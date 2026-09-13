@@ -1,0 +1,250 @@
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Portfolio, AIDecision } from '@/types/trading';
+import { TrendingUp, TrendingDown, Activity, RotateCcw, FileText, Loader2, Brain } from 'lucide-react';
+
+interface TradingDashboardProps {
+  portfolio: Portfolio;
+  decisions: AIDecision[];
+  aiReports: Array<{
+    timestamp: number;
+    symbol: string;
+    analysis: string;
+    chainOfThought: string;
+    decision: string;
+    confidence: number;
+  }>;
+  isEnabled: boolean;
+  isAnalyzing: boolean;
+  onToggle: (enabled: boolean) => void;
+  onReset: () => void;
+}
+
+const TradingDashboard = ({ 
+  portfolio, 
+  decisions, 
+  aiReports,
+  isEnabled,
+  isAnalyzing,
+  onToggle,
+  onReset 
+}: TradingDashboardProps) => {
+  const formatCurrency = (value: number) => {
+    return new Intl.NumberFormat('fa-IR', {
+      style: 'decimal',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value);
+  };
+
+  const formatPercent = (value: number) => {
+    return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
+  };
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6" dir="rtl">
+      {/* Left Column - Portfolio & Positions */}
+      <div className="lg:col-span-2 space-y-6">
+        {/* Portfolio Overview */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2">
+                <Activity className="w-5 h-5" />
+                پرتفوی
+              </CardTitle>
+              <div className="flex items-center gap-3">
+                <Switch checked={isEnabled} onCheckedChange={onToggle} />
+                <Badge variant={isEnabled ? 'default' : 'secondary'}>
+                  {isEnabled ? 'فعال' : 'غیرفعال'}
+                </Badge>
+                {isAnalyzing && <Loader2 className="w-4 h-4 animate-spin" />}
+                <Button variant="outline" size="sm" onClick={onReset}>
+                  <RotateCcw className="w-4 h-4 ml-2" />
+                  ریست
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="text-right">
+                <p className="text-xs text-muted-foreground">ارزش کل</p>
+                <p className="text-xl font-bold">${formatCurrency(portfolio.totalValue)}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-xs text-muted-foreground">موجودی نقد</p>
+                <p className="text-xl font-bold">${formatCurrency(portfolio.cash)}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-xs text-muted-foreground">بازدهی</p>
+                <p className={`text-xl font-bold ${portfolio.totalReturn >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {formatPercent(portfolio.totalReturn)}
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="text-xs text-muted-foreground">پوزیشن‌ها</p>
+                <p className="text-xl font-bold">{portfolio.positions.length}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Current Positions */}
+        {portfolio.positions.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg text-right">پوزیشن‌های باز</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ScrollArea className="h-[200px]">
+                <div className="space-y-2">
+                  {portfolio.positions.map((position, index) => (
+                    <div key={index} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+                      <div className="text-right">
+                        <p className="font-bold">{position.symbol}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {position.quantity} @ ${formatCurrency(position.entryPrice)}
+                        </p>
+                      </div>
+                      <div className="text-left">
+                        <p className={`font-bold text-sm ${position.unrealizedPnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          ${formatCurrency(position.unrealizedPnl)}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          ${formatCurrency(position.currentPrice)}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </ScrollArea>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Recent Trades */}
+        {portfolio.trades.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg text-right">معاملات اخیر</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ScrollArea className="h-[250px]">
+                <div className="space-y-2">
+                  {portfolio.trades.slice(0, 10).map((trade) => (
+                    <div key={trade.id} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+                      <div className="flex items-center gap-3">
+                        {trade.type === 'BUY' ? (
+                          <TrendingUp className="w-4 h-4 text-green-600" />
+                        ) : (
+                          <TrendingDown className="w-4 h-4 text-red-600" />
+                        )}
+                        <div className="text-right">
+                          <p className="font-bold text-sm">{trade.symbol}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {trade.quantity} @ ${formatCurrency(trade.price)}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-left">
+                        <p className="text-xs text-muted-foreground">
+                          {new Date(trade.timestamp).toLocaleTimeString('fa-IR')}
+                        </p>
+                        <p className="text-xs">
+                          اطمینان: {(trade.confidence * 100).toFixed(0)}%
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </ScrollArea>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+
+      {/* Right Column - AI Analysis & Reports */}
+      <div className="space-y-6">
+        {/* Current AI Decisions */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg text-right">سیگنال‌های هوش مصنوعی</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ScrollArea className="h-[300px]">
+              <div className="space-y-2">
+                {decisions.map((decision, index) => (
+                  <div key={index} className="p-3 bg-muted/50 rounded-lg space-y-2 text-right">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-sm">{decision.symbol}</span>
+                      <Badge 
+                        variant={
+                          decision.action === 'BUY' ? 'default' : 
+                          decision.action === 'SELL' ? 'destructive' : 
+                          'secondary'
+                        }
+                        className="text-xs"
+                      >
+                        {decision.action === 'BUY' ? 'خرید' : decision.action === 'SELL' ? 'فروش' : 'نگهداری'}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground text-right">{decision.reasoning}</p>
+                    <p className="text-xs font-medium text-right">
+                      اطمینان: {(decision.confidence * 100).toFixed(0)}%
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </ScrollArea>
+          </CardContent>
+        </Card>
+
+        {/* AI Chain of Thought Reports */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2 text-right">
+              <Brain className="w-4 h-4" />
+              گزارش‌های تحلیل هوش مصنوعی
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ScrollArea className="h-[400px]">
+              <div className="space-y-3">
+                {aiReports.map((report, index) => (
+                  <div key={index} className="p-3 bg-muted/50 rounded-lg space-y-2 text-right">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-sm">{report.symbol}</span>
+                      <Badge variant="outline" className="text-xs">
+                        {report.decision === 'BUY' ? 'خرید' : report.decision === 'SELL' ? 'فروش' : 'نگهداری'}
+                      </Badge>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-xs font-medium text-muted-foreground text-right">فرآیند تفکر:</p>
+                      <p className="text-xs text-muted-foreground leading-relaxed text-right">
+                        {report.chainOfThought}
+                      </p>
+                    </div>
+                    <div className="flex items-center justify-between pt-2 border-t">
+                      <p className="text-xs text-muted-foreground">
+                        {new Date(report.timestamp).toLocaleString('fa-IR')}
+                      </p>
+                      <p className="text-xs font-medium">
+                        اطمینان: {(report.confidence * 100).toFixed(0)}%
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </ScrollArea>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+};
+
+export default TradingDashboard;

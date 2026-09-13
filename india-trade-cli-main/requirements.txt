@@ -1,0 +1,47 @@
+# ── Broker APIs ──────────────────────────────────────────────
+kiteconnect>=4.2.0          # Zerodha Kite Connect
+httpx>=0.27.0               # Groww REST API + general HTTP
+fyers-apiv3>=3.1.0          # Fyers broker (official SDK)
+
+# ── AI Brain ─────────────────────────────────────────────────
+anthropic>=0.40.0           # Claude API
+openai>=1.40.0              # OpenAI GPT API
+google-genai>=1.0.0         # Google Gemini API (unified GenAI SDK)
+google-cloud-aiplatform>=1.60.0  # Vertex AI (Gemini for GCP/Workspace)
+
+# ── Terminal UI ──────────────────────────────────────────────
+rich>=13.7.0                # Tables, panels, styled output
+textual>=0.80.0             # TUI framework (split panels)
+prompt_toolkit>=3.0.0       # REPL with tab-complete
+
+# ── Data & Analysis ──────────────────────────────────────────
+pandas>=2.2.0               # OHLCV data manipulation
+numpy>=1.26.0               # Numerical computations
+# py_vollib>=1.0.1          # Black-Scholes, Greeks (optional: pip install py_vollib)
+yfinance>=0.2.40            # Free market data (NSE/BSE) — no broker needed
+
+# ── News & Events ────────────────────────────────────────────
+feedparser>=6.0.11          # RSS feed parsing
+newsapi-python>=0.2.7       # NewsAPI.org client
+
+# ── Web ──────────────────────────────────────────────────────
+fastapi>=0.110.0            # Web API framework
+uvicorn>=0.29.0             # ASGI server (with --reload for dev)
+
+# ── Output ───────────────────────────────────────────────────
+fpdf2>=2.7.0                # PDF export for --pdf flag
+
+# ── Bot ──────────────────────────────────────────────────────
+python-telegram-bot>=21.0    # Telegram bot (free, official API)
+
+# ── Utilities ────────────────────────────────────────────────
+python-dotenv>=1.0.0        # .env file loading
+keyring>=25.2.0             # Secure OS token storage
+pyotp>=2.9.0                # TOTP 2FA (Angel One auto-login)
+python-dateutil>=2.9.0      # Date parsing helpers
+pytz>=2024.1                # Timezone handling (IST)
+
+# ── Testing ─────────────────────────────────────────────────
+pytest>=7.0.0               # Test framework
+pytest-mock>=3.10.0         # Mocking helpers
+scipy>=1.11

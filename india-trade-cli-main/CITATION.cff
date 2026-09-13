@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use this software in your work, please cite it as below."
+type: software
+title: "India Trade CLI"
+abstract: "AI-powered multi-agent stock & options analysis platform for Indian markets (NSE/BSE/NFO)."
+authors:
+  - name: "hopit-ai"
+    alias: "hopit-ai"
+    email: "arkid@hopit.ai"
+repository-code: "https://github.com/hopit-ai/india-trade-cli"
+license: MIT
+keywords:
+  - trading
+  - stocks
+  - options
+  - NSE
+  - BSE
+  - India
+  - AI
+  - LLM
+  - multi-agent
+  - backtesting

@@ -1,0 +1,127 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "india-trade-cli"
+version = "0.1.0"
+description = "Vibe Trading: AI-powered multi-agent stock & options analysis platform for Indian markets"
+requires-python = ">=3.11"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "hopit-ai", email = "arkid@hopit.ai"},
+]
+maintainers = [
+    {name = "hopit-ai", email = "arkid@hopit.ai"},
+]
+keywords = ["trading", "stocks", "options", "nse", "bse", "india", "ai", "llm", "analysis"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
+
+dependencies = [
+    # ── Brokers ──────────────────────────────────────────────────────
+    "kiteconnect>=4.2.0",
+    "httpx>=0.27.0",
+    "fyers-apiv3>=3.1.0",
+    # ── AI ───────────────────────────────────────────────────────────
+    "anthropic>=0.40.0",
+    "pydantic>=2.0.0",
+    "openai>=1.40.0",
+    "google-genai>=1.0.0",
+    "google-cloud-aiplatform>=1.60.0",
+    # ── Terminal UI ───────────────────────────────────────────────────
+    "rich>=13.7.0",
+    "textual>=0.80.0",
+    "prompt_toolkit>=3.0.0",
+    # ── Data & Analysis ───────────────────────────────────────────────
+    "pandas>=2.2.0",
+    "numpy>=1.26.0",
+    "scikit-learn>=1.3.0",
+    # py_vollib is optional: depends on numba which breaks on Python 3.13+.
+    # Install separately if needed: pip install py_vollib
+    # The platform gracefully falls back to built-in BS formulas without it.
+    "yfinance>=0.2.40",
+    "feedparser>=6.0.11",
+    "newsapi-python>=0.2.7",
+    # ── Web Search ───────────────────────────────────────────────────
+    "exa-py>=1.0.0",
+    "tavily-python>=0.3.0",
+    # ── Web ──────────────────────────────────────────────────────────
+    "fastapi>=0.110.0",
+    "uvicorn>=0.29.0",
+    # ── Output ───────────────────────────────────────────────────────
+    "fpdf2>=2.7.0",
+    # ── Bot ──────────────────────────────────────────────────────────
+    "python-telegram-bot>=21.0",
+    # ── Auth & Utilities ─────────────────────────────────────────────
+    "python-dotenv>=1.0.0",
+    "pyyaml>=6.0",
+    "keyring>=25.2.0",
+    "pyotp>=2.9.0",
+    "python-dateutil>=2.9.0",
+    "pytz>=2024.1",
+]
+
+[project.optional-dependencies]
+vollib = ["py_vollib>=1.0.1"]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-mock>=3.10.0",
+    "pytest-xdist>=3.0.0",
+    "pyyaml>=6.0",
+    "ruff>=0.8.0",
+]
+
+# ── Optional broker SDKs (install separately if needed) ─────────────
+# Angel One SmartAPI:  pip install smartapi-python logzero
+# Note: smartapi-python is not on PyPI's standard index; install with:
+#   pip install smartapi-python
+# The brokers/angelone.py gracefully imports it at call-time.
+
+[project.urls]
+Homepage = "https://github.com/hopit-ai/india-trade-cli"
+Repository = "https://github.com/hopit-ai/india-trade-cli"
+"Bug Tracker" = "https://github.com/hopit-ai/india-trade-cli/issues"
+
+[project.scripts]
+trade = "app.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["brokers*", "market*", "analysis*", "agent*", "engine*", "ui*", "app*", "web*", "config*", "bot*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short -m 'not network and not slow' -n auto"
+markers = [
+    "network: tests that require network access (yfinance, NSE API, etc.)",
+    "slow: tests slow by design — SSE stream connections, MC simulations (run nightly, not on every push)",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+# Ruff 0.16 began formatting Python code blocks inside Markdown. The snippets in
+# specs/ and docs/ are illustrative, not source — keep the formatter off them.
+extend-exclude = ["*.md"]
+
+[tool.ruff.lint]
+# Pin the enabled rule set explicitly rather than inheriting ruff's implicit
+# default. Ruff 0.16 widened that default (BLE001, S110, DTZ*, UP045, I001, ...),
+# which turned ~1600 pre-existing patterns into CI failures without a code change.
+# An explicit select keeps the enforced rules stable across ruff upgrades.
+select = ["E4", "E7", "E9", "F"]
+ignore = [
+    "E402",   # module-level import not at top — intentional for optional/conditional imports
+    "E701",   # multiple statements on one line (colon) — intentional style
+    "E702",   # multiple statements on one line (semicolon) — intentional style
+    "E741",   # ambiguous variable name `l` — widespread in financial loop code
+]

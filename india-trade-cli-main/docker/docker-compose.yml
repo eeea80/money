@@ -1,0 +1,51 @@
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: vibe-trading:latest
+    container_name: vibe-trading-app
+    ports:
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - vibe-trading-data:/data
+    environment:
+      - DEPLOY_MODE=self-hosted
+      - TRADING_PLATFORM_HOME=/data
+      - TRADING_PLATFORM_DATA=/data
+      - TRADING_PLATFORM_PDF_DIR=/data/exports
+      - SESSION_SECRET=${SESSION_SECRET:-change-me-in-production}
+      - AI_PROVIDER=${AI_PROVIDER:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - NEWSAPI_KEY=${NEWSAPI_KEY:-}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TRADING_CAPITAL=${TRADING_CAPITAL:-100000}
+      - TRADING_MODE=${TRADING_MODE:-paper}
+    env_file:
+      - path: .env
+        required: false
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8765/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  vibe-trading-data:
+    driver: local

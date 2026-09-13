@@ -1,0 +1,529 @@
+// @vitest-environment jsdom
+
+import { useState } from 'react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import type { Preset } from '../../api/types'
+import { api } from '../../api'
+import { i18n } from '../../i18n'
+import type { AgentInfo } from '../workspace/api'
+import { CredentialModal } from './CredentialModal'
+
+vi.mock('../../api', () => ({
+  api: {
+    config: {
+      testCredential: vi.fn(),
+      addCredential: vi.fn(),
+      updateCredential: vi.fn(),
+    },
+  },
+}))
+
+const openAiPreset: Preset = {
+  id: 'codex-api',
+  label: 'OpenAI',
+  description: 'OpenAI-compatible Responses endpoint.',
+  category: 'official',
+  defaultName: 'OpenAI',
+  schema: {
+    type: 'object',
+    properties: {
+      apiKey: { type: 'string' },
+      model: {
+        type: 'string',
+        oneOf: [{ const: 'gpt-test', title: 'GPT Test' }],
+      },
+    },
+  },
+  regions: [
+    {
+      id: 'official',
+      label: 'Official',
+      wires: { 'openai-responses': 'https://api.openai.com/v1' },
+    },
+  ],
+}
+
+const onboardingTestPreset: Preset = {
+  id: 'openalice-onboarding-test',
+  label: 'OpenAlice Test Provider',
+  description: 'Local mock for onboarding test mode',
+  category: 'custom',
+  defaultName: 'OpenAlice Test Provider',
+  schema: {
+    type: 'object',
+    properties: {
+      apiKey: { type: 'string' },
+      model: {
+        type: 'string',
+        oneOf: [{ const: 'openalice-onboarding-test', title: 'Onboarding Mock' }],
+      },
+    },
+  },
+  regions: [
+    {
+      id: 'local-mock',
+      label: 'Local mock',
+      wires: { 'openai-chat': 'http://127.0.0.1:0/v1' },
+    },
+  ],
+}
+
+const geminiPreset: Preset = {
+  id: 'gemini',
+  label: 'Google Gemini',
+  description: 'Google AI via API key',
+  category: 'third-party',
+  defaultName: 'Google Gemini',
+  hint: 'OpenAlice uses Google’s native Gemini API.',
+  setup: {
+    apiKeyLabel: 'Google AI API key',
+    apiKeyPlaceholder: 'AQ... or AIza...',
+    apiKeyHelp: 'Use a Gemini API key from Google AI Studio. AQ and AIza keys are supported.',
+    modelHelp: 'Choose a Gemini model exposed by the native endpoint.',
+  },
+  schema: {
+    type: 'object',
+    properties: {
+      apiKey: { type: 'string' },
+      model: {
+        type: 'string',
+        default: 'gemini-default',
+        oneOf: [
+          { const: 'gemini-list-first', title: 'First suggestion' },
+          { const: 'gemini-default', title: 'Catalog default' },
+        ],
+      },
+    },
+  },
+  regions: [
+    {
+      id: 'google',
+      label: 'Google',
+      wires: { 'google-generative-ai': 'https://generativelanguage.googleapis.com/v1beta' },
+    },
+  ],
+}
+
+const customPreset: Preset = {
+  id: 'custom',
+  label: 'Custom',
+  description: 'Custom compatible endpoint',
+  category: 'custom',
+  defaultName: '',
+  setup: {
+    apiKeyLabel: 'Endpoint API key',
+    apiKeyHelp: 'Use a key accepted by this endpoint.',
+    modelHelp: 'Enter the exact model ID.',
+  },
+  schema: {
+    type: 'object',
+    properties: {
+      apiKey: { type: 'string' },
+      model: { type: 'string' },
+    },
+  },
+}
+
+const cursorPreset: Preset = {
+  id: 'cursor-dashboard',
+  label: 'Cursor Dashboard',
+  description: 'Cursor Agent using a Cursor Dashboard API key',
+  category: 'official',
+  defaultName: 'Cursor Dashboard',
+  directAgentId: 'cursor',
+  hint: 'Consumed directly by Cursor Agent.',
+  setup: {
+    apiKeyLabel: 'Cursor Dashboard API key',
+    apiKeyHelp: 'Create a key in Cursor Dashboard.',
+    modelHelp: 'Choose a Cursor model.',
+  },
+  schema: {
+    type: 'object',
+    properties: {
+      apiKey: { type: 'string' },
+      model: { type: 'string', default: 'auto', oneOf: [{ const: 'auto', title: 'Auto' }] },
+    },
+  },
+}
+
+const agents: AgentInfo[] = [
+  {
+    id: 'claude',
+    displayName: 'Claude Code',
+    capabilities: {
+      parallelPerCwd: true, resumeLast: false, resumeById: true, transcriptDiscovery: 'fs-watch',
+      aiProvider: { credentialSource: 'runtime-or-workspace', wirePreference: ['anthropic'] },
+    },
+  },
+  {
+    id: 'codex',
+    displayName: 'Codex',
+    capabilities: {
+      parallelPerCwd: true, resumeLast: true, resumeById: true, transcriptDiscovery: 'subprocess',
+      aiProvider: { credentialSource: 'runtime-or-workspace', wirePreference: ['openai-responses'] },
+    },
+  },
+  ...['opencode', 'pi'].map((id): AgentInfo => ({
+    id,
+    displayName: id === 'pi' ? 'Pi' : 'opencode',
+    capabilities: {
+      parallelPerCwd: true, resumeLast: true, resumeById: true, transcriptDiscovery: 'subprocess',
+      aiProvider: {
+        credentialSource: 'workspace-required',
+        wirePreference: ['google-generative-ai', 'openai-chat', 'anthropic', 'openai-responses'],
+      },
+    },
+  })),
+  {
+    id: 'cursor',
+    displayName: 'Cursor Agent',
+    capabilities: {
+      parallelPerCwd: true, resumeLast: true, resumeById: true, transcriptDiscovery: 'subprocess',
+      aiProvider: {
+        credentialSource: 'runtime-or-workspace',
+        wirePreference: [],
+        directVendors: ['cursor'],
+      },
+    },
+  },
+]
+
+function setup() {
+  const onClose = vi.fn()
+  const onSaved = vi.fn().mockResolvedValue(undefined)
+  render(
+    <CredentialModal
+      mode="add"
+      presets={[openAiPreset]}
+      agents={agents}
+      onClose={onClose}
+      onSaved={onSaved}
+    />,
+  )
+  fireEvent.click(screen.getByText('OpenAI'))
+  fireEvent.change(screen.getByPlaceholderText('Enter API key'), { target: { value: 'sk-test' } })
+  return { onClose, onSaved }
+}
+
+beforeEach(async () => {
+  await i18n.changeLanguage('en')
+})
+
+afterEach(() => {
+  cleanup()
+  vi.clearAllMocks()
+})
+
+describe('CredentialModal', () => {
+  it('uses the shared long-form dialog contract and restores the opener', async () => {
+    const opener = document.createElement('button')
+    opener.textContent = 'Open credentials'
+    document.body.append(opener)
+    opener.focus()
+    const onClose = vi.fn()
+
+    function Harness() {
+      const [open, setOpen] = useState(true)
+      if (!open) return null
+      return (
+        <CredentialModal
+          mode="add"
+          presets={[openAiPreset]}
+          agents={agents}
+          onClose={() => {
+            onClose()
+            setOpen(false)
+          }}
+          onSaved={vi.fn()}
+        />
+      )
+    }
+
+    render(<Harness />)
+
+    const dialog = screen.getByRole('dialog', { name: 'Add credential' })
+    const scrollArea = screen.getByTestId('credential-modal-scroll')
+    expect(dialog.getAttribute('aria-modal')).toBe('true')
+    expect(dialog.className).toContain('h-full')
+    expect(scrollArea.className).toContain('min-h-0')
+    expect(scrollArea.className).toContain('overflow-y-auto')
+    expect(document.activeElement).toBe(screen.getByPlaceholderText('Search providers…'))
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(document.activeElement).toBe(opener))
+    opener.remove()
+  })
+
+  it('lists providers in one catalog without official or third-party headings', () => {
+    render(
+      <CredentialModal
+        mode="add"
+        presets={[openAiPreset, geminiPreset, customPreset]}
+        agents={agents}
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+      />,
+    )
+
+    expect(screen.queryByRole('heading', { name: 'Official' })).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'Third-party' })).toBeNull()
+    expect(screen.getByText('OpenAI')).toBeTruthy()
+    expect(screen.getByText('Google Gemini')).toBeTruthy()
+    expect(screen.getByText('free-form')).toBeTruthy()
+  })
+
+  it('saves an optional display name on a first-party credential', async () => {
+    vi.mocked(api.config.testCredential).mockResolvedValue({ ok: true, response: 'pong' })
+    vi.mocked(api.config.addCredential).mockResolvedValue({ slug: 'openai-1', vendor: 'openai' })
+    const onSaved = vi.fn().mockResolvedValue(undefined)
+    render(
+      <CredentialModal
+        mode="add"
+        presets={[openAiPreset]}
+        agents={agents}
+        initialPresetId={openAiPreset.id}
+        onClose={vi.fn()}
+        onSaved={onSaved}
+      />,
+    )
+
+    fireEvent.change(screen.getByPlaceholderText('e.g. Work key'), { target: { value: 'Office OpenAI' } })
+    fireEvent.change(screen.getByPlaceholderText('Enter API key'), { target: { value: 'sk-office' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Test connection' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(api.config.addCredential).toHaveBeenCalledWith(expect.objectContaining({
+      vendor: 'openai',
+      label: 'Office OpenAI',
+      apiKey: 'sk-office',
+    })))
+    expect(onSaved).toHaveBeenCalled()
+  })
+
+  it('explains provider-specific key, runtime, and model behavior before testing', () => {
+    render(
+      <CredentialModal
+        mode="add"
+        presets={[geminiPreset]}
+        agents={agents}
+        initialPresetId={geminiPreset.id}
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('Use a Gemini API key from Google AI Studio. AQ and AIza keys are supported.')).toBeTruthy()
+    expect(screen.getByText('Choose a Gemini model exposed by the native endpoint.')).toBeTruthy()
+    expect(screen.getByText('Pi')).toBeTruthy()
+    expect(screen.getByText('opencode')).toBeTruthy()
+    expect(screen.queryByText('Claude Code')).toBeNull()
+    expect(screen.queryByText('Codex')).toBeNull()
+    expect(screen.getByPlaceholderText('AQ... or AIza...')).toBeTruthy()
+    expect(screen.getByDisplayValue('gemini-default')).toBeTruthy()
+  })
+
+  it('requires a concrete URL for custom providers and explains mode compatibility', () => {
+    render(
+      <CredentialModal
+        mode="add"
+        presets={[customPreset]}
+        agents={agents}
+        initialPresetId={customPreset.id}
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+      />,
+    )
+
+    fireEvent.change(screen.getByPlaceholderText('e.g. Local vLLM'), { target: { value: 'Gateway' } })
+    fireEvent.change(screen.getByPlaceholderText('Enter API key'), { target: { value: 'sk-gateway' } })
+    fireEvent.change(screen.getByPlaceholderText('Exact provider model ID'), { target: { value: 'gateway-model' } })
+
+    expect(screen.getByRole('option', { name: /OpenAI Chat Completions — opencode, Pi/ })).toBeTruthy()
+    const testButton = screen.getByRole('button', { name: 'Test connection' }) as HTMLButtonElement
+    expect(testButton.disabled).toBe(true)
+    expect(testButton.title).toBe('Enter the custom API base URL.')
+  })
+
+  it('saves Cursor as an ordinary provider credential without a wire probe', async () => {
+    vi.mocked(api.config.addCredential).mockResolvedValue({ slug: 'cursor-1', vendor: 'cursor' })
+    const onSaved = vi.fn().mockResolvedValue(undefined)
+    render(
+      <CredentialModal
+        mode="add"
+        presets={[cursorPreset]}
+        agents={agents}
+        initialPresetId={cursorPreset.id}
+        onClose={vi.fn()}
+        onSaved={onSaved}
+      />,
+    )
+
+    expect(screen.getByText('Cursor Agent')).toBeTruthy()
+    fireEvent.change(screen.getByPlaceholderText('Cursor default endpoint'), { target: { value: 'https://api.cursor.example' } })
+    fireEvent.change(screen.getByPlaceholderText('Enter API key'), { target: { value: 'cursor-key' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(api.config.addCredential).toHaveBeenCalledWith({
+      vendor: 'cursor',
+      wires: {},
+      baseUrl: 'https://api.cursor.example',
+      apiKey: 'cursor-key',
+      lastModel: 'auto',
+    }))
+    expect(api.config.testCredential).not.toHaveBeenCalled()
+    expect(onSaved).toHaveBeenCalled()
+  })
+
+  it('can clear a Cursor endpoint override and return to the runtime default', async () => {
+    vi.mocked(api.config.updateCredential).mockResolvedValue(undefined)
+    render(
+      <CredentialModal
+        mode="edit"
+        cred={{
+          slug: 'cursor-1',
+          vendor: 'cursor',
+          authType: 'api-key',
+          wires: {},
+          baseUrl: 'https://api.cursor.example',
+          apiKey: 'cursor-key',
+          hasApiKey: true,
+          lastModel: 'auto',
+        }}
+        presets={[cursorPreset]}
+        agents={agents}
+        onClose={vi.fn()}
+        onSaved={vi.fn().mockResolvedValue(undefined)}
+      />,
+    )
+
+    fireEvent.change(screen.getByPlaceholderText('Cursor default endpoint'), { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(api.config.updateCredential).toHaveBeenCalledWith('cursor-1', expect.objectContaining({
+      vendor: 'cursor',
+      wires: {},
+      baseUrl: '',
+      lastModel: 'auto',
+    })))
+  })
+
+  it('can open directly on a provided onboarding test preset', async () => {
+    render(
+      <CredentialModal
+        mode="add"
+        presets={[openAiPreset]}
+        agents={agents}
+        initialPresetId={openAiPreset.id}
+        initialApiKey="sk-prefilled"
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('OpenAI')).toBeTruthy()
+    expect(screen.getByPlaceholderText('Enter API key')).toHaveProperty('value', 'sk-prefilled')
+    await waitFor(() => expect(screen.getByDisplayValue('gpt-test')).toBeTruthy())
+  })
+
+  it('keeps the failed test message inside the dialog instead of overflowing', async () => {
+    const longError = '401 {"error":{"code":"invalid_api_key","message":"missing_api_key","type":"authentication_error","param":"really_long_unbroken_payload_for_wrapping"}}'
+    vi.mocked(api.config.testCredential).mockResolvedValue({ ok: false, error: longError })
+
+    setup()
+    fireEvent.click(screen.getByRole('button', { name: 'Test connection' }))
+
+    const message = await screen.findByText(longError)
+    expect(message.className).toContain('break-words')
+    expect(screen.getByText('Fix the fields and test again')).toBeTruthy()
+    expect((screen.getByRole('button', { name: 'Test connection' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('uses one primary action that tests first and then saves after a passing test', async () => {
+    vi.mocked(api.config.testCredential).mockResolvedValue({ ok: true, response: 'pong' })
+    vi.mocked(api.config.addCredential).mockResolvedValue({ slug: 'openai-1', vendor: 'openai' })
+    const { onSaved } = setup()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Test connection' }))
+
+    await waitFor(() => expect(screen.getAllByText('Connection verified').length).toBeGreaterThan(0))
+    const save = screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement
+    expect(save.disabled).toBe(false)
+
+    fireEvent.click(save)
+    await waitFor(() => expect(api.config.addCredential).toHaveBeenCalled())
+    expect(onSaved).toHaveBeenCalled()
+  })
+
+  it('keeps a label for fixed custom presets such as the onboarding mock provider', async () => {
+    vi.mocked(api.config.testCredential).mockResolvedValue({ ok: true, response: 'ready' })
+    vi.mocked(api.config.addCredential).mockResolvedValue({ slug: 'custom-1', vendor: 'custom' })
+    const onSaved = vi.fn().mockResolvedValue(undefined)
+
+    render(
+      <CredentialModal
+        mode="add"
+        presets={[onboardingTestPreset]}
+        agents={agents}
+        initialPresetId={onboardingTestPreset.id}
+        initialApiKey="oa_test_ok"
+        onClose={vi.fn()}
+        onSaved={onSaved}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Test connection' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(api.config.addCredential).toHaveBeenCalled())
+    expect(api.config.addCredential).toHaveBeenCalledWith(expect.objectContaining({
+      vendor: 'custom',
+      label: 'OpenAlice Test Provider',
+      apiKey: 'oa_test_ok',
+      lastModel: 'openalice-onboarding-test',
+    }))
+    expect(onSaved).toHaveBeenCalled()
+  })
+
+  it('preserves a remembered model and unmatched stored endpoint while editing', async () => {
+    vi.mocked(api.config.testCredential).mockResolvedValue({ ok: true, response: 'ready' })
+    vi.mocked(api.config.updateCredential).mockResolvedValue(undefined)
+    const onSaved = vi.fn().mockResolvedValue(undefined)
+
+    render(
+      <CredentialModal
+        mode="edit"
+        cred={{
+          slug: 'openai-1',
+          vendor: 'openai',
+          authType: 'api-key',
+          wires: { 'openai-responses': 'https://gateway.example/responses' },
+          apiKey: 'sk-existing',
+          hasApiKey: true,
+          lastModel: 'gpt-account-specific',
+        }}
+        presets={[openAiPreset]}
+        agents={agents}
+        onClose={vi.fn()}
+        onSaved={onSaved}
+      />,
+    )
+
+    expect(screen.getByDisplayValue('gpt-account-specific')).toBeTruthy()
+    expect(screen.getByDisplayValue('Saved custom endpoint (keep unchanged)')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Test connection' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(api.config.updateCredential).toHaveBeenCalled())
+    expect(api.config.updateCredential).toHaveBeenCalledWith('openai-1', expect.objectContaining({
+      wires: { 'openai-responses': 'https://gateway.example/responses' },
+      lastModel: 'gpt-account-specific',
+    }))
+    expect(onSaved).toHaveBeenCalled()
+  })
+})

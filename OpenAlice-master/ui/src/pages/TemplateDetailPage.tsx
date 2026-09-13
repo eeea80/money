@@ -1,0 +1,193 @@
+/**
+ * Workspace template detail.
+ *
+ * Renders the template's README (via MarkdownContent). This is the
+ * in-flow staffing surface — read what shape of coworker this Harness
+ * produces, then hire one via the top-right "Create workspace" button,
+ * which opens the same CreateWorkspaceDialog every other create entry
+ * point uses (sidebar +, Chat +). Keeping a single create presentation
+ * means the README stays a pure reading surface instead of burying a
+ * form below the fold.
+ *
+ * The instance the agent starts modifying from here will diverge over
+ * time; this page describes the **starting shape**. The README on disk
+ * inside the spawned workspace is the agent's territory thereafter.
+ */
+
+import { useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { PageTopBar } from '../components/PageTopBar'
+
+import { MarkdownContent } from '../components/MarkdownContent'
+import { useWorkspaces } from '../contexts/workspaces-context'
+import { useWorkspace } from '../tabs/store'
+import { fetchTemplateReadme } from '../components/workspace/api'
+import { CreateWorkspaceDialog } from '../components/workspace/CreateWorkspaceDialog'
+import { EmptyState } from '../components/StateViews'
+import { Button } from '../components/ui/button'
+import { AgentRuntimeIcon } from '../lib/agentRuntimeIcon'
+
+interface Props {
+  spec: { kind: 'template-detail'; params: { name: string } }
+}
+
+function humanize(name: string): string {
+  return (
+    name
+      .split(/[-_]/)
+      .filter(Boolean)
+      .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
+      .join(' ') || name
+  )
+}
+
+export function TemplateDetailPage({ spec }: Props) {
+  const { t } = useTranslation()
+  const { templates, agents, refresh } = useWorkspaces()
+  const openOrFocus = useWorkspace((s) => s.openOrFocus)
+  const [showCreate, setShowCreate] = useState(false)
+
+  const templateName = spec.params.name
+  const template = useMemo(
+    () => templates.find((t) => t.name === templateName),
+    [templates, templateName],
+  )
+
+  // README — fetched lazily once per template (no cache across mounts; the
+  // catalog is small enough that re-fetch on tab open is fine).
+  const [readme, setReadme] = useState<string | null>(null)
+  const [readmeMissing, setReadmeMissing] = useState(false)
+  const [readmeError, setReadmeError] = useState<string | null>(null)
+  const [readmeAttempt, setReadmeAttempt] = useState(0)
+  useEffect(() => {
+    let cancelled = false
+    setReadme(null)
+    setReadmeMissing(false)
+    setReadmeError(null)
+    void fetchTemplateReadme(templateName)
+      .then((md) => {
+        if (cancelled) return
+        if (md === null) setReadmeMissing(true)
+        else setReadme(md)
+      })
+      .catch((err) => {
+        if (cancelled) return
+        setReadmeError((err as Error).message)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [templateName, readmeAttempt])
+
+  if (!template) {
+    return (
+      <div className="flex h-full items-center justify-center px-6">
+        <EmptyState
+          title={t('templates.notFoundTitle')}
+          description={t('templates.notFoundBody', { name: templateName })}
+        />
+      </div>
+    )
+  }
+
+  const title = template.displayName ?? humanize(template.name)
+
+  // The page header already shows the title — drop the README's own leading
+  // H1 so it doesn't render twice. Conservative: only when the very first
+  // content line is an ATX h1.
+  const readmeBody = readme === null ? null : readme.replace(/^\s*#[^\n#].*\r?\n+/, '')
+
+  return (
+    <div className="h-full overflow-y-auto">
+      <PageTopBar title={title} actions={
+        <Button type="button" size="sm" onClick={() => setShowCreate(true)}>{t('createWorkspace.create')}</Button>
+      } />
+      <div className="max-w-4xl mx-auto px-6 py-6">
+        {/* Header — identity + metadata band */}
+        <div className="mb-5 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-baseline gap-2.5 flex-wrap">
+              <span className="text-[12px] font-mono text-muted-foreground tabular-nums shrink-0">
+                v{template.version}
+              </span>
+              {template.community && (
+                <span className="shrink-0 rounded-md border border-border px-2 py-0.5 text-[10px] text-muted-foreground">
+                  {t('templates.communityBadge')}
+                </span>
+              )}
+            </div>
+            {template.description && (
+              <p className="text-[12px] text-muted-foreground mt-1.5 max-w-2xl leading-relaxed">
+                {template.description}
+              </p>
+            )}
+            <div className="flex items-center gap-3 mt-2.5 flex-wrap">
+              <span className="text-[11px] font-medium text-muted-foreground">
+                {t('templates.agentsLabel')}
+              </span>
+              <div className="flex items-center gap-2 flex-wrap">
+                {agents.map((a) => (
+                  <span
+                    key={a.id}
+                    className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground"
+                  >
+                    <AgentRuntimeIcon agentId={a.id} className="size-3.5 shrink-0" />
+                    {a.id}
+                  </span>
+                ))}
+              </div>
+              <span className="text-[11px] font-mono text-muted-foreground/60">
+                {template.name}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* README body — the template's starting-shape doc */}
+        <div className="mb-2 text-[11px] font-medium text-muted-foreground">
+          {t('templates.readmeLabel')}
+        </div>
+        <div className="rounded-lg border border-border bg-secondary px-6 py-5">
+          {readme === null && !readmeMissing && readmeError === null && (
+            <p className="text-[12px] text-muted-foreground italic">{t('templates.loadingReadme')}</p>
+          )}
+          {readmeMissing && (
+            <p className="text-[12px] text-muted-foreground italic">{t('templates.noReadme')}</p>
+          )}
+          {readmeError && (
+            <div
+              role="alert"
+              className="flex items-center justify-between gap-3 text-[12px] text-destructive"
+            >
+              <span className="min-w-0 break-words">{readmeError}</span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="shrink-0"
+                onClick={() => setReadmeAttempt((attempt) => attempt + 1)}
+              >
+                {t('common.retry')}
+              </Button>
+            </div>
+          )}
+          {readmeBody && (
+            <MarkdownContent text={readmeBody} className="text-[13px] leading-relaxed" />
+          )}
+        </div>
+      </div>
+
+      {showCreate && (
+        <CreateWorkspaceDialog
+          templates={templates}
+          presetTemplate={template.name}
+          onClose={() => setShowCreate(false)}
+          onCreated={(workspace) => {
+            refresh()
+            openOrFocus({ kind: 'workspace', params: { wsId: workspace.id } })
+          }}
+        />
+      )}
+    </div>
+  )
+}

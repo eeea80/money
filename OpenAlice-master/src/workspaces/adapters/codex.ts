@@ -1,0 +1,885 @@
+import { createReadStream, existsSync, readFileSync } from 'node:fs';
+import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import { createInterface } from 'node:readline';
+
+import type {
+  CliAdapter,
+  OnDiskSession,
+  ResolvedSessionRuntimeBinding,
+  SpawnContext,
+  WorkspaceAiCred,
+} from '../cli-adapter.js';
+import { isModelReasoningEffort } from '../../ai-providers/model-semantics.js';
+import { readWorkspaceFile, writeWorkspaceFile } from '../file-service.js';
+import type { HeadlessOutputEvent } from '../headless-output.js';
+import { resetOwnedTomlConfig, writeOwnedTomlConfig } from './owned-toml-config.js';
+
+const CODEX_CONFIG_PATH = '.codex/config.toml';
+const CODEX_BINDING_STATE_PATH = '.codex/openalice-provider.json';
+const CODEX_ISOLATED_HOME_PATH = '.codex/openalice-home';
+const CODEX_ISOLATED_CONFIG_PATH = `${CODEX_ISOLATED_HOME_PATH}/config.toml`;
+const CODEX_ISOLATED_ENV_PATH = `${CODEX_ISOLATED_HOME_PATH}/env.json`;
+const CODEX_LEGACY_ENV_PATH = '.codex/env.json';
+const CODEX_KEY_ENV_NAME = 'OPENALICE_WORKSPACE_KEY';
+const CODEX_SESSION_KEY_ENV_NAME = 'OPENALICE_SESSION_KEY';
+const CODEX_PROVIDER_NAME = 'workspace';
+const CODEX_SESSION_PROVIDER_NAME = 'openalice_session';
+const CODEX_DEFAULT_BASE_URL = 'https://api.openai.com/v1';
+// Alice already composes the Workspace PATH. Login profiles can replace it
+// (notably /etc/profile on Linux), hiding every injected CLI from shell tools.
+const CODEX_SHELL_ARGS = ['-c', 'allow_login_shell=false'] as const;
+const CODEX_INTERACTIVE_PERMISSION_ARGS = [
+  '--sandbox',
+  'danger-full-access',
+  '--ask-for-approval',
+  'never',
+] as const;
+
+function codexHome(cwd: string): string {
+  const relativeHome = isolatedHomePath(cwd);
+  return relativeHome ? join(cwd, relativeHome) : join(homedir(), '.codex');
+}
+
+const codexTitleIndexInFlight = new Map<string, Promise<ReadonlyMap<string, string>>>();
+
+type NodeSqliteModule = typeof import('node:sqlite');
+
+let nodeSqliteModule: NodeSqliteModule | null | undefined;
+
+/**
+ * Node 22 still labels the built-in SQLite module experimental and emits one
+ * process warning when it is first loaded. OPENALICE requires Node >=22.19,
+ * where the synchronous read-only API we use is present. Load it lazily so
+ * non-Codex users never touch the module; suppress only the module-load warning
+ * in this synchronous section so a background title refresh stays silent.
+ */
+function loadNodeSqlite(): NodeSqliteModule | null {
+  if (nodeSqliteModule !== undefined) return nodeSqliteModule;
+  const originalEmitWarning = process.emitWarning;
+  try {
+    process.emitWarning = (() => undefined) as typeof process.emitWarning;
+    nodeSqliteModule = process.getBuiltinModule('node:sqlite') as NodeSqliteModule;
+  } catch {
+    nodeSqliteModule = null;
+  } finally {
+    process.emitWarning = originalEmitWarning;
+  }
+  return nodeSqliteModule;
+}
+
+function readCodexDesktopTitleCatalog(home: string): ReadonlyMap<string, string> {
+  const sqlite = loadNodeSqlite();
+  if (!sqlite) return new Map<string, string>();
+  const path = join(home, 'sqlite', 'codex-dev.db');
+  if (!existsSync(path)) return new Map<string, string>();
+
+  let database: InstanceType<NodeSqliteModule['DatabaseSync']> | undefined;
+  try {
+    database = new sqlite.DatabaseSync(path, { readOnly: true });
+    const rows = database.prepare(
+      'SELECT thread_id, display_title FROM local_thread_catalog',
+    ).all() as Array<{ thread_id?: unknown; display_title?: unknown }>;
+    const titles = new Map<string, string>();
+    for (const row of rows) {
+      const id = typeof row.thread_id === 'string' ? row.thread_id : null;
+      const title = typeof row.display_title === 'string' ? row.display_title.trim() : '';
+      if (id && title) titles.set(id, title);
+    }
+    return titles;
+  } catch {
+    // Codex owns this private catalog and may migrate or lock it. A title is
+    // presentation metadata only, so fall through to the legacy index/fallback.
+    return new Map<string, string>();
+  } finally {
+    database?.close();
+  }
+}
+
+function readCodexSessionTitleIndex(cwd: string): Promise<ReadonlyMap<string, string>> {
+  const home = codexHome(cwd);
+  const existing = codexTitleIndexInFlight.get(home);
+  if (existing) return existing;
+  const read = (async () => {
+    const titles = new Map<string, string>();
+    let raw: string;
+    try {
+      raw = await readFile(join(home, 'session_index.jsonl'), 'utf8');
+    } catch {
+      raw = '';
+    }
+    for (const line of raw.split(/\r?\n/)) {
+      if (!line.trim()) continue;
+      try {
+        const row = JSON.parse(line) as Record<string, unknown>;
+        const id = typeof row['id'] === 'string' ? row['id'] : null;
+        const title = typeof row['thread_name'] === 'string' ? row['thread_name'].trim() : '';
+        if (id && title) titles.set(id, title);
+      } catch {
+        // A partially-written tail must not hide the rest of the index.
+      }
+    }
+    // Current Codex Desktop keeps its generated short titles in the local
+    // thread catalog. Prefer that newer projection when both stores know the
+    // same native thread id, while retaining session_index.jsonl compatibility.
+    for (const [id, title] of readCodexDesktopTitleCatalog(home)) titles.set(id, title);
+    return titles;
+  })().finally(() => codexTitleIndexInFlight.delete(home));
+  codexTitleIndexInFlight.set(home, read);
+  return read;
+}
+
+/**
+ * OpenAI Codex CLI (Rust rewrite, `codex-cli`).
+ *
+ * Verified empirically against `codex-cli 0.130.0` on macOS:
+ * - Resume CLI: `codex resume --last` (= most recent for this cwd; codex
+ *   filters by cwd by default), and `codex resume <uuid>` for a specific id.
+ *   So the resume model is structurally the same as claude's `--continue` /
+ *   `--resume <id>`, just expressed as a subcommand instead of a flag.
+ * - Sessions live at `~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl`
+ *   (uncompressed plain JSONL). The directory tree is **global, not
+ *   per-cwd**, so transcript discovery via fs.watch is degenerate here —
+ *   we'd see new files from every codex session on the machine, not just
+ *   this workspace. v1 punts on this (`transcriptDiscovery: 'none'`); the
+ *   `codex resume` picker is cwd-aware and handles the user-facing case.
+ * - Trust model: codex prompts on first run for any cwd not in
+ *   `~/.codex/config.toml` `[projects."<abs>"] trust_level`. The shared
+ *   runtime lifecycle pre-writes that entry so the launcher's spawn doesn't
+ *   stall on the prompt.
+ * - Terminal appearance: Codex has no project UI-theme default to replace.
+ *   Its TUI probes OSC 10/11 at startup and derives contrast-sensitive colors
+ *   from the terminal defaults supplied by OpenAlice's shared PTY layer.
+ *
+ * AI provider model — three modes, selected explicitly:
+ *
+ *   1. **Default (no override).** Workspace has no `.codex/` directory.
+ *      Adapter doesn't set `CODEX_HOME`. Codex reads the user's global
+ *      `~/.codex/auth.json` + `~/.codex/config.toml` — exactly what a
+ *      vanilla `codex` invocation in any project does. The OpenAlice MCP
+ *      servers are wired via per-invocation `-c mcp_servers...url=...`
+ *      flags in `composeCommand` below, so MCP is visible without polluting
+ *      the user's global config.
+ *
+ *   2. **Native login preference.** `.codex/config.toml` contains only the
+ *      project-local model / effort preference. `CODEX_HOME` remains unset, so
+ *      Codex keeps the user's normal login, sessions, skills, and user config.
+ *
+ *   3. **OpenAlice-managed custom provider.** Provider config and its env key
+ *      live under `.codex/openalice-home/`; only this explicit mode sets
+ *      `CODEX_HOME` to that isolated directory.
+ *
+ * The `-c` flag is OpenAlice's "local MCP registration" — analogous to
+ * claude's `.mcp.json` cwd discovery, but driven via codex's CLI override flag
+ * since codex has no cwd-MCP convention of its own.
+ */
+
+export const codexAdapter: CliAdapter = {
+  id: 'codex',
+  displayName: 'Codex',
+  binary: 'codex',
+  namePrefix: 'x',
+  capabilities: {
+    parallelPerCwd: true,
+    resumeLast: true,
+    resumeById: true,
+    // by-id resume (claude-level): codex can't be assigned an id at spawn, so
+    // the watcher polls `listOnDisk` post-spawn — codex writes a global
+    // `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` whose line-1 `session_meta`
+    // carries { id, cwd }, so we attribute by cwd and persist the id as
+    // resumeHint. Then `codex resume <id>` (composeCommand) resumes by id.
+    transcriptDiscovery: 'subprocess',
+    headless: true,
+    // `codex app-server` speaks JSON-RPC over stdio; threads are created or
+    // resumed in-band with the same full-access policy as TUI/headless.
+    web: { wire: 'codex-app-server', permissionPrompts: true, freshSession: true },
+    aiProvider: {
+      credentialSource: 'runtime-or-workspace',
+      wirePreference: ['openai-responses'],
+      defaultWire: 'openai-responses',
+    },
+  },
+
+  sessionRuntime: {
+    project(_ctx, runtime: ResolvedSessionRuntimeBinding) {
+      const ai = runtime.ai;
+      const args = [
+        ...(runtime.binding.model ? ['--model', runtime.binding.model] : []),
+        ...(runtime.binding.reasoningEffort
+          ? ['-c', `model_reasoning_effort=${tomlString(runtime.binding.reasoningEffort)}`]
+          : []),
+      ];
+      const env: Record<string, string> = {};
+      if (ai?.apiKey || ai?.baseUrl) {
+        args.push(
+          '-c', `model_provider=${tomlString(CODEX_SESSION_PROVIDER_NAME)}`,
+          '-c', `model_providers.${CODEX_SESSION_PROVIDER_NAME}.name=${tomlString('OpenAlice Session provider')}`,
+          '-c', `model_providers.${CODEX_SESSION_PROVIDER_NAME}.base_url=${tomlString(ai.baseUrl || CODEX_DEFAULT_BASE_URL)}`,
+          '-c', `model_providers.${CODEX_SESSION_PROVIDER_NAME}.env_key=${tomlString(CODEX_SESSION_KEY_ENV_NAME)}`,
+          '-c', `model_providers.${CODEX_SESSION_PROVIDER_NAME}.wire_api=${tomlString('responses')}`,
+        );
+        if (ai.apiKey) env[CODEX_SESSION_KEY_ENV_NAME] = ai.apiKey;
+      }
+      return { env, interactiveArgs: args, headlessArgs: args, webArgs: args };
+    },
+  },
+
+  /**
+   * Every OpenAlice-owned interactive Codex launch explicitly selects full
+   * host access and disables command approvals. Without launch-time flags,
+   * Codex inherits its global/project defaults and can silently start in a
+   * sandbox that blocks the injected `alice*` CLIs from reaching Alice.
+   *
+   * MCP server flags remain optional. The default tool path is CLI-mode
+   * (`alice*` shell commands), so a workspace must still spawn when no MCP URL
+   * is present.
+   */
+  composeCommand(_base: readonly string[], ctx: SpawnContext): readonly string[] {
+    const [binary, ...baseArgs] = codexMcpHead(ctx);
+    const head = [binary!, ...(ctx.sessionRuntime?.interactiveArgs ?? []), ...baseArgs];
+    if (ctx.resume === undefined) {
+      // Quick-chat seed: `codex [-c …] -- <prompt>` opens the interactive TUI on
+      // that prompt ("Optional user prompt to start the session" per `codex
+      // --help`). `--` terminates options so a `-`-leading prompt is safe (codex
+      // accepts `--` at the top level; verified). Seeding only on fresh spawns —
+      // codex's `resume <id>` subcommand has no positional-prompt slot.
+      if (ctx.initialPrompt) return [...head, '--', ctx.initialPrompt];
+      return head;
+    }
+    if (ctx.resume === 'last') return [...head, 'resume', '--last'];
+    return [...head, 'resume', ctx.resume.sessionId];
+  },
+
+  // Headless codex is CLI-MODE, NOT MCP: `codex exec` cancels EVERY MCP tool
+  // call when there's no human to approve — even under approval_policy=never
+  // (verified: "user cancelled MCP tool call") — so MCP is dead weight here.
+  // Instead the agent reads data and reports via the unified `alice` CLI
+  // (shell commands codex runs autonomously). Full host access and no approval
+  // match the interactive launch, including resumed runs on container hosts.
+  // No mcp_servers head (interactive composeCommand keeps it — MCP works there
+  // with a human approver). `--` terminates options before the trailing prompt.
+  composeHeadlessCommand(
+    _base: readonly string[],
+    ctx: SpawnContext,
+    prompt: string,
+  ): readonly string[] {
+    const custom = ctx.sessionRuntime ? null : readCustomProviderSelection(ctx.cwd);
+    const model = custom?.model;
+    const reasoningEffort = custom?.reasoningEffort;
+    const head = [
+      'codex',
+      ...(ctx.sessionRuntime?.headlessArgs ?? []),
+      ...(model ? ['--model', model] : []),
+      ...(reasoningEffort
+        ? ['-c', `model_reasoning_effort=${tomlString(reasoningEffort)}`]
+        : []),
+      ...(custom ? ['-c', `model_provider=${tomlString(CODEX_PROVIDER_NAME)}`] : []),
+      '-c',
+      'approval_policy="never"',
+      '-c',
+      'sandbox_mode="danger-full-access"',
+      ...CODEX_SHELL_ARGS,
+      'exec',
+    ];
+    if (ctx.resume === 'last') return [...head, 'resume', '--json', '--last', prompt];
+    if (ctx.resume) return [...head, 'resume', '--json', ctx.resume.sessionId, prompt];
+    return [
+      ...head,
+      '--json',
+      '--',
+      prompt,
+    ];
+  },
+
+  // Web surface: `codex app-server --listen stdio://`. Session identity,
+  // approval policy, and sandbox are selected in-band by the transport
+  // (`thread/start` / `thread/resume` with never/danger-full-access).
+  // MCP registration mirrors the TUI.
+  composeWebCommand(_base: readonly string[], ctx: SpawnContext): readonly string[] {
+    if (ctx.resume === 'last') throw new Error('the Web surface requires a concrete Codex thread id or a fresh Session');
+    return [
+      'codex',
+      ...(ctx.sessionRuntime?.webArgs ?? ctx.sessionRuntime?.interactiveArgs ?? []),
+      ...codexMcpConfigArgs(ctx),
+      ...CODEX_SHELL_ARGS,
+      'app-server',
+      '--listen',
+      'stdio://',
+    ];
+  },
+
+  // `codex exec --json` line 1 is `{"type":"thread.started","thread_id":…}`;
+  // the thread_id EQUALS the rollout's `session_meta.id` (verified 0.137.0,
+  // 2026-06-11 — same uuid in ~/.codex/sessions/…/rollout-*.jsonl), so it
+  // resumes via `codex resume <id>` like any interactively-captured id.
+  extractHeadlessSessionId(line: string): string | null {
+    try {
+      const evt = JSON.parse(line) as Record<string, unknown>;
+      if (evt['type'] !== 'thread.started') return null;
+      return typeof evt['thread_id'] === 'string' ? evt['thread_id'] : null;
+    } catch {
+      return null;
+    }
+  },
+
+  extractHeadlessAssistantText(line: string): string | null {
+    try {
+      const evt = JSON.parse(line) as Record<string, unknown>;
+      if (evt['type'] !== 'item.completed') return null;
+      const item = evt['item'];
+      if (!item || typeof item !== 'object') return null;
+      const record = item as Record<string, unknown>;
+      return record['type'] === 'agent_message' && typeof record['text'] === 'string'
+        ? record['text']
+        : null;
+    } catch {
+      return null;
+    }
+  },
+
+  extractHeadlessOutputEvents(line: string): readonly HeadlessOutputEvent[] {
+    try {
+      const evt = JSON.parse(line) as Record<string, unknown>;
+      if (evt['type'] === 'error' && typeof evt['message'] === 'string') {
+        return [{ type: 'error', message: evt['message'] }];
+      }
+      if (evt['type'] === 'turn.failed') {
+        const error = evt['error'];
+        const message = error && typeof error === 'object' && typeof (error as Record<string, unknown>)['message'] === 'string'
+          ? (error as Record<string, unknown>)['message'] as string
+          : typeof error === 'string'
+            ? error
+            : 'Codex turn failed';
+        return [{ type: 'error', message }];
+      }
+      if (evt['type'] !== 'item.started' && evt['type'] !== 'item.completed') return [];
+      const item = evt['item'];
+      if (!item || typeof item !== 'object') return [];
+      const record = item as Record<string, unknown>;
+      const id = typeof record['id'] === 'string' ? record['id'] : `codex-${record['type'] ?? 'item'}`;
+      if (evt['type'] === 'item.completed' && record['type'] === 'error' && typeof record['message'] === 'string') {
+        return [{ type: 'error', message: record['message'] }];
+      }
+      if (evt['type'] === 'item.completed' && record['type'] === 'agent_message' && typeof record['text'] === 'string') {
+        return [{ type: 'text', text: record['text'] }];
+      }
+      if (record['type'] === 'command_execution') {
+        const input = typeof record['command'] === 'string' ? { command: record['command'] } : record['command'];
+        if (evt['type'] === 'item.started') return [{ type: 'tool-start', id, name: 'Shell', input }];
+        const failed = record['status'] === 'failed' ||
+          record['status'] === 'declined' ||
+          (typeof record['exit_code'] === 'number' && record['exit_code'] !== 0);
+        return [{
+          type: 'tool-finish',
+          id,
+          name: 'Shell',
+          ...(record['aggregated_output'] !== undefined ? { output: record['aggregated_output'] } : {}),
+          ...(failed ? { isError: true } : {}),
+        }];
+      }
+      if (record['type'] === 'file_change') {
+        if (evt['type'] === 'item.started') {
+          return [{ type: 'tool-start', id, name: 'File changes', input: record['changes'] }];
+        }
+        return [{
+          type: 'tool-finish',
+          id,
+          name: 'File changes',
+          output: record['changes'],
+          ...(record['status'] === 'failed' ? { isError: true } : {}),
+        }];
+      }
+      if (record['type'] === 'mcp_tool_call' || record['type'] === 'tool_call') {
+        const name = typeof record['tool'] === 'string'
+          ? record['tool']
+          : typeof record['name'] === 'string'
+            ? record['name']
+            : 'Tool';
+        if (evt['type'] === 'item.started') {
+          return [{ type: 'tool-start', id, name, input: record['arguments'] ?? record['input'] }];
+        }
+        return [{
+          type: 'tool-finish',
+          id,
+          name,
+          output: record['result'] ?? record['output'] ?? record['error'],
+          ...(record['status'] === 'failed' ? { isError: true } : {}),
+        }];
+      }
+      if (record['type'] === 'web_search') {
+        const input = { query: record['query'], action: record['action'] };
+        if (evt['type'] === 'item.started') return [{ type: 'tool-start', id, name: 'Web search', input }];
+        return [{ type: 'tool-finish', id, name: 'Web search', output: input }];
+      }
+      if (record['type'] === 'collab_tool_call') {
+        const rawTool = typeof record['tool'] === 'string' ? record['tool'] : 'collaboration';
+        const name = `Collaboration · ${rawTool.replaceAll('_', ' ')}`;
+        const input = {
+          ...(record['receiver_thread_ids'] !== undefined ? { receiverThreadIds: record['receiver_thread_ids'] } : {}),
+          ...(record['prompt'] !== undefined ? { prompt: record['prompt'] } : {}),
+        };
+        if (evt['type'] === 'item.started') return [{ type: 'tool-start', id, name, input }];
+        return [{
+          type: 'tool-finish',
+          id,
+          name,
+          output: record['agents_states'],
+          ...(record['status'] === 'failed' ? { isError: true } : {}),
+        }];
+      }
+      return [];
+    } catch {
+      return [];
+    }
+  },
+
+  /** @deprecated Native-project compatibility export; managed Sessions use sessionRuntime. */
+  async writeAiConfig(cwd: string, cred: WorkspaceAiCred): Promise<void> {
+    const hasAny = !!(cred.baseUrl || cred.apiKey || cred.model || cred.reasoningEffort);
+    const legacyIsolated = isLegacyIsolatedHome(cwd);
+    const legacyNative = !legacyIsolated && existsSync(join(cwd, CODEX_LEGACY_ENV_PATH));
+
+    if (!hasAny) {
+      await rm(join(cwd, CODEX_ISOLATED_HOME_PATH), { recursive: true, force: true });
+      if (legacyIsolated) await resetLegacyIsolatedHome(cwd);
+      else await rm(join(cwd, CODEX_LEGACY_ENV_PATH), { force: true });
+      await resetOwnedTomlConfig({
+        cwd,
+        configPath: CODEX_CONFIG_PATH,
+        statePath: CODEX_BINDING_STATE_PATH,
+        ...(legacyNative ? { legacyOwnedKeys: ['model', 'model_reasoning_effort'] } : {}),
+      });
+      return;
+    }
+
+    if (!cred.baseUrl && !cred.apiKey) {
+      // Native login mode: project-level model preferences are a normal Codex
+      // config layer. They must not redirect CODEX_HOME or shadow global auth.
+      await rm(join(cwd, CODEX_ISOLATED_HOME_PATH), { recursive: true, force: true });
+      if (legacyIsolated) await resetLegacyIsolatedHome(cwd);
+      else await rm(join(cwd, CODEX_LEGACY_ENV_PATH), { force: true });
+      await writeOwnedTomlConfig({
+        cwd,
+        configPath: CODEX_CONFIG_PATH,
+        statePath: CODEX_BINDING_STATE_PATH,
+        entries: [
+          { key: 'model', value: cred.model ? tomlString(cred.model) : null },
+          {
+            key: 'model_reasoning_effort',
+            value: cred.reasoningEffort ? tomlString(cred.reasoningEffort) : null,
+          },
+        ],
+        ...(legacyNative ? { legacyOwnedKeys: ['model', 'model_reasoning_effort'] } : {}),
+      });
+      return;
+    }
+
+    // Custom provider mode: provider tables are not a supported Codex project
+    // layer, so keep them in an explicit isolated CODEX_HOME. Restore any
+    // OpenAlice-owned native project keys before entering that mode.
+    await resetOwnedTomlConfig({
+      cwd,
+      configPath: CODEX_CONFIG_PATH,
+      statePath: CODEX_BINDING_STATE_PATH,
+      ...(legacyNative ? { legacyOwnedKeys: ['model', 'model_reasoning_effort'] } : {}),
+    });
+    if (legacyIsolated) await resetLegacyIsolatedHome(cwd);
+    else await rm(join(cwd, CODEX_LEGACY_ENV_PATH), { force: true });
+
+    // A managed API key without an explicit endpoint still means the official
+    // OpenAI provider. Materialize that endpoint because the isolated home has
+    // no inherited provider block to attach env_key to.
+    const providerBaseUrl = cred.baseUrl || CODEX_DEFAULT_BASE_URL;
+    let toml = '';
+    if (cred.model) toml += `model = ${tomlString(cred.model)}\n`;
+    if (cred.reasoningEffort) {
+      toml += `model_reasoning_effort = ${tomlString(cred.reasoningEffort)}\n`;
+    }
+    toml += `model_provider = "${CODEX_PROVIDER_NAME}"\n`;
+    toml += '\n';
+    toml += `[model_providers.${CODEX_PROVIDER_NAME}]\n`;
+    toml += `name = "OpenAlice workspace provider"\n`;
+    toml += `base_url = ${tomlString(providerBaseUrl)}\n`;
+    toml += `env_key = "${CODEX_KEY_ENV_NAME}"\n`;
+    // Codex 0.130+ only speaks the OpenAI Responses API — it hard-rejects
+    // wire_api="chat" — so this is always "responses" regardless of the
+    // credential's wireShape. See memory reference_codex_chat_dead.
+    toml += `wire_api = "responses"\n`;
+    await writeWorkspaceFile(cwd, CODEX_ISOLATED_CONFIG_PATH, toml);
+
+    // env.json: holds the per-workspace API key codex picks up via env_key.
+    // composeEnv reads this and exports at spawn.
+    if (cred.apiKey) {
+      const envObj: Record<string, string> = { [CODEX_KEY_ENV_NAME]: cred.apiKey };
+      await writeWorkspaceFile(cwd, CODEX_ISOLATED_ENV_PATH, JSON.stringify(envObj, null, 2) + '\n');
+    } else {
+      await writeWorkspaceFile(cwd, CODEX_ISOLATED_ENV_PATH, '{}\n');
+    }
+  },
+
+  /** @deprecated Compatibility inspection for legacy Session bindings only. */
+  async readAiConfig(cwd: string): Promise<WorkspaceAiCred | null> {
+    const isolatedHome = isolatedHomePath(cwd);
+    const tomlRaw = await readWorkspaceFile(
+      cwd,
+      isolatedHome === CODEX_ISOLATED_HOME_PATH ? CODEX_ISOLATED_CONFIG_PATH : CODEX_CONFIG_PATH,
+    );
+    const envRaw = isolatedHome === CODEX_ISOLATED_HOME_PATH
+      ? await readWorkspaceFile(cwd, CODEX_ISOLATED_ENV_PATH)
+      : isolatedHome === '.codex'
+        ? await readWorkspaceFile(cwd, CODEX_LEGACY_ENV_PATH)
+        : null;
+    if (tomlRaw === null && envRaw === null) return null;
+
+    let baseUrl: string | null = null;
+    let wireApi: 'chat' | 'responses' | null = null;
+    let model: string | null = null;
+    let reasoningEffort: WorkspaceAiCred['reasoningEffort'] = null;
+    if (tomlRaw) {
+      // Shape-specific extraction: we always write the provider section as
+      // `[model_providers.workspace]` with `base_url`, `wire_api`, plus
+      // top-level `model`. Regex is brittle in general but our shape is
+      // controlled (writer above produces deterministic output).
+      const providerBlock = tomlRaw.match(/\[model_providers\.workspace\][^\[]*/);
+      if (providerBlock) {
+        const block = providerBlock[0];
+        const base = block.match(/base_url\s*=\s*"([^"]*)"/);
+        if (base) baseUrl = base[1] ?? null;
+        const wire = block.match(/wire_api\s*=\s*"(chat|responses)"/);
+        if (wire) wireApi = wire[1] as 'chat' | 'responses';
+      }
+      const modelMatch = tomlRaw.match(/^model\s*=\s*"([^"]*)"\s*$/m);
+      if (modelMatch) model = modelMatch[1] ?? null;
+      const effortMatch = tomlRaw.match(/^model_reasoning_effort\s*=\s*"([^"]*)"\s*$/m);
+      if (isModelReasoningEffort(effortMatch?.[1])) reasoningEffort = effortMatch[1];
+    }
+
+    let apiKey: string | null = null;
+    if (envRaw) {
+      try {
+        const env = JSON.parse(envRaw) as Record<string, unknown>;
+        const k = env[CODEX_KEY_ENV_NAME];
+        if (typeof k === 'string') apiKey = k;
+      } catch { /* ignore parse error, leave apiKey null */ }
+    }
+
+    if (baseUrl === null && apiKey === null && model === null && wireApi === null && reasoningEffort === null) return null;
+    // Codex is Responses-only, so the unified wireShape is always openai-responses.
+    return {
+      baseUrl,
+      apiKey,
+      model,
+      wireApi,
+      wireShape: 'openai-responses',
+      ...(reasoningEffort ? { reasoningEffort } : {}),
+    };
+  },
+
+  /**
+   * Set `CODEX_HOME` only for an explicit OpenAlice-managed custom provider.
+   * A normal `.codex/config.toml` is Codex's native project layer and must keep
+   * the user's global home/login/session state.
+   *
+   * `.codex/env.json` is OpenAlice's per-workspace key bridge. Codex's
+   * `[model_providers.X].env_key` field indirects through an env var; the
+   * UI writes the chosen key into `env.json` and the adapter exports it
+   * at spawn so codex's `env_key` lookup resolves. This is the only place
+   * we bridge file → env, and the source of truth is still the workspace
+   * file (not OpenAlice's internal state).
+   */
+  composeEnv(ctx: SpawnContext): Record<string, string> {
+    const result: Record<string, string> = {};
+    const relativeHome = isolatedHomePath(ctx.cwd);
+    if (!relativeHome) return result;
+    const workspaceCodex = join(ctx.cwd, relativeHome);
+    result['CODEX_HOME'] = workspaceCodex;
+    const envFile = join(workspaceCodex, 'env.json');
+    if (existsSync(envFile)) {
+      try {
+        const parsed: unknown = JSON.parse(readFileSync(envFile, 'utf8'));
+        if (parsed && typeof parsed === 'object') {
+          for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+            if (typeof v === 'string' && /^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) {
+              result[k] = v;
+            }
+          }
+        }
+      } catch {
+        // ignore parse errors; file is user-editable and v1 doesn't surface
+      }
+    }
+    return result;
+  },
+
+  lifecycle: {
+    async prepareWorkspace(ctx): Promise<void> {
+      await ensureTrustedProject(ctx.cwd);
+    },
+  },
+
+  /**
+   * List codex sessions belonging to THIS workspace cwd, for the transcript
+   * watcher's post-spawn id capture (codex can't be assigned an id at spawn).
+   * Sessions live at `$CODEX_HOME/sessions` (custom-provider mode) or
+   * `~/.codex/sessions` (default), partitioned `YYYY/MM/DD`, GLOBAL across all
+   * cwds. We read each rollout's line-1 `session_meta { id, cwd }` (written at
+   * session start) and keep only those whose cwd matches — scanning just the
+   * newest dated leaves since a just-spawned session is today's.
+   */
+  async listOnDisk(cwd: string): Promise<readonly OnDiskSession[]> {
+    const root = join(codexHome(cwd), 'sessions');
+    const target = resolve(cwd);
+    const out: OnDiskSession[] = [];
+    for (const leaf of await recentDatedLeaves(root, 2)) {
+      let files: string[];
+      try {
+        files = await readdir(leaf);
+      } catch {
+        continue;
+      }
+      for (const f of files) {
+        if (!CODEX_ROLLOUT_RE.test(f)) continue;
+        const fp = join(leaf, f);
+        try {
+          const meta = JSON.parse(await firstLine(fp)) as {
+            type?: string;
+            payload?: { id?: string; cwd?: string };
+          };
+          const id = meta.payload?.id;
+          const rolloutCwd = meta.payload?.cwd;
+          if (meta.type !== 'session_meta' || typeof id !== 'string' || typeof rolloutCwd !== 'string') continue;
+          if (resolve(rolloutCwd) !== target) continue;
+          const st = await stat(fp);
+          out.push({ sessionId: id, file: fp, mtime: st.mtime.toISOString(), sizeBytes: st.size });
+        } catch {
+          // partial / unreadable rollout — skip
+        }
+      }
+    }
+    return out;
+  },
+
+  async readSessionTitle(cwd: string, sessionId: string): Promise<string | null> {
+    return (await readCodexSessionTitleIndex(cwd)).get(sessionId) ?? null;
+  },
+};
+
+/**
+ * Optional `codex -c mcp_servers.*` head. When MCP is disabled, return the
+ * bare codex command and let the workspace use the injected `alice*` CLIs.
+ *
+ * Reads OPENALICE_MCP_URL / AQ_WS_ID from the spawn-bound env. The URL exists
+ * only when the optional MCP server is enabled; otherwise the workspace uses
+ * the injected `alice*` CLI tools.
+ */
+function codexMcpHead(ctx: SpawnContext): string[] {
+  const custom = ctx.sessionRuntime ? null : readCustomProviderSelection(ctx.cwd);
+  const selection = custom
+    ? [
+        ...(custom.model ? ['--model', custom.model] : []),
+        ...(custom.reasoningEffort
+          ? ['-c', `model_reasoning_effort=${tomlString(custom.reasoningEffort)}`]
+          : []),
+        '-c',
+        `model_provider=${tomlString(CODEX_PROVIDER_NAME)}`,
+      ]
+    : [];
+  return ['codex', ...selection, ...CODEX_INTERACTIVE_PERMISSION_ARGS, ...CODEX_SHELL_ARGS, ...codexMcpConfigArgs(ctx)];
+}
+
+/** `-c mcp_servers.*` overrides that register the launcher's MCP gateway. */
+function codexMcpConfigArgs(ctx: SpawnContext): string[] {
+  const mcpUrl = ctx.env['OPENALICE_MCP_URL'];
+  if (!mcpUrl) return [];
+  const workspaceId = ctx.env['AQ_WS_ID'];
+  if (!workspaceId) {
+    throw new Error('codex adapter: AQ_WS_ID missing from spawn env');
+  }
+  return [
+    '-c',
+    `mcp_servers.openalice.url="${mcpUrl}"`,
+    '-c',
+    // `openalice-workspace` is a valid TOML bare key (hyphen is allowed in bare
+    // keys), so it needs NO quoting. Quoting the segment as
+    // `"openalice-workspace"` made codex carry the literal quotes into the MCP
+    // server name, which then failed codex's own `^[a-zA-Z0-9_-]+$` name check
+    // ("Invalid MCP server name '\"openalice-workspace\"'").
+    `mcp_servers.openalice-workspace.url="${mcpUrl}/${workspaceId}"`,
+  ];
+}
+
+const CODEX_ROLLOUT_RE = /^rollout-.*\.jsonl$/;
+
+/** Newest `count` `YYYY/MM/DD` leaf dirs under a date-partitioned root. A
+ *  just-spawned session is in today's leaf, so the newest few suffice. */
+async function recentDatedLeaves(root: string, count: number): Promise<string[]> {
+  const newestNumeric = async (dir: string, n: number): Promise<string[]> => {
+    let names: string[];
+    try {
+      names = await readdir(dir);
+    } catch {
+      return [];
+    }
+    return names
+      .filter((x) => /^\d+$/.test(x))
+      .sort()
+      .reverse()
+      .slice(0, n)
+      .map((x) => join(dir, x));
+  };
+  const leaves: string[] = [];
+  for (const y of await newestNumeric(root, 1)) {
+    for (const m of await newestNumeric(y, 1)) {
+      for (const d of await newestNumeric(m, count)) leaves.push(d);
+    }
+  }
+  return leaves;
+}
+
+/** First line only — codex rollout line-1 (session_meta) can be many KB
+ *  (it embeds the full base instructions), so stream rather than readFile. */
+async function firstLine(fp: string): Promise<string> {
+  const input = createReadStream(fp, { encoding: 'utf8' });
+  const rl = createInterface({ input, crlfDelay: Infinity });
+  try {
+    for await (const line of rl) return line;
+    return '';
+  } finally {
+    rl.close();
+    input.destroy();
+  }
+}
+
+/**
+ * Add (or no-op if present) a `[projects."<abs>"] trust_level = "trusted"`
+ * entry to `~/.codex/config.toml`. Uses a minimal append-or-rewrite strategy
+ * — we don't bring in a TOML library because the section grammar is simple
+ * and we only ever touch one section per workspace.
+ *
+ * If the project is already present we leave the file alone, regardless of
+ * what value it has (the user may have set `read_only` deliberately).
+ */
+async function ensureTrustedProject(cwd: string): Promise<void> {
+  const abs = resolve(cwd);
+  const configPath = join(homedir(), '.codex', 'config.toml');
+
+  let existing = '';
+  try {
+    existing = await readFile(configPath, 'utf8');
+  } catch (err) {
+    if (!isENOENT(err)) throw err;
+    await mkdir(dirname(configPath), { recursive: true });
+  }
+
+  // Match either single- or triple-bracket [projects."<path>"] headers.
+  const headerEsc = abs.replace(/[\\"]/g, (c) => `\\${c}`);
+  const headerRe = new RegExp(
+    `^\\[projects\\."${headerEsc.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"\\]\\s*$`,
+    'm',
+  );
+  if (headerRe.test(existing)) return; // already configured — don't clobber
+
+  const block = `\n[projects."${headerEsc}"]\ntrust_level = "trusted"\n`;
+  const next = existing.endsWith('\n') || existing.length === 0 ? existing + block : existing + '\n' + block;
+  await writeFile(configPath, next, 'utf8');
+}
+
+function isLegacyIsolatedHome(cwd: string): boolean {
+  if (existsSync(join(cwd, CODEX_ISOLATED_CONFIG_PATH))) return false;
+  const configPath = join(cwd, CODEX_CONFIG_PATH);
+  if (existsSync(configPath)) {
+    try {
+      const raw = readFileSync(configPath, 'utf8');
+      if (
+        /^\s*model_provider\s*=\s*"workspace"\s*$/m.test(raw) ||
+        /^\s*\[model_providers\.workspace\]\s*$/m.test(raw)
+      ) {
+        return true;
+      }
+    } catch {
+      return false;
+    }
+  }
+  const envPath = join(cwd, CODEX_LEGACY_ENV_PATH);
+  if (!existsSync(envPath)) return false;
+  try {
+    const parsed = JSON.parse(readFileSync(envPath, 'utf8')) as Record<string, unknown>;
+    return typeof parsed[CODEX_KEY_ENV_NAME] === 'string';
+  } catch {
+    return false;
+  }
+}
+
+function isolatedHomePath(cwd: string): string | null {
+  if (
+    existsSync(join(cwd, CODEX_ISOLATED_CONFIG_PATH)) ||
+    existsSync(join(cwd, CODEX_ISOLATED_ENV_PATH))
+  ) {
+    return CODEX_ISOLATED_HOME_PATH;
+  }
+  return isLegacyIsolatedHome(cwd) ? '.codex' : null;
+}
+
+function readCustomProviderSelection(cwd: string): {
+  model?: string
+  reasoningEffort?: NonNullable<WorkspaceAiCred['reasoningEffort']>
+} | null {
+  const home = isolatedHomePath(cwd);
+  if (!home) return null;
+  const configPath = home === CODEX_ISOLATED_HOME_PATH
+    ? CODEX_ISOLATED_CONFIG_PATH
+    : CODEX_CONFIG_PATH;
+  try {
+    const raw = readFileSync(join(cwd, configPath), 'utf8');
+    const model = raw.match(/^model\s*=\s*"([^"]*)"\s*$/m)?.[1];
+    const effort = raw.match(/^model_reasoning_effort\s*=\s*"([^"]*)"\s*$/m)?.[1];
+    return {
+      ...(model ? { model } : {}),
+      ...(isModelReasoningEffort(effort) ? { reasoningEffort: effort } : {}),
+    };
+  } catch {
+    return {};
+  }
+}
+
+async function resetLegacyIsolatedHome(cwd: string): Promise<void> {
+  const raw = await readWorkspaceFile(cwd, CODEX_CONFIG_PATH);
+  if (raw !== null) {
+    const lines = raw.split(/\r?\n/);
+    const kept: string[] = [];
+    let inWorkspaceProvider = false;
+    let beforeFirstSection = true;
+    for (const line of lines) {
+      const section = line.match(/^\s*\[([^\]]+)\]\s*$/);
+      if (section) {
+        beforeFirstSection = false;
+        inWorkspaceProvider = section[1] === `model_providers.${CODEX_PROVIDER_NAME}`;
+        if (inWorkspaceProvider) continue;
+      }
+      if (inWorkspaceProvider) continue;
+      if (
+        beforeFirstSection &&
+        /^\s*(model|model_reasoning_effort|model_provider)\s*=/.test(line)
+      ) {
+        continue;
+      }
+      kept.push(line);
+    }
+    while (kept.at(-1)?.trim() === '') kept.pop();
+    if (kept.some((line) => line.trim().length > 0)) {
+      await writeWorkspaceFile(cwd, CODEX_CONFIG_PATH, `${kept.join('\n')}\n`);
+    } else {
+      await rm(join(cwd, CODEX_CONFIG_PATH), { force: true });
+    }
+  }
+  await rm(join(cwd, CODEX_LEGACY_ENV_PATH), { force: true });
+}
+
+function isENOENT(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { code?: string }).code === 'ENOENT';
+}
+
+function tomlString(s: string): string {
+  return `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+}

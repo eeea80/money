@@ -1,0 +1,599 @@
+import { spawn } from 'node:child_process';
+import { resolveBashPath } from '@/core/shell-resolver.js';
+import { existsSync } from 'node:fs';
+import { mkdir, rename, rm, statfs } from 'node:fs/promises';
+import { join } from 'node:path';
+
+import { exec as gitExec } from './git-execution.js';
+
+import {
+  readCredentials,
+  readWorkspaceCredentialDefaults,
+} from '@/core/config.js';
+
+import { prepareAgentRuntimeWorkspace, type AdapterRegistry } from './cli-adapter.js';
+import { resolveMjsBootstrapInvocation } from './bootstrap-runtime.js';
+import { injectWorkspaceContext } from './context-injector.js';
+import { credentialToWorkspaceAiCred } from './credential-injection.js';
+import type { Logger } from './logger.js';
+import { generatePetnameId } from './petname-id.js';
+import type {
+  AgentCredentialDecl,
+  TemplateMeta,
+  TemplateRegistry,
+  TemplateSourceVersion,
+} from './template-registry.js';
+import { initializeWorkspaceTemplateState } from './template-upgrade.js';
+import type { WorkspaceMeta, WorkspaceRegistry } from './workspace-registry.js';
+import {
+  emptyWorkspaceRuntimeSettings,
+  writeWorkspaceRuntimeSettings,
+  type WorkspaceRuntimePreference,
+} from './workspace-runtime-settings.js';
+
+export interface BootstrapEnv {
+  /**
+   * Optional path to an Auto-Quant clone the user wants to override the
+   * managed mirror with. Templates that don't read `AQ_TEMPLATE_DIR`
+   * ignore this. Empty string when env unset.
+   */
+  readonly templateDir: string;
+  /** Absolute path to the launcher repo root (for `${AQ_LAUNCHER_REPO_ROOT}` references). */
+  readonly launcherRepoRoot: string;
+}
+
+export interface CreatorOptions {
+  readonly workspacesRoot: string;
+  readonly templateRegistry: TemplateRegistry;
+  readonly adapterRegistry: AdapterRegistry;
+  readonly bootstrapEnv: BootstrapEnv;
+  readonly bootstrapTimeoutMs: number;
+  readonly registry: WorkspaceRegistry;
+  /** Catalog keeps ids reserved after departure/purge; active registry cannot. */
+  readonly isWorkspaceIdReserved?: (id: string) => boolean;
+  /** Persist the new active row in the complete lifecycle catalog. */
+  readonly onWorkspaceCreated?: (workspace: WorkspaceMeta) => Promise<void>;
+  readonly logger: Logger;
+}
+
+export type CreateResult =
+  | { readonly ok: true; readonly workspace: WorkspaceMeta }
+  | {
+      readonly ok: false;
+      readonly code:
+        | 'invalid_tag'
+        | 'tag_in_use'
+        | 'insufficient_storage'
+        | 'bootstrap_failed'
+        | 'injection_failed'
+        | 'unknown_template'
+        | 'unknown_source_version';
+      readonly message: string;
+      readonly stderr?: string;
+      readonly exitCode?: number;
+    };
+
+const TAG_RE = /^[a-z0-9][a-z0-9_-]{0,32}$/;
+export const MIN_WORKSPACE_FREE_BYTES = 64 * 1024 * 1024;
+
+/**
+ * Order the live adapter registry for transient Workspace preparation.
+ * Templates may put preferred runtimes first, but this order is never
+ * persisted as a Workspace capability boundary.
+ */
+export function orderCreateAdapters(
+  templateDefaultAgents: readonly string[],
+  allAdapterIds: readonly string[],
+): readonly string[] {
+  const utility = new Set(['shell']);
+  const registered = new Set(allAdapterIds);
+  const ordered = [
+    ...new Set([
+      ...templateDefaultAgents.filter((id) => registered.has(id)),
+      ...allAdapterIds,
+    ]),
+  ];
+  return [
+    ...ordered.filter((id) => !utility.has(id)),
+    ...ordered.filter((id) => utility.has(id)),
+  ];
+}
+
+export function resolveTemplateSource(
+  template: TemplateMeta,
+  requestedVersion?: string,
+): TemplateSourceVersion | undefined {
+  if (!template.source) return undefined;
+  const version = requestedVersion ?? template.source.defaultVersion;
+  return template.source.versions.find((candidate) => candidate.version === version);
+}
+
+/**
+ * Creates a workspace by invoking the template's bootstrap script.
+ *
+ * The launcher itself knows nothing about git, branches, or results.tsv —
+ * each template's script encapsulates that. We give it `tag` + `outDir` +
+ * a small env contract (`AQ_TEMPLATE_DIR`, `AQ_SHARED_DATA_DIR`,
+ * `AQ_TEMPLATE_FILES_DIR`, `AQ_LAUNCHER_REPO_ROOT`), wait for exit 0, and
+ * on success append the resulting WorkspaceMeta to the registry.
+ */
+export class WorkspaceCreator {
+  constructor(private readonly opts: CreatorOptions) {}
+
+  async create(
+    tag: string,
+    templateName: string,
+    sourceVersion?: string,
+  ): Promise<CreateResult> {
+    if (!TAG_RE.test(tag)) {
+      return {
+        ok: false,
+        code: 'invalid_tag',
+        message: `tag must match ${TAG_RE.source}`,
+      };
+    }
+    if (this.opts.registry.hasTag(tag)) {
+      return { ok: false, code: 'tag_in_use', message: `tag in use: ${tag}` };
+    }
+    const template = this.opts.templateRegistry.get(templateName);
+    if (!template) {
+      return {
+        ok: false,
+        code: 'unknown_template',
+        message: `unknown template: ${templateName}`,
+      };
+    }
+    const templateSource = resolveTemplateSource(template, sourceVersion);
+    if (
+      (template.source && !templateSource)
+      || (!template.source && sourceVersion !== undefined)
+    ) {
+      return {
+        ok: false,
+        code: 'unknown_source_version',
+        message: template.source
+          ? `unsupported ${templateName} source version: ${sourceVersion ?? ''}`
+          : `template ${templateName} does not accept a source version`,
+      };
+    }
+
+    const adapters = orderCreateAdapters(
+      template.defaultAgents,
+      this.opts.adapterRegistry.list().map((a) => a.id),
+    );
+
+    const storage = await inspectWorkspaceStorage(this.opts.workspacesRoot);
+    if (!storage.ok) return insufficientStorageResult(storage.availableBytes);
+
+    const id = generatePetnameId(templateName, {
+      fallbackPrefix: 'workspace',
+      isTaken: (candidate) =>
+        this.opts.registry.hasId(candidate) ||
+        this.opts.isWorkspaceIdReserved?.(candidate) === true ||
+        existsSync(join(this.opts.workspacesRoot, candidate)),
+    });
+    const dir = join(this.opts.workspacesRoot, id);
+    const log = this.opts.logger.child({
+      tag,
+      id,
+      dir,
+      template: templateName,
+      adapters,
+      ...(templateSource ? { sourceVersion: templateSource.version } : {}),
+    });
+
+    log.info('bootstrap.start', { script: template.bootstrapScript });
+
+    const result = await runScript(
+      template.bootstrapScript,
+      [tag, dir],
+      {
+        AQ_TEMPLATE_DIR: this.opts.bootstrapEnv.templateDir,
+        AQ_TEMPLATE_FILES_DIR: template.filesDir,
+        AQ_TEMPLATE_ROOT: template.templateDir,
+        AQ_LAUNCHER_REPO_ROOT: this.opts.bootstrapEnv.launcherRepoRoot,
+        ...(template.source && templateSource ? {
+          OPENALICE_TEMPLATE_SOURCE_REPOSITORY: template.source.repository,
+          OPENALICE_TEMPLATE_SOURCE_VERSION: templateSource.version,
+          OPENALICE_TEMPLATE_SOURCE_COMMIT: templateSource.commit,
+        } : {}),
+        // AQ_LAUNCHER_ROOT is intentionally NOT set here. bootstrap.sh's
+        // ${AQ_LAUNCHER_ROOT:-$HOME/.openalice/workspaces} default matches
+        // config.ts's default; a user-exported value flows in via
+        // `process.env` inheritance (see `runScript()` below).
+      },
+      this.opts.bootstrapTimeoutMs,
+    );
+
+    if (!result.ok) {
+      log.warn('bootstrap.failed', {
+        exitCode: result.exitCode,
+        stderr: result.stderr.slice(0, 4000),
+      });
+      await cleanupIncompleteWorkspace(dir, log);
+      if (isInsufficientStorageFailure(result)) return insufficientStorageResult();
+      // Surface the actual reason in the message, not just the exit code —
+      // a null exit code (spawn failure: bash-not-found on Windows, timeout)
+      // rendered as "code unknown" tells the user nothing, while result.stderr
+      // already carries the why (e.g. the Git-for-Windows install hint).
+      const reason = result.stderr.trim();
+      const headline =
+        result.exitCode === null
+          ? 'bootstrap could not start'
+          : `bootstrap script exited with code ${result.exitCode}`;
+      return {
+        ok: false,
+        code: 'bootstrap_failed',
+        message: reason ? `${headline}:\n${reason.slice(-500)}` : headline,
+        stderr: result.stderr,
+        ...(result.exitCode !== null ? { exitCode: result.exitCode } : {}),
+      };
+    }
+
+    // Launcher-owned context injection (MCP / persona / skills, gated by the
+    // template manifest), then the launcher commit. The launcher — not the
+    // bootstrap script — owns what lands in that commit. Snapshot templates
+    // make it the root commit; source-backed templates may append it to their
+    // retained upstream history.
+    try {
+      await injectWorkspaceContext({ template, wsId: id, dir });
+    } catch (err) {
+      log.warn('inject.failed', { err });
+      await cleanupIncompleteWorkspace(dir, log);
+      if (isInsufficientStorageError(err)) return insufficientStorageResult();
+      return {
+        ok: false,
+        code: 'injection_failed',
+        message: `context injection failed: ${(err as Error).message}`,
+      };
+    }
+
+    // Seed the Workspace-owned, secret-free launch preferences before the
+    // launcher baseline commit. Unlike the deprecated native CLI export, this
+    // file is part of the Workspace's self-description and is safe to track.
+    // The template still wins over installation defaults per runtime.
+    try {
+      const userDefaults = await readWorkspaceCredentialDefaults();
+      const effective: Record<string, AgentCredentialDecl> = {
+        ...userDefaults,
+        ...(template.agentCredentials ?? {}),
+      };
+      if (Object.keys(effective).length > 0) {
+        const credentials = await readCredentials();
+        const settings = emptyWorkspaceRuntimeSettings();
+        const rememberedAgents: string[] = [];
+        for (const [agentId, decl] of Object.entries(effective)) {
+          const adapter = this.opts.adapterRegistry.get(agentId);
+          const credential = credentials[decl.credentialSlug];
+          if (!adapter || !credential) {
+            log.warn('workspace.runtime_settings_seed_skipped', {
+              agentId,
+              reason: adapter ? 'credential_not_found' : 'adapter_not_found',
+            });
+            continue;
+          }
+          const projected = credentialToWorkspaceAiCred(credential, adapter, decl);
+          if (!projected) {
+            log.warn('workspace.runtime_settings_seed_skipped', {
+              agentId,
+              reason: 'credential_incompatible',
+            });
+            continue;
+          }
+          const preference: WorkspaceRuntimePreference = {
+            accessMode: 'vault',
+            credentialSlug: decl.credentialSlug,
+            ...(projected.wireShape ? { wireShape: projected.wireShape } : {}),
+            ...(projected.model ? { model: projected.model } : {}),
+            ...(projected.reasoningEffort ? { reasoningEffort: projected.reasoningEffort } : {}),
+          };
+          settings.runtime.interactive.agents[agentId] = preference;
+          settings.runtime.headless.agents[agentId] = preference;
+          rememberedAgents.push(agentId);
+        }
+        if (rememberedAgents.length > 0) {
+          const defaultAgent = template.defaultAgents.find((agent) => rememberedAgents.includes(agent))
+            ?? rememberedAgents[0]!;
+          settings.runtime.interactive.defaultAgent = defaultAgent;
+          settings.runtime.headless.defaultAgent = defaultAgent;
+          await writeWorkspaceRuntimeSettings(dir, settings);
+        }
+      }
+    } catch (err) {
+      log.warn('workspace.runtime_settings_seed_failed', { err });
+    }
+
+    try {
+      await commitInitial(dir, `${templateName}: ${tag}`);
+    } catch (err) {
+      log.warn('initial_commit.failed', { err });
+      await cleanupIncompleteWorkspace(dir, log);
+      if (isInsufficientStorageError(err)) return insufficientStorageResult();
+      return {
+        ok: false,
+        code: 'injection_failed',
+        message: `initial commit failed: ${(err as Error).message}`,
+      };
+    }
+
+    // Run the same per-runtime preparation hook used before later process
+    // launches. Hooks are idempotent. A single adapter failure does not fail
+    // Workspace creation; another registered runtime can still be used.
+    for (const a of adapters) {
+      const adapter = this.opts.adapterRegistry.get(a);
+      if (!adapter) continue;
+      try {
+        await prepareAgentRuntimeWorkspace(adapter, {
+          wsId: id,
+          cwd: dir,
+          launcherRepoRoot: this.opts.bootstrapEnv.launcherRepoRoot,
+        });
+      } catch (err) {
+        log.warn('adapter.prepare_workspace_failed', { agent: a, err });
+      }
+    }
+
+    const workspace: WorkspaceMeta = {
+      id,
+      tag,
+      dir,
+      createdAt: new Date().toISOString(),
+      template: templateName,
+      spawnedFromVersion: template.version,
+    };
+    try {
+      // The first commit is the exact Base for every future Template Upgrade.
+      // Store it outside Git now; legacy Workspaces reconstruct the same Base
+      // from their root commit on first upgrade.
+      await initializeWorkspaceTemplateState(workspace, template);
+    } catch (err) {
+      log.warn('template_state.initialize_failed', { err });
+      await cleanupIncompleteWorkspace(dir, log);
+      if (isInsufficientStorageError(err)) return insufficientStorageResult();
+      return {
+        ok: false,
+        code: 'injection_failed',
+        message: `template baseline initialization failed: ${(err as Error).message}`,
+      };
+    }
+    try {
+      await this.opts.registry.add(workspace);
+    } catch (err) {
+      await cleanupIncompleteWorkspace(dir, log);
+      log.error('registry.register_failed', { err });
+      if (isInsufficientStorageError(err)) return insufficientStorageResult();
+      return {
+        ok: false,
+        code: 'injection_failed',
+        message: `workspace registry update failed: ${(err as Error).message}`,
+      };
+    }
+    try {
+      await this.opts.onWorkspaceCreated?.(workspace);
+    } catch (err) {
+      await this.opts.registry.remove(workspace.id).catch(() => undefined);
+      await cleanupIncompleteWorkspace(dir, log);
+      log.error('catalog.register_failed', { err });
+      if (isInsufficientStorageError(err)) return insufficientStorageResult();
+      return {
+        ok: false,
+        code: 'injection_failed',
+        message: `workspace catalog update failed: ${(err as Error).message}`,
+      };
+    }
+    log.info('bootstrap.ok', { stdout: result.stdout.slice(-400) });
+    return { ok: true, workspace };
+  }
+}
+
+export async function inspectWorkspaceStorage(
+  workspacesRoot: string,
+  options: {
+    readonly minimumFreeBytes?: number;
+    readonly mkdirImpl?: typeof mkdir;
+    readonly statfsImpl?: typeof statfs;
+  } = {},
+): Promise<{ readonly ok: boolean; readonly availableBytes: number | null }> {
+  try {
+    await (options.mkdirImpl ?? mkdir)(workspacesRoot, { recursive: true });
+    const stats = await (options.statfsImpl ?? statfs)(workspacesRoot);
+    const availableBytes = Number(stats.bavail) * Number(stats.bsize);
+    return {
+      ok: !Number.isFinite(availableBytes)
+        || availableBytes >= (options.minimumFreeBytes ?? MIN_WORKSPACE_FREE_BYTES),
+      availableBytes: Number.isFinite(availableBytes) ? availableBytes : null,
+    };
+  } catch (error) {
+    if (isInsufficientStorageError(error)) return { ok: false, availableBytes: 0 };
+    // Some virtual/network filesystems do not implement statfs. Creation still
+    // has stage-specific ENOSPC handling below, so do not reject them blindly.
+    return { ok: true, availableBytes: null };
+  }
+}
+
+async function cleanupIncompleteWorkspace(dir: string, log: Logger): Promise<void> {
+  try {
+    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    return;
+  } catch (cleanupError) {
+    const quarantine = `${dir}.bootstrap-failed-${Date.now()}`;
+    try {
+      await rename(dir, quarantine);
+      log.warn('bootstrap.quarantined', { dir, quarantine, cleanupError });
+      return;
+    } catch (quarantineError) {
+      log.error('bootstrap.cleanup_failed', { dir, cleanupError, quarantineError });
+    }
+  }
+}
+
+function isInsufficientStorageFailure(result: RunResult): boolean {
+  return result.errorCode === 'ENOSPC' || /\bENOSPC\b|no space left on device/i.test(result.stderr);
+}
+
+function isInsufficientStorageError(error: unknown): boolean {
+  const candidate = error as NodeJS.ErrnoException;
+  return candidate?.code === 'ENOSPC'
+    || /\bENOSPC\b|no space left on device/i.test(candidate?.message ?? String(error));
+}
+
+function insufficientStorageResult(availableBytes: number | null = null): CreateResult {
+  const available = availableBytes === null
+    ? ''
+    : ` (${Math.max(0, Math.floor(availableBytes / 1024 / 1024))} MiB available)`;
+  return {
+    ok: false,
+    code: 'insufficient_storage',
+    message: `Not enough free space to create this Workspace${available}. Free disk space or choose another OpenAlice data location, then retry.`,
+  };
+}
+
+/**
+ * The launcher's workspace commit, uniform across templates. Snapshot templates
+ * initialize a fresh repository, while source-backed templates may retain an
+ * upstream repository and append this commit to it. Replaces the old
+ * per-template `commit_initial` bash helper, byte-identical in message + author.
+ * The bootstrap script has already prepared Git and its excludes; we just stage
+ * and commit.
+ */
+export async function commitInitial(dir: string, message: string): Promise<void> {
+  await runGit(dir, ['add', '.']);
+  await runGit(dir, [
+    '-c', 'user.email=launcher@local',
+    '-c', 'user.name=launcher',
+    'commit', '-q', '-m', message,
+  ]);
+}
+
+// Routes through the bundled git (dugite) so the launcher's initial commit
+// needs no system git — same reason the bootstrap scripts use _common.mjs's
+// git(). dugite resolves with an exitCode (it only rejects when git fails to
+// launch), so a non-zero exit is turned into a throw to preserve the old
+// reject-on-failure contract.
+async function runGit(dir: string, args: readonly string[]): Promise<void> {
+  const r = await gitExec([...args], dir);
+  if (r.exitCode !== 0) {
+    throw new Error(`git ${args[0] ?? ''} exited ${r.exitCode}: ${String(r.stderr).slice(0, 500)}`);
+  }
+}
+
+interface RunResult {
+  readonly ok: boolean;
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly exitCode: number | null;
+  readonly errorCode?: string;
+}
+
+const WINDOWS_BASH_HINT =
+  'hint: this template ships a bash bootstrap script. OpenAlice\'s built-in ' +
+  'templates (chat, auto-quant) need no bash — only third-party templates do. ' +
+  'To use this one, install Git for Windows from https://gitforwindows.org/ so ' +
+  'bash is on PATH, or run OpenAlice from inside WSL2.';
+
+/**
+ * Run a bootstrap script.
+ *
+ * On macOS / Linux the script is invoked directly — the kernel reads the
+ * `#!/usr/bin/env bash` shebang and launches bash. On Windows the kernel
+ * doesn't read shebangs and there's no native bash, so we invoke bash
+ * explicitly with the script as its first argument. Git for Windows commonly
+ * puts only `git.exe` on PATH, so resolve its sibling `bin/bash.exe` as well.
+ *
+ * Exported for unit testing — the platform branch needs coverage that
+ * doesn't depend on which OS the tests happen to run on.
+ */
+export function runScript(
+  script: string,
+  args: readonly string[],
+  extraEnv: { [key: string]: string },
+  timeoutMs: number,
+): Promise<RunResult> {
+  const isMjs = script.endsWith('.mjs');
+  const isWindows = process.platform === 'win32';
+
+  // `.mjs` (built-in templates): Node/Electron uses its bundled Node runtime.
+  // A Bun standalone re-enters the same Alice executable through a private
+  // bootstrap role because its process.execPath is the product binary, not a
+  // general-purpose Bun interpreter. No system Node/Bun/bash is required.
+  // ELECTRON_RUN_AS_NODE flips Electron to pure-Node mode and is harmless for
+  // the other runtimes.
+  // `.sh` (third-party fallback): unix reads the `#!/usr/bin/env bash` shebang;
+  // Windows has no native bash, so invoke the Git-for-Windows executable we
+  // resolved above (with a final bare-name fallback for WSL/custom PATHs).
+  const mjsInvocation = isMjs
+    ? resolveMjsBootstrapInvocation(script, args)
+    : null;
+  const cmd = mjsInvocation
+    ? mjsInvocation.command
+    : isWindows
+      ? resolveBashPath(process.env, 'win32') ?? 'bash'
+      : script;
+  const cmdArgs = mjsInvocation?.args ?? (isWindows ? [script, ...args] : args);
+  const env = isMjs
+    ? { ...process.env, ...extraEnv, ELECTRON_RUN_AS_NODE: '1' }
+    : { ...process.env, ...extraEnv };
+
+  return new Promise((resolve) => {
+    const child = spawn(cmd, cmdArgs, {
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+    let timedOut = false;
+
+    child.stdout.on('data', (c: Buffer) => stdoutChunks.push(c));
+    child.stderr.on('data', (c: Buffer) => stderrChunks.push(c));
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGTERM');
+      setTimeout(() => {
+        if (child.exitCode === null) child.kill('SIGKILL');
+      }, 2000);
+    }, timeoutMs);
+    timer.unref();
+
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      const errMsg = (err as Error).message;
+      // ENOENT on Windows when we tried `bash` (a `.sh` third-party template)
+      // means Git Bash / WSL bash isn't on PATH — surface the install hint.
+      // Built-in `.mjs` templates run on the bundled Node and never hit this.
+      const hinted =
+        !isMjs && isWindows && /ENOENT/i.test(errMsg) ? `${errMsg}\n${WINDOWS_BASH_HINT}` : errMsg;
+      resolve({
+        ok: false,
+        stdout: Buffer.concat(stdoutChunks).toString('utf8'),
+        stderr: `${hinted}\n${Buffer.concat(stderrChunks).toString('utf8')}`,
+        exitCode: null,
+        ...((err as NodeJS.ErrnoException).code
+          ? { errorCode: (err as NodeJS.ErrnoException).code }
+          : {}),
+      });
+    });
+
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      const stdout = Buffer.concat(stdoutChunks).toString('utf8');
+      const stderr = Buffer.concat(stderrChunks).toString('utf8');
+      if (timedOut) {
+        resolve({
+          ok: false,
+          stdout,
+          stderr: `[timed out after ${timeoutMs}ms]\n${stderr}`,
+          exitCode: code,
+        });
+        return;
+      }
+      resolve({
+        ok: code === 0,
+        stdout,
+        stderr,
+        exitCode: code,
+      });
+    });
+  });
+}

@@ -1,0 +1,647 @@
+import { useState, useEffect, useId, useMemo } from 'react'
+import { AlertTriangle } from 'lucide-react'
+import { SettingsScrollArea, inputClass } from '../components/form'
+import { EmptyState as SharedEmptyState, RecoverySurface, Skeleton } from '../components/StateViews'
+import { Toggle } from '../components/Toggle'
+import { useTradingConfig } from '../hooks/useTradingConfig'
+import { useAccountHealth } from '../hooks/useAccountHealth'
+import { useBrokerPackReadiness, deriveAccountInteractionPolicy } from '../hooks/useBrokerPackReadiness'
+import { PageHeader } from '../components/PageHeader'
+import { AccountReadinessBadge } from '../components/uta/BrokerPackGate'
+import { CreateUTADialog } from '../components/uta/CreateUTADialog'
+import { EditUTADialog } from '../components/uta/EditUTADialog'
+import { fmt } from '../lib/format'
+import { api } from '../api'
+import type { TradingServiceStatus } from '../api/trading'
+import { useWorkspace } from '../tabs/store'
+import type { UTAConfig, BrokerPreset, BrokerHealthInfo, BrokerPackStatus } from '../api/types'
+import { Button } from '../components/ui/button'
+import type { AccountPackReadiness } from '../hooks/useBrokerPackReadiness'
+
+// ==================== External order monitoring cadence ====================
+//
+// data/config/trading.json observeExternalOrdersEvery — how often UTA lists
+// the broker's open orders to catch ones placed outside Alice. Saving
+// bounces the UTA process (boot-time config), same protocol as broker
+// edits; the health badges show the brief reconnect.
+
+const OBSERVE_CADENCE_OPTIONS = ['off', '1m', '5m', '10m', '15m'] as const
+const KEYLESS_DATA_SOURCE_OPTIONS = [
+  { id: 'binance', label: 'Binance' },
+  { id: 'okx', label: 'OKX' },
+  { id: 'bybit', label: 'Bybit' },
+] as const
+
+type KeylessDataSource = typeof KEYLESS_DATA_SOURCE_OPTIONS[number]['id']
+
+interface TradingRuntimeConfig {
+  observeExternalOrdersEvery: string
+  keylessDataSources: KeylessDataSource[]
+  mode?: 'lite' | 'readonly' | 'pro'
+}
+
+async function loadTradingRuntimeConfig(): Promise<TradingRuntimeConfig> {
+  const cfg = await fetch('/api/config').then((r) => r.json())
+  return {
+    observeExternalOrdersEvery: cfg?.trading?.observeExternalOrdersEvery ?? '15m',
+    mode: cfg?.trading?.mode,
+    keylessDataSources: Array.isArray(cfg?.trading?.keylessDataSources)
+      ? cfg.trading.keylessDataSources.filter((v: unknown): v is KeylessDataSource =>
+        KEYLESS_DATA_SOURCE_OPTIONS.some((o) => o.id === v))
+      : [],
+  }
+}
+
+async function writeTradingRuntimeConfig(next: TradingRuntimeConfig): Promise<void> {
+  const res = await fetch('/api/config/trading', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(next),
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+}
+
+async function saveTradingRuntimeConfigPatch(patch: Partial<TradingRuntimeConfig>): Promise<TradingRuntimeConfig> {
+  const current = await loadTradingRuntimeConfig()
+  const next = { ...current, ...patch }
+  await writeTradingRuntimeConfig(next)
+  return next
+}
+
+export function ExternalOrderMonitoringRow() {
+  const [value, setValue] = useState<string | null>(null)
+  const [runtimeConfig, setRuntimeConfig] = useState<TradingRuntimeConfig | null>(null)
+  const [msg, setMsg] = useState('')
+  const selectId = useId()
+  const descriptionId = `${selectId}-description`
+  const statusId = `${selectId}-status`
+
+  useEffect(() => {
+    let cancelled = false
+    loadTradingRuntimeConfig()
+      .then((cfg) => {
+        if (!cancelled) {
+          setRuntimeConfig(cfg)
+          setValue(cfg.observeExternalOrdersEvery)
+        }
+      })
+      .catch(() => { if (!cancelled) setValue('15m') })
+    return () => { cancelled = true }
+  }, [])
+
+  const save = async (next: string) => {
+    const prev = value
+    const current = runtimeConfig ?? { observeExternalOrdersEvery: prev ?? '15m', keylessDataSources: [] }
+    const updated = { ...current, observeExternalOrdersEvery: next }
+    setValue(next)
+    setRuntimeConfig(updated)
+    setMsg('')
+    try {
+      const saved = await saveTradingRuntimeConfigPatch({ observeExternalOrdersEvery: next })
+      setRuntimeConfig(saved)
+      setMsg('Saved — restarting UTA to apply')
+      setTimeout(() => setMsg(''), 4000)
+    } catch (err) {
+      setValue(prev)
+      setRuntimeConfig(current)
+      setMsg(err instanceof Error ? err.message : 'Save failed')
+    }
+  }
+
+  if (value === null) return null
+
+  return (
+    <div className="flex min-h-12 flex-col items-stretch gap-3 rounded-lg border border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="min-w-0">
+        <label htmlFor={selectId} className="text-[12px] font-medium text-foreground">
+          External order monitoring
+        </label>
+        <div id={descriptionId} className="text-[11px] text-muted-foreground">
+          How often to scan for orders placed outside Alice (exchange app, direct API).
+          Known pending orders are tracked every 10s regardless.
+        </div>
+      </div>
+      <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0 sm:justify-end">
+        <span
+          id={statusId}
+          role="status"
+          aria-atomic="true"
+          className="text-[11px] text-muted-foreground"
+        >
+          {msg}
+        </span>
+        <select
+          id={selectId}
+          aria-describedby={`${descriptionId} ${statusId}`}
+          value={value}
+          onChange={(e) => { void save(e.target.value) }}
+          className={`${inputClass} w-full sm:w-auto`}
+        >
+          {OBSERVE_CADENCE_OPTIONS.map((v) => (
+            <option key={v} value={v}>{v === 'off' ? 'Off' : `Every ${v}`}</option>
+          ))}
+        </select>
+      </div>
+    </div>
+  )
+}
+
+export function KeylessDataSourcesRow({ ccxtPack, onInstall }: {
+  ccxtPack?: BrokerPackStatus
+  onInstall: () => Promise<void>
+}) {
+  const [runtimeConfig, setRuntimeConfig] = useState<TradingRuntimeConfig | null>(null)
+  const [msg, setMsg] = useState('')
+  const [installing, setInstalling] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    loadTradingRuntimeConfig()
+      .then((cfg) => { if (!cancelled) setRuntimeConfig(cfg) })
+      .catch(() => { if (!cancelled) setRuntimeConfig({ observeExternalOrdersEvery: '15m', keylessDataSources: [] }) })
+    return () => { cancelled = true }
+  }, [])
+
+  const toggle = async (source: KeylessDataSource, enabled: boolean) => {
+    if (!runtimeConfig) return
+    if (enabled && !ccxtPack?.installed) {
+      setMsg('Install crypto data support first')
+      return
+    }
+    const prev = runtimeConfig
+    const nextSources = enabled
+      ? [...new Set([...prev.keylessDataSources, source])]
+      : prev.keylessDataSources.filter((s) => s !== source)
+    const next = { ...prev, keylessDataSources: nextSources }
+    setRuntimeConfig(next)
+    setMsg('')
+    try {
+      const saved = await saveTradingRuntimeConfigPatch({ keylessDataSources: nextSources })
+      setRuntimeConfig(saved)
+      setMsg('Saved — restarting UTA to apply')
+      setTimeout(() => setMsg(''), 4000)
+    } catch (err) {
+      setRuntimeConfig(prev)
+      setMsg(err instanceof Error ? err.message : 'Save failed')
+    }
+  }
+
+  const install = async () => {
+    setInstalling(true)
+    setMsg('Installing crypto data support…')
+    try {
+      await onInstall()
+      setMsg('Installed — choose the feeds you want')
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : 'Install failed')
+    } finally {
+      setInstalling(false)
+    }
+  }
+
+  if (!runtimeConfig) return null
+
+  return (
+    <div className="px-4 py-3 border border-border rounded-lg">
+      <div className="flex flex-col items-start gap-3 sm:flex-row sm:justify-between">
+        <div className="min-w-0">
+          <div className="text-[12px] font-medium text-foreground">Public crypto data sources</div>
+          <div className="text-[11px] text-muted-foreground leading-relaxed mt-0.5">
+            Optional keyless K-line feeds. Disabled by default; enabled sources appear as read-only broker-style bar IDs.
+          </div>
+        </div>
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+          {msg && <span className="text-[11px] text-muted-foreground">{msg}</span>}
+          {ccxtPack && !ccxtPack.installed && (
+            <Button type="button" variant="outline" disabled={installing} onClick={() => { void install() }}>
+              {installing ? 'Installing…' : ccxtPack.source === 'broken' ? 'Repair data support' : 'Install data support'}
+            </Button>
+          )}
+        </div>
+      </div>
+      <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(min(100%,10rem),1fr))] gap-2">
+        {KEYLESS_DATA_SOURCE_OPTIONS.map((source) => {
+          const checked = runtimeConfig.keylessDataSources.includes(source.id)
+          return (
+            <div key={source.id} className="flex min-h-12 items-center justify-between gap-2 rounded-md border border-border bg-secondary/40 px-3 py-2">
+              <span className="text-[12px] text-foreground">{source.label}</span>
+              <Toggle
+                size="sm"
+                checked={checked}
+                disabled={!checked && ccxtPack?.installed !== true}
+                ariaLabel={`${source.label} public data source`}
+                onChange={(v) => { void toggle(source.id, v) }}
+              />
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// ==================== Live equity (across all UTAs) ====================
+//
+// TradingPage is the CRUD surface for broker connections. The single
+// per-card equity number is here as a liveness signal — "this connection
+// returned real account data" — not as a portfolio view. Aggregate
+// equity, sparklines, 24h deltas, and trade logs live in Portfolio.
+
+interface EquitySummary {
+  totalEquity: string
+  totalCash: string
+  totalUnrealizedPnL: string
+  totalRealizedPnL: string
+  accounts: Array<{ id: string; label: string; equity: string; cash: string }>
+}
+
+export function MissingBrokerPacksNotice({ packs, onInstall }: {
+  packs: BrokerPackStatus[]
+  onInstall: (engine: Exclude<BrokerPackStatus['engine'], 'mock'>) => Promise<void>
+}) {
+  const actionable = packs.filter(
+    (pack) => (!pack.installed || pack.updateAvailable) && pack.requiredBy.length > 0,
+  )
+  const [installing, setInstalling] = useState<string | null>(null)
+  const [error, setError] = useState('')
+
+  if (actionable.length === 0) return null
+
+  const install = async (pack: BrokerPackStatus) => {
+    if (pack.engine === 'mock') return
+    setInstalling(pack.engine)
+    setError('')
+    try {
+      await onInstall(pack.engine)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `Failed to install ${pack.engine} support`)
+    } finally {
+      setInstalling(null)
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-warning/30 bg-warning/5 px-4 py-3">
+      <div className="flex items-start gap-2.5">
+        <AlertTriangle size={15} className="mt-0.5 shrink-0 text-warning" />
+        <div className="min-w-0 flex-1">
+          <div className="text-[12px] font-medium text-foreground">Broker support needs attention</div>
+          <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
+            Update or repair only the integrations already used by these accounts or K-line sources.
+          </p>
+          <div className="mt-3 divide-y divide-border/60 border-y border-border/60">
+            {actionable.map((pack) => (
+              <div key={pack.engine} className="flex items-center justify-between gap-3 py-2.5">
+                <div className="min-w-0">
+                  <div className="text-[12px] font-medium text-foreground">{pack.engine}</div>
+                  <div className="truncate text-[11px] text-muted-foreground">Required by {pack.requiredBy.join(', ')}</div>
+                  {pack.updateAvailable && pack.version && (
+                    <div className="mt-0.5 text-[11px] text-warning">
+                      Installed support is from OpenAlice {pack.version}
+                    </div>
+                  )}
+                  {pack.reason && <div className="mt-0.5 text-[11px] text-warning">{pack.reason}</div>}
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="shrink-0"
+                  disabled={installing !== null}
+                  onClick={() => { void install(pack) }}
+                >
+                  {installing === pack.engine
+                    ? 'Installing…'
+                    : pack.source === 'broken'
+                      ? 'Repair'
+                      : pack.updateAvailable
+                        ? 'Update'
+                        : 'Install'}
+                </Button>
+              </div>
+            ))}
+          </div>
+          {error && <p className="mt-2 text-[11px] text-destructive">{error}</p>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ==================== Page ====================
+
+export function TradingPage() {
+  const tc = useTradingConfig()
+  const healthMap = useAccountHealth()
+  const brokerReadiness = useBrokerPackReadiness()
+  const openOrFocus = useWorkspace((s) => s.openOrFocus)
+  const setSidebar = useWorkspace((s) => s.setSidebar)
+  const [showAdd, setShowAdd] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [presets, setPresets] = useState<BrokerPreset[]>([])
+  const [equity, setEquity] = useState<EquitySummary | null>(null)
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
+  const [serviceStatus, setServiceStatus] = useState<TradingServiceStatus | null>(null)
+  const brokerPacks = brokerReadiness.data?.packs ?? []
+
+  useEffect(() => {
+    api.trading.getBrokerPresets().then(r => setPresets(r.presets)).catch(() => {})
+  }, [])
+
+  const hasReadableAccount = tc.utas.some((uta) => brokerReadiness.forAccount(uta).operational && uta.enabled !== false)
+
+  useEffect(() => {
+    if (!hasReadableAccount) {
+      setServiceStatus(null)
+      return
+    }
+    let cancelled = false
+    const refresh = async () => {
+      try {
+        const status = await api.trading.status()
+        if (!cancelled) setServiceStatus(status)
+      } catch {
+        if (!cancelled) setServiceStatus({
+          available: false,
+          state: 'unavailable',
+          mode: 'lite',
+          modeSource: 'auto',
+          envLocked: false,
+          hasUTAConfig: false,
+          reason: 'status_unreachable',
+          hint: 'Trading service status is not reachable. Alice is running in lite mode.',
+        })
+      }
+    }
+    void refresh()
+    const id = setInterval(refresh, 15_000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [hasReadableAccount])
+
+  // Per-card liveness signal — `equity()` lets each card show "this
+  // connection actually returned an account balance" rather than just
+  // "ping went through". 60s cadence is enough; trend/sparkline/aggregate
+  // moved to Portfolio.
+  useEffect(() => {
+    if (!hasReadableAccount) {
+      setEquity(null)
+      setLastUpdated(null)
+      return
+    }
+    let cancelled = false
+    const refresh = async () => {
+      const eq = await api.trading.equity().catch(() => null)
+      if (cancelled) return
+      if (eq && eq.accounts.length > 0) {
+        setEquity(eq)
+        setLastUpdated(new Date())
+      }
+    }
+    void refresh()
+    const id = setInterval(refresh, 60_000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [hasReadableAccount])
+
+  const editingUTA = editingId ? tc.utas.find(u => u.id === editingId) : null
+  const editingPreset = editingUTA ? presets.find(p => p.id === editingUTA.presetId) : undefined
+
+  const openInPortfolio = (id: string) => {
+    setEditingId(null)
+    setSidebar('portfolio')
+    openOrFocus({ kind: 'uta-detail', params: { id } })
+  }
+
+  if (tc.loading) return (
+    <PageShell>
+      <div className="max-w-[820px] mx-auto space-y-2.5" aria-hidden="true">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} className="flex items-center gap-3 px-4 py-3.5 rounded-lg border border-border bg-secondary">
+            <Skeleton className="h-9 w-9 rounded-lg" />
+            <div className="flex-1 space-y-2">
+              <Skeleton className="h-3.5 w-32" />
+              <Skeleton className="h-2.5 w-20" />
+            </div>
+            <Skeleton className="h-4 w-24" />
+          </div>
+        ))}
+      </div>
+    </PageShell>
+  )
+  if (tc.error) {
+    return (
+      <PageShell scroll={false}>
+        <RecoverySurface
+          title="Failed to load trading configuration"
+          description={tc.error}
+          actionLabel="Retry"
+          onAction={tc.refresh}
+        />
+      </PageShell>
+    )
+  }
+
+  return (
+    <div className="flex flex-col flex-1 min-h-0">
+      <PageHeader
+        title="Trading"
+        live={lastUpdated && equity?.accounts.some((row) => brokerReadiness.data?.accounts.some(
+          (account) => account.accountId === row.id && account.operational,
+        )) ? { lastUpdated } : undefined}
+      />
+
+      <SettingsScrollArea className="px-4 py-5 md:px-6">
+        <div className="max-w-[820px] mx-auto space-y-4">
+          {serviceStatus?.available === false && <TradingServiceOfflineBanner status={serviceStatus} />}
+          <MissingBrokerPacksNotice packs={brokerPacks} onInstall={brokerReadiness.install} />
+          {tc.utas.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-border pb-8 text-center">
+              <SharedEmptyState
+                title="No UTAs configured"
+                description="Connect a crypto exchange or brokerage to start automated trading."
+              />
+              <Button type="button" onClick={() => setShowAdd(true)}>+ Add UTA</Button>
+            </div>
+          ) : (
+            <div className="space-y-2.5">
+              {tc.utas.map((uta) => {
+                const equityRow = equity?.accounts.find(a => a.id === uta.id) ?? null
+                const readiness = brokerReadiness.forAccount(uta)
+                return (
+                  <UTACard
+                    key={uta.id}
+                    uta={uta}
+                    preset={presets.find(p => p.id === uta.presetId)}
+                    health={healthMap[uta.id]}
+                    readiness={readiness}
+                    equity={equityRow}
+                    onClick={() => setEditingId(uta.id)}
+                  />
+                )
+              })}
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setShowAdd(true)}
+                className="h-auto min-h-12 w-full border-dashed text-muted-foreground"
+              >
+                + Add UTA
+              </Button>
+            </div>
+          )}
+
+          <KeylessDataSourcesRow
+            ccxtPack={brokerPacks.find((row) => row.engine === 'ccxt')}
+            onInstall={() => brokerReadiness.install('ccxt')}
+          />
+          {tc.utas.length > 0 && <ExternalOrderMonitoringRow />}
+        </div>
+      </SettingsScrollArea>
+
+      {showAdd && (
+        <CreateUTADialog
+          presets={presets}
+          onSave={async (uta) => {
+            const created = await tc.createUTA(uta)
+            // Persisted — close NOW. The first broker connection runs in the
+            // background and the list's health badge tracks it (Reconnecting
+            // → Connected/Offline); credential validity has its own explicit
+            // Test step in the wizard. Holding the dialog open on a failed
+            // first connect lies about an already-created UTA — re-clicking
+            // Save can only 409.
+            setShowAdd(false)
+            void tc.reconnectUTA(created.id).catch(() => {})
+            // Trigger a fresh fetch so the new UTA shows live numbers right away.
+            void api.trading.equity().then(setEquity).catch(() => {})
+            return created
+          }}
+          onOpenExisting={(id) => {
+            setShowAdd(false)
+            setEditingId(id)
+          }}
+          onClose={() => setShowAdd(false)}
+          onPackInstalled={() => { void brokerReadiness.refresh() }}
+        />
+      )}
+
+      {editingUTA && (
+        <EditUTADialog
+          uta={editingUTA}
+          preset={editingPreset}
+          health={healthMap[editingUTA.id]}
+          readiness={brokerReadiness.forAccount(editingUTA)}
+          policy={deriveAccountInteractionPolicy({
+            account: editingUTA,
+            readiness: brokerReadiness.forAccount(editingUTA),
+            health: healthMap[editingUTA.id],
+            tradingMode: serviceStatus?.mode ?? 'lite',
+          })}
+          installingEngine={brokerReadiness.installingEngine}
+          onInstallBrokerPack={brokerReadiness.install}
+          onRetryBrokerPack={brokerReadiness.refresh}
+          onSave={async (next) => { await tc.saveUTA(next) }}
+          onDelete={async () => {
+            await tc.deleteUTA(editingUTA.id)
+            setEditingId(null)
+          }}
+          onViewInPortfolio={() => openInPortfolio(editingUTA.id)}
+          onClose={() => setEditingId(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+// ==================== Page Shell ====================
+
+function PageShell({ children, scroll = true }: { children?: React.ReactNode; scroll?: boolean }) {
+  return (
+    <div className="flex flex-col flex-1 min-h-0">
+      <PageHeader title="Trading" />
+      <SettingsScrollArea scroll={scroll} className={scroll ? 'px-4 py-5 md:px-6' : ''}>{children}</SettingsScrollArea>
+    </div>
+  )
+}
+
+function TradingServiceOfflineBanner({ status }: { status: TradingServiceStatus }) {
+  return (
+    <div className="flex gap-3 rounded-lg border border-warning/30 bg-warning/5 px-4 py-3" role="status">
+      <AlertTriangle size={16} className="mt-0.5 shrink-0 text-warning" aria-hidden />
+      <div className="min-w-0">
+        <div className="text-[12px] font-medium text-foreground">Trading service offline</div>
+        <div className="mt-0.5 text-[11px] text-muted-foreground leading-relaxed">
+          {status.hint ?? 'Alice is running in lite mode.'}
+          {status.reason ? <span className="ml-1 font-mono text-muted-foreground/70">{status.reason}</span> : null}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ==================== Subtitle builder ====================
+
+function buildSubtitle(uta: UTAConfig, preset?: BrokerPreset): string {
+  if (!preset) return uta.presetId
+  const pc = uta.presetConfig
+  const parts: string[] = []
+  for (const sf of preset.subtitleFields) {
+    const val = pc[sf.field]
+    if (typeof val === 'boolean') {
+      if (val && sf.label) parts.push(sf.label)
+      else if (!val && sf.falseLabel) parts.push(sf.falseLabel)
+    } else if (val != null && val !== '') {
+      let display = String(val)
+      if (sf.field === 'mode' && preset.modes) {
+        const mode = preset.modes.find(m => m.id === val)
+        if (mode) display = mode.label
+      }
+      parts.push(`${sf.prefix ?? ''}${display}`)
+    }
+  }
+  return parts.join(', ') || preset.label
+}
+
+// ==================== UTA Card ====================
+
+function UTACard({ uta, preset, health, readiness, equity, onClick }: {
+  uta: UTAConfig
+  preset?: BrokerPreset
+  health?: BrokerHealthInfo
+  readiness: AccountPackReadiness
+  equity?: { equity: string; cash: string } | null
+  onClick: () => void
+}) {
+  const isDisabled = health?.disabled || uta.enabled === false
+
+  // Per-card equity is a liveness signal, not a portfolio view —
+  // proves the connection returned a real account balance, not just
+  // a ping. Aggregate / curves / per-account drill-in all live in
+  // Portfolio.
+  const equityNum = equity ? Number(equity.equity) : null
+  const equityNode = !isDisabled && equityNum != null && Number.isFinite(equityNum)
+    ? <span className="tabular-nums">{fmt(equityNum, 'USD')}</span>
+    : null
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`oa-pressable w-full rounded-lg border border-border bg-card px-4 py-3 text-left transition-[border-color,background-color,opacity] duration-[var(--motion-fast)] hover:border-muted-foreground/40 hover:bg-muted/20 ${isDisabled ? 'opacity-50' : ''}`}
+    >
+      <div className="flex items-center gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="text-[13px] font-medium text-foreground truncate">{uta.label || uta.id}</div>
+          <div className="mt-0.5 flex min-w-0 flex-wrap gap-x-2 text-[11px] text-muted-foreground">
+            <span className="truncate font-mono">{uta.id}</span>
+            <span className="truncate font-mono">{buildSubtitle(uta, preset)}</span>
+            {uta.guards.length > 0 && <span className="text-muted-foreground/70">{uta.guards.length} guard{uta.guards.length > 1 ? 's' : ''}</span>}
+          </div>
+        </div>
+        <div className="shrink-0 flex items-center gap-3">
+          {equityNode && (
+            <span className="text-[11px] text-muted-foreground/80 hidden sm:inline">{equityNode}</span>
+          )}
+          <AccountReadinessBadge readiness={readiness} health={health} />
+        </div>
+      </div>
+    </button>
+  )
+}

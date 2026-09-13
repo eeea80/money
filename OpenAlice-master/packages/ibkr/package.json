@@ -1,0 +1,45 @@
+{
+  "name": "@traderalice/ibkr",
+  "version": "0.1.0",
+  "description": "TypeScript port of IBKR TWS API v10.44.01",
+  "type": "module",
+  "exports": {
+    ".": {
+      "openalice-source": "./src/index.ts",
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TraderAlice/OpenAlice.git",
+    "directory": "packages/ibkr"
+  },
+  "scripts": {
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc",
+    "test": "vitest run --config vitest.config.ts",
+    "test:external:readonly": "node ../../scripts/run-tests.mjs --lane external-readonly --package @traderalice/ibkr",
+    "test:live-paper": "node ../../scripts/run-tests.mjs --lane live-paper --package @traderalice/ibkr",
+    "typecheck": "tsc --noEmit",
+    "generate:proto": "bash generate-proto.sh"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "^2.11.0",
+    "decimal.js": "^10.6.0",
+    "protobufjs": "^7.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "ts-proto": "^2.11.5",
+    "tsup": "^8.4.0",
+    "typescript": "^5.7.3",
+    "vitest": "^3.2.6"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "license": "AGPL-3.0"
+}

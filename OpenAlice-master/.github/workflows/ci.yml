@@ -1,0 +1,172 @@
+name: Full Source Validation
+
+on:
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: full-source-validation-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # This is the bounded automatic gate for master PRs and the entry gate for an
+  # explicitly requested full validation. The classifier is
+  # loaded from the trusted base revision so a candidate cannot weaken its own
+  # lane. A classifier failure retains the normal Windows PR smoke instead of
+  # granting the exact-beta fast path; a source-gate failure stops dependents.
+  source-contracts:
+    runs-on: ubuntu-latest
+    outputs:
+      beta_release_prep: ${{ steps.beta-release-prep.outcome == 'success' && steps.beta-release-prep.outputs.beta_release_prep || 'false' }}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Detect exact beta release preparation
+        id: beta-release-prep
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git show "${BASE_SHA}:scripts/classify-beta-release-prep.mjs" > "$RUNNER_TEMP/classify-beta-release-prep.mjs"
+          node "$RUNNER_TEMP/classify-beta-release-prep.mjs" --github-output "$GITHUB_OUTPUT"
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Verify CI workflow contracts
+        run: pnpm test:contract:workflow
+
+      - name: Typecheck root workspace
+        run: npx tsc --noEmit
+        timeout-minutes: 5
+
+  workspace-build:
+    needs: source-contracts
+    if: >-
+      !cancelled() &&
+      github.event_name == 'workflow_dispatch' &&
+      needs.source-contracts.result == 'success'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build complete workspace
+        run: pnpm build
+
+  hermetic-tests:
+    needs: source-contracts
+    if: >-
+      !cancelled() &&
+      github.event_name == 'workflow_dispatch' &&
+      needs.source-contracts.result == 'success'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Run hermetic monorepo suite
+        run: pnpm test
+
+  cross-platform-test:
+    needs: source-contracts
+    if: >-
+      !cancelled() &&
+      github.event_name == 'workflow_dispatch' &&
+      needs.source-contracts.result == 'success'
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # Ubuntu owns the hermetic full suite. macOS keeps one native-host
+        # repetition; Windows is covered by the real dev-stack smoke below
+        # and the separate desktop/package acceptance workflow.
+        os: [macos-14]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build complete workspace
+        run: pnpm build
+        timeout-minutes: 15
+
+      - name: Run complete suite
+        run: pnpm test
+        timeout-minutes: 15
+
+  # Windows remains the one automatic native-host smoke because it is not
+  # covered by the maintainer's local macOS/Linux development loop.
+  dev-smoke:
+    needs: source-contracts
+    if: >-
+      !cancelled() &&
+      needs.source-contracts.result == 'success' &&
+      (
+        github.event_name == 'workflow_dispatch' ||
+        needs.source-contracts.outputs.beta_release_prep != 'true'
+      )
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # The native smoke needs UTA, Alice, and UI, not the Electron download.
+      - run: pnpm install --frozen-lockfile --filter='!@traderalice/desktop'
+
+      - name: Exercise Guardian recovery with real child processes
+        run: pnpm test:system:guardian
+        timeout-minutes: 3
+
+      - name: Boot the complete development stack
+        run: pnpm test:system:dev-stack
+        timeout-minutes: 8

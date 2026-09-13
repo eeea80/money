@@ -1,0 +1,323 @@
+/**
+ * News Collector — Persistent JSONL store with in-memory index
+ *
+ * Follows the EventLog pattern (src/core/event-log.ts):
+ * - Append-only JSONL on disk
+ * - In-memory buffer for fast queries
+ * - Recover from file on startup
+ * - Dedup set survives restarts
+ *
+ * Implements INewsProvider so globRss/grepRss/readRss tools work.
+ */
+
+import { createReadStream } from 'node:fs'
+import { createInterface } from 'node:readline'
+import { appendFile, readFile, mkdir } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { dirname } from 'node:path'
+import { dataPath } from '../../core/paths.js'
+import type { INewsProvider, GetNewsV2Options, NewsItem, NewsRecord } from './types.js'
+
+const DEFAULT_LOG_PATH = dataPath('news-collector', 'news.jsonl')
+const DEFAULT_MAX_IN_MEMORY = 2000
+const DEFAULT_RETENTION_DAYS = 7
+
+/**
+ * Parse a semantic time string into milliseconds.
+ * Supported formats: 1h, 2h, 12h, 24h, 1d, 2d, 7d, 30d
+ */
+export function parseLookback(lookback: string): number | null {
+  const match = lookback.match(/^(\d+)(h|d)$/i)
+  if (!match) return null
+  const value = parseInt(match[1], 10)
+  const unit = match[2].toLowerCase()
+  if (unit === 'h') return value * 60 * 60 * 1000
+  if (unit === 'd') return value * 24 * 60 * 60 * 1000
+  return null
+}
+
+export interface NewsCollectorStoreOpts {
+  logPath?: string
+  maxInMemory?: number
+  retentionDays?: number
+}
+
+export class NewsCollectorStore implements INewsProvider {
+  private logPath: string
+  private maxInMemory: number
+  private retentionDays: number
+
+  /** In-memory buffer, sorted by pubTs ascending */
+  private buffer: NewsRecord[] = []
+  /** All known dedup keys (survives beyond retention window) */
+  private dedupSet: Set<string> = new Set()
+  /** Monotonic sequence counter */
+  private seq: number = 0
+  /**
+   * Promise-chain mutex: serialize ingest() so the dedup-check / appendFile /
+   * dedup-add sequence is atomic across concurrent callers. Without this, two
+   * ingests of the same key both pass has(), both appendFile, and the JSONL
+   * gets duplicate lines (recovery dedups them, but the file is dirty).
+   */
+  private writeChain: Promise<unknown> = Promise.resolve()
+
+  constructor(opts?: NewsCollectorStoreOpts) {
+    this.logPath = opts?.logPath ?? DEFAULT_LOG_PATH
+    this.maxInMemory = opts?.maxInMemory ?? DEFAULT_MAX_IN_MEMORY
+    this.retentionDays = opts?.retentionDays ?? DEFAULT_RETENTION_DAYS
+  }
+
+  /**
+   * Initialize: read JSONL from disk, rebuild dedup set and buffer.
+   * Must be called before any other method.
+   */
+  async init(): Promise<void> {
+    await mkdir(dirname(this.logPath), { recursive: true })
+
+    let raw: string
+    try {
+      raw = await readFile(this.logPath, 'utf-8')
+    } catch (err: unknown) {
+      if (isENOENT(err)) return // No file yet — fresh start
+      throw err
+    }
+
+    if (!raw.trim()) return
+
+    const retentionCutoff = Date.now() - this.retentionDays * 24 * 60 * 60 * 1000
+    const lines = raw.split('\n')
+
+    for (const line of lines) {
+      if (!line.trim()) continue
+      try {
+        const record: NewsRecord = JSON.parse(line)
+
+        // Always track dedup key (full history)
+        this.dedupSet.add(record.dedupKey)
+
+        // Track highest seq
+        if (record.seq > this.seq) this.seq = record.seq
+
+        // Only load recent items into buffer
+        if (record.pubTs >= retentionCutoff) {
+          this.buffer.push(record)
+        }
+      } catch {
+        // Skip malformed lines
+      }
+    }
+
+    // Sort buffer by pubTs ascending
+    this.buffer.sort((a, b) => a.pubTs - b.pubTs)
+
+    // Trim buffer if over limit
+    if (this.buffer.length > this.maxInMemory) {
+      this.buffer = this.buffer.slice(-this.maxInMemory)
+    }
+
+    console.log(
+      `news-collector-store: recovered ${this.dedupSet.size} dedup keys, ${this.buffer.length} items in memory`,
+    )
+  }
+
+  /**
+   * Ingest a single news item. Returns true if new (not a duplicate).
+   *
+   * Serialized via writeChain so that concurrent callers cannot both pass the
+   * dedup check before either writes to disk.
+   */
+  async ingest(item: {
+    title: string
+    content: string
+    pubTime: Date
+    dedupKey: string
+    metadata: Record<string, string | null>
+  }): Promise<boolean> {
+    return (await this.ingestRecord(item)) !== null
+  }
+
+  /**
+   * Ingest and return the durable record. Optional product integrations use
+   * the returned identity to publish an activity fact without coupling this
+   * store to Office, Sonner, or a particular Alice product.
+   */
+  async ingestRecord(item: {
+    title: string
+    content: string
+    pubTime: Date
+    dedupKey: string
+    metadata: Record<string, string | null>
+  }): Promise<NewsRecord | null> {
+    const next = this.writeChain.then(() => this._ingestImpl(item))
+    this.writeChain = next.catch(() => {})
+    return next
+  }
+
+  private async _ingestImpl(item: {
+    title: string
+    content: string
+    pubTime: Date
+    dedupKey: string
+    metadata: Record<string, string | null>
+  }): Promise<NewsRecord | null> {
+    if (this.dedupSet.has(item.dedupKey)) return null
+
+    this.seq += 1
+    const record: NewsRecord = {
+      seq: this.seq,
+      ts: Date.now(),
+      pubTs: item.pubTime.getTime(),
+      dedupKey: item.dedupKey,
+      title: item.title,
+      content: item.content,
+      metadata: item.metadata,
+    }
+
+    // Disk first
+    const jsonLine = JSON.stringify(record) + '\n'
+    await appendFile(this.logPath, jsonLine, 'utf-8')
+
+    // Memory
+    this.dedupSet.add(item.dedupKey)
+    this.buffer.push(record)
+
+    // Evict oldest if over limit
+    if (this.buffer.length > this.maxInMemory) {
+      this.buffer = this.buffer.slice(-this.maxInMemory)
+    }
+
+    return record
+  }
+
+  /**
+   * Batch ingest. Returns count of new (non-duplicate) items.
+   */
+  async ingestBatch(
+    items: Array<{
+      title: string
+      content: string
+      pubTime: Date
+      dedupKey: string
+      metadata: Record<string, string | null>
+    }>,
+  ): Promise<number> {
+    let count = 0
+    for (const item of items) {
+      const isNew = await this.ingest(item)
+      if (isNew) count++
+    }
+    return count
+  }
+
+  /** Check if a dedup key already exists */
+  has(dedupKey: string): boolean {
+    return this.dedupSet.has(dedupKey)
+  }
+
+  /** Number of items in memory */
+  get count(): number {
+    return this.buffer.length
+  }
+
+  /** Number of dedup keys tracked (includes items beyond retention) */
+  get dedupCount(): number {
+    return this.dedupSet.size
+  }
+
+  // ==================== INewsProvider ====================
+
+  async getNewsV2(options: GetNewsV2Options): Promise<NewsItem[]> {
+    const { endTime, startTime, lookback, limit } = options
+    const endMs = endTime.getTime()
+
+    // Determine head truncation
+    let startMs: number | null = null
+    if (startTime) {
+      startMs = startTime.getTime()
+    } else if (lookback) {
+      const ms = parseLookback(lookback)
+      if (ms !== null) {
+        startMs = endMs - ms
+      }
+    }
+
+    let filtered = this.buffer.filter((r) => {
+      if (r.pubTs > endMs) return false
+      if (startMs !== null && r.pubTs <= startMs) return false
+      return true
+    })
+
+    filtered.sort((a, b) => a.pubTs - b.pubTs)
+
+    if (limit && filtered.length > limit) {
+      filtered = filtered.slice(-limit)
+    }
+
+    return filtered.map(recordToNewsItem)
+  }
+
+  /** Stable IDs address the durable archive, not just the recent memory index. */
+  async getNewsById(id: number): Promise<NewsItem | null> {
+    const cached = this.buffer.find((record) => record.seq === id)
+    if (cached) return recordToNewsItem(cached)
+    const input = createReadStream(this.logPath, { encoding: 'utf8' })
+    const lines = createInterface({ input, crlfDelay: Infinity })
+    try {
+      for await (const line of lines) {
+        let record: NewsRecord
+        try { record = JSON.parse(line) } catch { continue }
+        if (record?.seq === id) return recordToNewsItem(record)
+      }
+      return null
+    } catch (error) {
+      if (isENOENT(error)) return null
+      throw error
+    } finally {
+      lines.close()
+      input.destroy()
+    }
+  }
+
+  // ==================== Lifecycle ====================
+
+  async close(): Promise<void> {
+    this.buffer = []
+    this.dedupSet.clear()
+  }
+}
+
+// ==================== Helpers ====================
+
+function recordToNewsItem(record: NewsRecord): NewsItem {
+  return {
+    id: record.seq,
+    time: new Date(record.pubTs),
+    title: record.title,
+    content: record.content,
+    metadata: record.metadata,
+  }
+}
+
+function isENOENT(err: unknown): boolean {
+  return err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT'
+}
+
+/**
+ * Compute a dedup key for a news item.
+ *
+ * Priority: guid > link > content hash
+ */
+export function computeDedupKey(item: {
+  guid?: string
+  link?: string
+  title: string
+  content: string
+}): string {
+  if (item.guid) return `guid:${item.guid}`
+  if (item.link) return `link:${item.link}`
+  const hash = createHash('sha256')
+    .update(item.title + item.content)
+    .digest('hex')
+    .slice(0, 16)
+  return `hash:${hash}`
+}

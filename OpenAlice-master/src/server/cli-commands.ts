@@ -1,0 +1,336 @@
+/** Public CLI exports. alice combines research and Workspace collaboration;
+ * dispatch retains each tool's global or Workspace registry ownership.
+ * The workspace export remains a compatibility endpoint for old shims.
+ */
+
+export interface CliExport {
+  /** PATH binary name. The shim is one file; siblings are byte-identical copies. */
+  readonly binary: string
+  /** Which registry backs this export — global catalog vs per-workspace scoped. */
+  readonly scope: 'global' | 'scoped' | 'mixed'
+  readonly description: string
+  /** Short intent-first help for each command group. The live manifest exposes
+   * this separately from verb descriptions so old Workspace skills can recover
+   * from the CLI itself without guessing which namespace owns an action. */
+  readonly groupDescriptions: Record<string, string>
+  /** group -> verb -> internal tool name. */
+  readonly commands: Record<string, Record<string, string>>
+}
+
+const BASE_EXPORTS: Record<string, CliExport> = {
+  data: {
+    binary: 'alice',
+    scope: 'global',
+    description: 'Market & research data sources',
+    groupDescriptions: {
+      rss: 'Search and read the user\'s collected subscribed-feed archive',
+      market: 'Discover symbols, bar sources, and optional market-data vendors',
+      analysis: 'Read dated K-lines and calculate indicators',
+    },
+    commands: {
+      // `rss`, not `news`: the backing store is the RSS collector's archive —
+      // only what the user's subscribed feeds pulled. Naming it "news" baited
+      // agents into treating it as general news search; the group name should
+      // say what the data actually is.
+      rss: {
+        glob: 'globRss',
+        grep: 'grepRss',
+        // window: date-bounded, oldest-first — for aligning catalysts to a price path.
+        window: 'windowRss',
+        read: 'readRss',
+      },
+      market: {
+        search: 'marketSearchForResearch',
+        'search-bars': 'searchBars',
+        bars: 'getMarketBars',
+        // Discover data sources + drive them: `vendors` lists what's available,
+        // each with on/off state and a usage note (symbol convention, search
+        // language); `vendor-set` flips one on/off, live on the next search.
+        vendors: 'listMarketVendors',
+        'vendor-set': 'setMarketVendor',
+      },
+      analysis: {
+        // Shipped alias; new raw-data workflows use market search-bars.
+        'search-bars': 'searchBars',
+        quant: 'calculateQuant',
+        // Dated as-of read with a freshness contract for retrospective analysis.
+        snapshot: 'marketSnapshot',
+      },
+    },
+  },
+  traderhub: {
+    binary: 'traderhub',
+    scope: 'global',
+    description: 'Low-frequency market data — boards, fundamentals, macro, calendars (TraderHub-first)',
+    groupDescriptions: {
+      board: 'Read finished market boards and sector rotation',
+      equity: 'Read company profiles, fundamentals, estimates, and calendars',
+      etf: 'Search ETFs and inspect holdings or sector exposure',
+      economy: 'Read US and euro-area macro series',
+      global: 'Compare cross-country economic indicators',
+      shipping: 'Inspect ports and maritime chokepoints',
+      fed: 'Read FOMC documents, the Fed balance sheet, and dealer positioning',
+      crypto: 'Inspect crypto derivatives markets',
+      index: 'Discover index identifiers',
+    },
+    commands: {
+      board: {
+        get: 'marketGetBoard',
+        rotation: 'sectorRotation',
+      },
+      equity: {
+        profile: 'equityGetProfile',
+        financials: 'equityGetFinancials',
+        ratios: 'equityGetRatios',
+        earnings: 'equityGetEarningsCalendar',
+        insiders: 'equityGetInsiderTrading',
+        'short-interest': 'equityGetShortInterest',
+        estimates: 'equityGetEstimates',
+        discover: 'equityDiscover',
+      },
+      etf: {
+        search: 'etfSearch',
+        info: 'etfGetInfo',
+        holdings: 'etfGetHoldings',
+        sectors: 'etfGetSectors',
+      },
+      economy: {
+        'fred-search': 'economyFredSearch',
+        'fred-series': 'economyFredSeries',
+        'fred-regional': 'economyFredRegional',
+        'bls-search': 'economyBlsSearch',
+        'bls-series': 'economyBlsSeries',
+        energy: 'economyEnergyOutlook',
+        petroleum: 'economyPetroleumStatus',
+        'euro-bop': 'economyEuroAreaBop',
+      },
+      global: {
+        cpi: 'economyCountryCpi',
+        rates: 'economyCountryRates',
+        leading: 'economyLeadingIndicator',
+        retail: 'economyCountryRetail',
+        house: 'economyCountryHousePrices',
+        share: 'economyCountrySharePrices',
+      },
+      shipping: {
+        'port-search': 'economyPortSearch',
+        'port-volume': 'economyPortVolume',
+        chokepoint: 'economyChokepointVolume',
+      },
+      fed: {
+        documents: 'economyFomcDocuments',
+        'balance-sheet': 'economyFedBalanceSheet',
+        dealers: 'economyDealerPositioning',
+      },
+      crypto: {
+        options: 'cryptoOptionsChains',
+        futures: 'cryptoFuturesInstruments',
+      },
+      index: {
+        search: 'indexSearch',
+      },
+    },
+  },
+  workspace: {
+    binary: 'alice-workspace',
+    scope: 'scoped',
+    description: 'Workspace collaboration — address peers, talk to Agents, deliver reports, coordinate Issues, and inspect provenance',
+    groupDescriptions: {
+      peer: 'Discover active desks, their Sessions, and absolute filesystem locations',
+      conversation: 'Send ordinary Agent-to-Agent requests and retrieve their replies',
+      inbox: 'Send outward-facing notifications and reports to the human Inbox; inspect and follow up on deliveries',
+      issue: 'Read the shared work board and manage this Workspace\'s durable work',
+      provenance: 'Trace business artifacts to attributable product Sessions',
+      signature: 'Show this Session\'s safe product identity',
+      session: 'Rename or inspect this Workspace\'s product Sessions',
+      track: 'Maintain the shared index of durable assets and topics',
+      harness: 'Review and update Project-provided Skill files while respecting Workspace preferences',
+      template: 'Preview or apply managed Workspace-template updates',
+    },
+    commands: {
+      // Peer commands only provide collaboration addresses. Coding Agents use
+      // their own native file/search/Git tools once `path` resolves a desk.
+      peer: {
+        list: 'workspace_list',
+        path: 'workspace_path',
+        sessions: 'workspace_sessions',
+      },
+      conversation: {
+        create: 'conversation_create',
+        ask: 'conversation_ask',
+        await: 'conversation_await',
+        collect: 'conversation_collect',
+        read: 'conversation_read',
+      },
+      // inbox push: one Markdown body with inline Workspace file references.
+      // --body-file publishes Markdown read from a local file.
+      // inbox read: look back at the inbox stream — `--self` narrows to this
+      // workspace's own pushes (whose doc paths are cwd-relative, so readable
+      // with the shell); `--limit N` caps the newest-first window.
+      inbox: {
+        push: 'inbox_push',
+        read: 'inbox_read',
+        ask: 'inbox_ask',
+      },
+      // issue: the issue board. READS are GLOBAL — `list` scans every
+      // workspace's titles, `show <name>` resolves a name across the board and
+      // returns full detail (issue + runs + inbox reports). WRITES stay local —
+      // create/update/comment author in the CALLER's own `.alice/issues/`
+      // (editing a peer's board is the human-approved peer-edit path).
+      issue: {
+        update: 'issue_update',
+        comment: 'issue_comment',
+        create: 'issue_create',
+        list: 'issue_list',
+        show: 'issue_show',
+        ask: 'issue_ask',
+        run: 'issue_run',
+        retry: 'issue_retry',
+      },
+      provenance: {
+        show: 'provenance_show',
+      },
+      signature: {
+        show: 'session_signature',
+      },
+      session: {
+        rename: 'session_rename',
+      },
+      // track: the durable cross-workspace tracked-entity index ([[name]]).
+      track: {
+        add: 'entity_upsert',
+        search: 'entity_search',
+      },
+      // Current-Workspace managed template reconciliation. Preview is the
+      // default; `--apply` explicitly performs the reviewed safe operation.
+      harness: { upgrade: 'alice_harness_upgrade' },
+      template: {
+        upgrade: 'workspace_template_upgrade',
+      },
+    },
+  },
+  uta: {
+    binary: 'alice-uta',
+    scope: 'global',
+    description: 'Trading — accounts, portfolio, orders, and the trading-as-git approval flow',
+    groupDescriptions: {
+      account: 'Read trading accounts and portfolios',
+      contract: 'Resolve broker instruments and quotes before trading',
+      order: 'Inspect or mutate broker orders',
+      position: 'Close an existing position',
+      git: 'Review, commit, push, reject, or synchronize staged trading decisions',
+      market: 'Read broker market-clock state',
+      sim: 'Drive the MockBroker simulator only',
+    },
+    commands: {
+      account: {
+        list: 'listUTAs',
+        info: 'getAccount',
+        portfolio: 'getPortfolio',
+      },
+      contract: {
+        search: 'searchContracts',
+        details: 'getContractDetails',
+        quote: 'getQuote',
+        expand: 'expandContract',
+        'option-contracts': 'getOptionContracts',
+        'option-chain': 'getOptionChain',
+        'order-book': 'getOrderBook',
+      },
+      order: {
+        list: 'getOrders',
+        history: 'orderHistory',
+        trades: 'tradeHistory',
+        place: 'placeOrder',
+        modify: 'modifyOrder',
+        cancel: 'cancelOrder',
+      },
+      position: {
+        // listing positions = `account portfolio` (one tool, one verb).
+        close: 'closePosition',
+      },
+      // trading-as-git: the approval/state flow mirrors git verbs on purpose.
+      git: {
+        status: 'tradingStatus',
+        log: 'tradingLog',
+        show: 'tradingShow',
+        commit: 'tradingCommit',
+        push: 'tradingPush',
+        reject: 'tradingReject',
+        sync: 'tradingSync',
+      },
+      market: {
+        clock: 'getMarketClock',
+      },
+      // MockBroker simulator only — no-op against real brokers.
+      sim: {
+        'price-change': 'simulatePriceChange',
+      },
+    },
+  },
+  // cron: deliberately NOT exported — scheduling stays MCP-only.
+}
+
+// Fail loudly if future namespaces collide instead of silently hiding commands.
+for (const group of Object.keys(BASE_EXPORTS.workspace.commands)) {
+  if (group in BASE_EXPORTS.data.commands) throw new Error(`Duplicate alice command group: ${group}`)
+}
+export const CLI_EXPORTS: Record<string, CliExport> = {
+  ...BASE_EXPORTS,
+  data: {
+    ...BASE_EXPORTS.data,
+    scope: 'mixed',
+    description: 'OpenAlice research, assets and Workspace collaboration',
+    commands: { ...BASE_EXPORTS.data.commands, ...BASE_EXPORTS.workspace.commands },
+    groupDescriptions: { ...BASE_EXPORTS.data.groupDescriptions, ...BASE_EXPORTS.workspace.groupDescriptions },
+  },
+}
+
+export function toolRegistryScope(exp: CliExport, name: string): 'global' | 'scoped' {
+  if (exp.scope !== 'mixed') return exp.scope
+  return Object.values(BASE_EXPORTS.workspace.commands).some(verbs => Object.values(verbs).includes(name)) ? 'scoped' : 'global'
+}
+
+/**
+ * Map a PATH binary name to its export key. `alice` and its legacy alias
+ * `alice-workspace` → `data`; other `alice-<x>` →
+ * `<x>`; any other bare name (e.g. `traderhub`) is its own key. Mirrored in
+ * the shim (bin/alice).
+ */
+export function exportKeyForBinary(binary: string): string {
+  return (binary === 'alice' || binary === 'alice-workspace') ? 'data' : binary.replace(/^alice-/, '')
+}
+
+/** The export descriptor for a key, or null. */
+export function getExport(key: string): CliExport | null {
+  return CLI_EXPORTS[key] ?? null
+}
+
+/** Every internal tool name ONE export references — for invoke gating + anti-rot tests. */
+export function mappedToolNames(exportKey: string): Set<string> {
+  const names = new Set<string>()
+  const exp = CLI_EXPORTS[exportKey]
+  if (!exp) return names
+  for (const verbs of Object.values(exp.commands)) {
+    for (const toolName of Object.values(verbs)) names.add(toolName)
+  }
+  return names
+}
+
+/** Every tool exposed by any CLI export sharing one registry scope. Used by
+ * manifest diagnostics so a tool owned by `alice-uta` is not falsely reported
+ * as an unmapped capability merely because the caller opened `alice` help. */
+export function mappedToolNamesForScope(scope: CliExport['scope']): Set<string> {
+  const names = new Set<string>()
+  for (const [key, exp] of Object.entries(CLI_EXPORTS)) {
+    for (const name of mappedToolNames(key)) {
+      if (scope === 'mixed' || toolRegistryScope(exp, name) === scope) names.add(name)
+    }
+  }
+  return names
+}
+
+/** Resolve an (export, group, verb) triple to its underlying tool name, or null. */
+export function resolveCommand(exportKey: string, group: string, verb: string): string | null {
+  return CLI_EXPORTS[exportKey]?.commands[group]?.[verb] ?? null
+}

@@ -1,0 +1,87 @@
+/**
+ * News Collector — Type definitions
+ */
+
+/** On-disk JSONL record for a single news article */
+export interface NewsRecord {
+  /** Monotonic sequence number (for ordering / recovery) */
+  seq: number
+  /** Ingestion timestamp (epoch ms) — when we received it */
+  ts: number
+  /** Publication timestamp (epoch ms) — from RSS pubDate or API date */
+  pubTs: number
+  /** Dedup key (guid:..., link:..., or hash:...) */
+  dedupKey: string
+  /** Article title / headline */
+  title: string
+  /** Article content / summary */
+  content: string
+  /** Extensible metadata: source, link, guid, ingestSource, category, etc. */
+  metadata: Record<string, string | null>
+}
+
+/** RSS feed configuration entry */
+export interface RSSFeedConfig {
+  /** Human-readable name, e.g. "CoinDesk" */
+  name: string
+  /** RSS / Atom feed URL */
+  url: string
+  /** Source tag stored in metadata.source */
+  source: string
+  /** Optional category tags */
+  categories?: string[]
+  /** Short human-readable description — shown in the UI to help users pick. */
+  description?: string
+  /** Whether this feed is actively fetched. Defaults to true when absent. */
+  enabled?: boolean
+}
+
+/** Discriminator for how a news item was ingested */
+export type IngestSource = 'rss'
+
+// ==================== News Provider Interface ====================
+
+/** A single news article (in-memory representation) */
+export interface NewsItem {
+  /** Stable monotonic id (mirrors NewsRecord.seq). Survives across lookback
+   *  windows, so it — not a positional index — is the addressing key the
+   *  archive tools hand back and readRss resolves against. */
+  id: number
+  time: Date
+  title: string
+  content: string
+  metadata: Record<string, string | null>
+}
+
+/**
+ * Query options for getNewsV2
+ *
+ * Supports two head truncation methods (choose one):
+ * - startTime: Exact timestamp
+ * - lookback: Semantic time, e.g. "1h", "2d", "7d"
+ *
+ * limit is independent of head truncation, takes the most recent N items from the tail
+ */
+export interface GetNewsV2Options {
+  /** Tail truncation time (required, cannot see news after this time) */
+  endTime: Date
+  /** Head truncation: exact timestamp (mutually exclusive with lookback) */
+  startTime?: Date
+  /** Head truncation: semantic time, e.g. "1h", "12h", "1d", "7d" (mutually exclusive with startTime) */
+  lookback?: string
+  /** Count limit: take the most recent N items from the tail (takes priority over time range) */
+  limit?: number
+}
+
+/** News data provider interface */
+export interface INewsProvider {
+  /**
+   * Get news (supports semantic time and count limit)
+   *
+   * @param options - Query options
+   * @returns News list (ascending by time, newest last)
+   */
+  getNewsV2(options: GetNewsV2Options): Promise<NewsItem[]>
+  /** Resolve a durable id beyond the recent search index, when supported. */
+  getNewsById?(id: number): Promise<NewsItem | null>
+}

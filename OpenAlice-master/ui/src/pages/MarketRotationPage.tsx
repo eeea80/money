@@ -1,0 +1,242 @@
+import { useEffect, useMemo, useState } from 'react'
+import type { TFunction } from 'i18next'
+import { useTranslation } from 'react-i18next'
+import {
+  ScatterChart, Scatter, Cell, LabelList, ReferenceLine,
+  XAxis, YAxis, Tooltip,
+} from 'recharts'
+import { BoardMeta } from '../components/market/BoardMeta'
+import { MeasuredChartFrame } from '../components/MeasuredChartFrame'
+import { PageHeader } from '../components/PageHeader'
+import { CenteredLoading } from '../components/StateViews'
+import { Button } from '../components/ui/button'
+import { marketApi, type SectorRotationResult, type SectorRotationRow } from '../api/market'
+
+const GREEN = 'var(--success)'
+const RED = 'var(--destructive)'
+const MUTED = 'var(--chart-axis)'
+const REFRESH_MS = 5 * 60 * 1000
+
+function pct(x: number | null | undefined, places = 1): string {
+  return x == null ? '—' : `${(x * 100).toFixed(places)}%`
+}
+function signColor(x: number | null | undefined): string {
+  if (x == null) return 'text-muted-foreground'
+  return x > 0 ? 'text-success' : x < 0 ? 'text-destructive' : 'text-muted-foreground'
+}
+function dotColor(score: number | null): string {
+  if (score == null) return MUTED
+  return score > 0 ? GREEN : score < 0 ? RED : MUTED
+}
+
+interface Point {
+  symbol: string
+  sector: string
+  x: number // relative strength vs SPY (1M), %
+  y: number // dollar-volume share change, %
+  score: number | null
+  rvol: number | null
+}
+
+export function MarketRotationPage() {
+  const { t } = useTranslation()
+  const [data, setData] = useState<SectorRotationResult | null>(null)
+  const [updatedAt, setUpdatedAt] = useState<Date | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [requestVersion, setRequestVersion] = useState(0)
+
+  useEffect(() => {
+    let alive = true
+    const load = async () => {
+      try {
+        const res = await marketApi.sectorRotation()
+        if (!alive) return
+        setData(res)
+        setUpdatedAt(new Date())
+        setError(null)
+      } catch (err) {
+        if (!alive) return
+        setError(err instanceof Error ? err.message : 'Failed to load')
+      } finally {
+        if (alive) setLoading(false)
+      }
+    }
+    load()
+    const timer = setInterval(load, REFRESH_MS)
+    return () => { alive = false; clearInterval(timer) }
+  }, [requestVersion])
+
+  const retry = () => {
+    setError(null)
+    setLoading(true)
+    setRequestVersion((version) => version + 1)
+  }
+
+  const points = useMemo<Point[]>(() => {
+    if (!data) return []
+    return data.sectors
+      .map((s) => {
+        const x = s.rel_strength['1M']
+        const y = s.dv_share_change
+        if (x == null || y == null) return null
+        return { symbol: s.symbol, sector: s.sector, x: x * 100, y: y * 100, score: s.rotation_score, rvol: s.rvol }
+      })
+      .filter((p): p is Point => p !== null)
+  }, [data])
+
+  return (
+    <div className="flex flex-col flex-1 min-h-0">
+      <PageHeader
+        title={t('market.sectorRotation')}
+        description={
+          <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-0.5">
+            <span>{t('market.rotationSubtitle')}</span>
+            {data && <span className="text-muted-foreground/70">{t('market.asOf')} {data.asOf}</span>}
+            {data?.meta && <BoardMeta meta={data.meta} />}
+          </span>
+        }
+        live={{ lastUpdated: updatedAt }}
+      />
+      <div className="flex-1 overflow-y-auto px-4 md:px-8 py-4 flex flex-col gap-6 min-h-0">
+        {loading && !data && <CenteredLoading label={t('common.loading')} />}
+        {error && (
+          <div
+            role="alert"
+            className="flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-[13px] leading-5 text-destructive"
+          >
+            <span className="min-w-0 break-words">{error}</span>
+            <Button
+              type="button"
+              className="shrink-0"
+              variant="destructive"
+              size="sm"
+              onClick={retry}
+            >
+              {t('common.retry')}
+            </Button>
+          </div>
+        )}
+
+        {data && (
+          <>
+            <QuadrantChart points={points} t={t} />
+            <RotationTable rows={data.sectors} benchmarkSymbol={data.benchmark.symbol} t={t} />
+            <p className="max-w-3xl break-words text-[11px] leading-relaxed text-muted-foreground/70">
+              <span className="font-semibold text-muted-foreground">{t('market.rotationMethodology')}: </span>
+              {data.methodology}
+            </p>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function QuadrantChart({ points, t }: { points: Point[]; t: TFunction }) {
+  return (
+    <div className="relative shrink-0">
+      {/* Quadrant corner labels */}
+      <div className="pointer-events-none absolute inset-0 z-10">
+        <CornerLabel className="top-1 right-2 text-success/70" text={t('market.quadRotatingIn')} />
+        <CornerLabel className="top-1 left-12 text-muted-foreground/60" text={t('market.quadImproving')} />
+        <CornerLabel className="bottom-7 right-2 text-muted-foreground/60" text={t('market.quadWeakening')} />
+        <CornerLabel className="bottom-7 left-12 text-destructive/70" text={t('market.quadRotatingOut')} />
+      </div>
+      <MeasuredChartFrame className="h-[420px] w-full">
+        {({ width, height }) => (
+          <ScatterChart accessibilityLayer width={width} height={height} margin={{ top: 24, right: 28, bottom: 28, left: 8 }}>
+          <XAxis
+            type="number" dataKey="x" name={t('market.axisRelStrength')}
+            tickFormatter={(v: number) => `${v.toFixed(0)}%`}
+            tick={{ fontSize: 11, fill: MUTED }} stroke={MUTED}
+            domain={['dataMin - 1', 'dataMax + 1']}
+          >
+          </XAxis>
+          <YAxis
+            type="number" dataKey="y" name={t('market.axisVolumeShare')}
+            tickFormatter={(v: number) => `${v.toFixed(1)}%`}
+            tick={{ fontSize: 11, fill: MUTED }} stroke={MUTED}
+            domain={['dataMin - 0.5', 'dataMax + 0.5']}
+          />
+          <ReferenceLine x={0} stroke="var(--border)" strokeDasharray="4 4" />
+          <ReferenceLine y={0} stroke="var(--border)" strokeDasharray="4 4" />
+          <Tooltip
+            isAnimationActive={false}
+            cursor={{ strokeDasharray: '3 3' }}
+            content={<PointTooltip t={t} />}
+          />
+          <Scatter data={points}>
+            {points.map((p) => <Cell key={p.symbol} fill={dotColor(p.score)} />)}
+            <LabelList dataKey="symbol" position="top" style={{ fontSize: 10, fill: 'var(--text)', fontWeight: 600 }} />
+          </Scatter>
+          </ScatterChart>
+        )}
+      </MeasuredChartFrame>
+      <div className="flex justify-between px-8 -mt-1 text-[10px] text-muted-foreground/50">
+        <span>{t('market.axisRelStrength')} →</span>
+        <span>↑ {t('market.axisVolumeShare')}</span>
+      </div>
+    </div>
+  )
+}
+
+function CornerLabel({ className, text }: { className: string; text: string }) {
+  return <span className={`absolute text-[11px] font-medium ${className}`}>{text}</span>
+}
+
+function PointTooltip({ active, payload, t }: { active?: boolean; payload?: Array<{ payload: Point }>; t: TFunction }) {
+  if (!active || !payload?.length) return null
+  const p = payload[0].payload
+  return (
+    <div className="oa-chart-tooltip px-2.5 py-1.5 text-[11px] leading-[15px]">
+      <div className="font-mono font-semibold text-foreground">{p.symbol} <span className="text-muted-foreground font-sans font-normal">{p.sector}</span></div>
+      <div className="mt-0.5 grid grid-cols-[auto_auto] gap-x-3 gap-y-0.5">
+        <span className="text-muted-foreground">{t('market.colScore')}</span><span className={signColor(p.score)}>{p.score ?? '—'}</span>
+        <span className="text-muted-foreground">{t('market.axisRelStrength')}</span><span className={signColor(p.x)}>{p.x.toFixed(1)}%</span>
+        <span className="text-muted-foreground">{t('market.axisVolumeShare')}</span><span className={signColor(p.y)}>{p.y.toFixed(2)}%</span>
+        <span className="text-muted-foreground">{t('market.colRvol')}</span><span className="text-foreground">{p.rvol ?? '—'}</span>
+      </div>
+    </div>
+  )
+}
+
+function RotationTable({ rows, benchmarkSymbol, t }: { rows: SectorRotationRow[]; benchmarkSymbol: string; t: TFunction }) {
+  return (
+    <div className="-mx-4 shrink-0 overflow-x-auto px-4 md:mx-0 md:px-0" data-testid="sector-rotation-table-scroll">
+      {/* The page owns vertical scrolling; horizontal overflow must not let flex shrink the table's height. */}
+      {/* Keep the market columns readable; narrow screens scroll instead of compressing headers together. */}
+      <table className="w-full min-w-[820px] border-collapse text-caption" data-testid="sector-rotation-table">
+        <thead>
+          <tr className="whitespace-nowrap border-b border-border text-left text-muted-foreground/70">
+            <th className="w-[220px] py-1.5 pr-3 font-medium">{t('market.colSector')}</th>
+            <th className="w-[72px] py-1.5 px-3 font-medium text-right">{t('market.colScore')}</th>
+            <th className="w-[64px] py-1.5 px-3 font-medium text-right">1W</th>
+            <th className="w-[64px] py-1.5 px-3 font-medium text-right">1M</th>
+            <th className="w-[64px] py-1.5 px-3 font-medium text-right">3M</th>
+            <th className="w-[88px] py-1.5 px-3 font-medium text-right">{t('market.colVsBench', { sym: benchmarkSymbol })}</th>
+            <th className="w-[72px] py-1.5 px-3 font-medium text-right">{t('market.colRvol')}</th>
+            <th className="w-[120px] py-1.5 pl-3 font-medium text-right">{t('market.colVolShareDelta')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.symbol} className="whitespace-nowrap border-b border-border/50 hover:bg-secondary/40">
+              <td className="py-1.5 pr-3">
+                <span className="font-mono font-semibold text-foreground">{r.symbol}</span>
+                <span className="ml-2 text-muted-foreground">{r.sector}</span>
+              </td>
+              <td className={`py-1.5 px-3 text-right font-mono ${signColor(r.rotation_score)}`}>{r.rotation_score ?? '—'}</td>
+              <td className={`py-1.5 px-3 text-right ${signColor(r.returns['1W'])}`}>{pct(r.returns['1W'])}</td>
+              <td className={`py-1.5 px-3 text-right ${signColor(r.returns['1M'])}`}>{pct(r.returns['1M'])}</td>
+              <td className={`py-1.5 px-3 text-right ${signColor(r.returns['3M'])}`}>{pct(r.returns['3M'])}</td>
+              <td className={`py-1.5 px-3 text-right ${signColor(r.rel_strength['1M'])}`}>{pct(r.rel_strength['1M'])}</td>
+              <td className="py-1.5 px-3 text-right text-foreground">{r.rvol ?? '—'}</td>
+              <td className={`py-1.5 pl-3 text-right ${signColor(r.dv_share_change)}`}>{pct(r.dv_share_change, 2)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}

@@ -1,0 +1,1986 @@
+/**
+ * Thin fetch wrapper for /api/workspaces*. Types mirror the server's
+ * `WorkspaceMeta` (plus a synthetic `claudeRunning` field derived by the
+ * server from the SessionPool).
+ */
+
+import type { ModelReasoningEffort, ModelReasoningMode, WireShape } from '../../api'
+
+export interface WorkspaceRuntimePreference {
+  readonly accessMode: 'native' | 'vault'
+  readonly credentialSlug?: string
+  readonly wireShape?: WireShape
+  readonly model?: string
+  readonly reasoningEffort?: ModelReasoningEffort
+}
+
+export interface WorkspaceRuntimeRecentSettings {
+  readonly agent?: string
+  readonly agents: Readonly<Record<string, WorkspaceRuntimePreference>>
+}
+
+export interface WorkspaceRuntimeModeSettings {
+  readonly defaultAgent?: string
+  readonly agents: Readonly<Record<string, WorkspaceRuntimePreference>>
+  readonly recent: WorkspaceRuntimeRecentSettings
+}
+
+export type WorkspaceRuntimeMode = 'interactive' | 'headless'
+
+export interface WorkspaceRuntimeSettings {
+  readonly version: 3
+  readonly runtime: {
+    readonly interactive: WorkspaceRuntimeModeSettings
+    readonly headless: WorkspaceRuntimeModeSettings
+  }
+}
+
+export interface Workspace {
+  readonly id: string;
+  readonly tag: string;
+  /** Workspace-owned display label from `.alice/workspace.json`; falls back to `tag`. */
+  readonly displayName?: string;
+  /** Workspace-owned short description from `.alice/workspace.json`. */
+  readonly description?: string;
+  /** Validation/read error for `.alice/workspace.json`, when present. */
+  readonly metadataError?: string;
+  /** Read-only projection of the interactive Agent preference in `.alice/settings.json`. */
+  readonly defaultAgent?: string;
+  readonly dir: string;
+  readonly createdAt: string;
+  readonly template?: string;
+  /**
+   * The template version at the moment this workspace was spawned. Pinned
+   * once — system-written, never updated. Used to render lineage in the
+   * Overview card ("from {template} v{spawnedFromVersion}").
+   */
+  readonly spawnedFromVersion?: string;
+  /** Last successfully applied template baseline; README text cannot forge it. */
+  readonly currentVersion?: string;
+  /**
+   * Set when the source template is newer than the recorded applied baseline.
+   * Opens the reviewed three-way Template Upgrade flow.
+   */
+  readonly upgradeAvailable?: {
+    from: string;
+    to: string;
+    kind?: 'template' | 'source';
+    verified?: boolean;
+    commit?: string;
+  } | null;
+  /** Exact external Harness source selected when this Workspace was created. */
+  readonly harnessSource?: {
+    readonly schemaVersion: 1;
+    readonly template: string;
+    readonly repository: string;
+    readonly version: string;
+    readonly commit: string;
+  };
+  /**
+   * Single ordered list of all session records (running + paused) the
+   * launcher tracks for this workspace. Source of truth for sidebar + main
+   * pane state.
+   */
+  readonly sessions: readonly SessionRecord[];
+  /**
+   * Whether deprecated native-project compatibility config exists for each
+   * Agent runtime. Kept for API compatibility and advanced diagnostics; this
+   * is not a managed Session default and is not surfaced in primary menus.
+   * @deprecated Use `runtimeSettings` for managed Session defaults.
+   */
+  readonly agentOverride?: {
+    readonly claude: boolean;
+    readonly codex: boolean;
+    readonly opencode: boolean;
+    readonly pi: boolean;
+  };
+  /** Secret-free, Workspace-owned recent launch choices from `.alice/settings.json`. */
+  readonly runtimeSettings?: WorkspaceRuntimeSettings;
+  readonly runtimeSettingsError?: string;
+}
+
+export interface CreateError {
+  readonly error:
+    | 'invalid_tag'
+    | 'tag_in_use'
+    | 'tag_required'
+    | 'insufficient_storage'
+    | 'bootstrap_failed'
+    | 'unknown_template'
+    | 'unknown_source_version'
+    | 'no_templates_configured';
+  readonly message?: string;
+  readonly stderr?: string;
+}
+
+export type CreateResult =
+  | { readonly ok: true; readonly workspace: Workspace }
+  | { readonly ok: false; readonly status: number; readonly error: CreateError };
+
+export type TemplateUpgradeFileStatus = 'ready' | 'preserved' | 'conflict' | 'unchanged'
+export type TemplateUpgradeResolution = 'workspace' | 'template'
+
+export interface TemplateUpgradeFilePlan {
+  readonly basePreview?: string | null
+  readonly baseTruncated?: boolean
+  readonly mergedPreview?: string
+  readonly mergedTruncated?: boolean
+  readonly path: string
+  readonly status: TemplateUpgradeFileStatus
+  readonly operation: 'add' | 'update' | 'remove' | 'keep' | 'none'
+  readonly currentPreview: string | null
+  readonly templatePreview: string | null
+  readonly currentTruncated: boolean
+  readonly templateTruncated: boolean
+  readonly canUseTemplate: boolean
+  readonly note?: string
+}
+
+export interface TemplateUpgradePlan {
+  readonly workspaceId: string
+  readonly template: string
+  readonly fromVersion: string
+  readonly toVersion: string
+  readonly strategy: 'managed-context'
+  readonly planDigest: string
+  readonly source: 'recorded-baseline' | 'legacy-root-commit'
+  readonly blocked: boolean
+  readonly blockers: readonly string[]
+  readonly activity: {
+    readonly busy: boolean
+    readonly sessions: readonly {
+      readonly sessionId: string
+      readonly resumeId: string
+      readonly name: string
+      readonly agent: string
+      readonly surface: 'terminal' | 'webpi'
+      readonly startedAt: number | null
+    }[]
+    readonly headless: readonly {
+      readonly taskId: string | null
+      readonly agent: string
+      readonly startedAt: number
+    }[]
+  }
+  readonly files: readonly TemplateUpgradeFilePlan[]
+  readonly summary: {
+    readonly ready: number
+    readonly preserved: number
+    readonly conflicts: number
+    readonly unchanged: number
+  }
+}
+
+export interface TemplateUpgradeResult {
+  readonly workspaceId: string
+  readonly fromVersion: string
+  readonly toVersion: string
+  readonly commit: string
+  readonly changedPaths: readonly string[]
+  readonly keptPaths: readonly string[]
+}
+
+export class TemplateUpgradeApiError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+    readonly status: number,
+    readonly plan?: TemplateUpgradePlan,
+  ) {
+    super(message)
+    this.name = 'TemplateUpgradeApiError'
+  }
+}
+
+export interface SkillProjectionRequest { skill: string; action: 'install' | 'update' | 'remove' | 'restore' }
+
+export async function getTemplateUpgradePlan(wsId: string, layer: 'template' | 'alice-harness' = 'template', projection?: SkillProjectionRequest): Promise<TemplateUpgradePlan> {
+  const res = await fetch(`/api/workspaces/${encodeURIComponent(wsId)}/${layer}-upgrade${projection ? `?${new URLSearchParams({ ...projection })}` : ''}`)
+  const body = await res.json().catch(() => ({})) as {
+    plan?: TemplateUpgradePlan
+    error?: string
+    message?: string
+  }
+  if (!res.ok || !body.plan) {
+    throw new TemplateUpgradeApiError(
+      body.error ?? 'upgrade_plan_failed',
+      body.message ?? `Template upgrade preview failed: HTTP ${res.status}`,
+      res.status,
+      body.plan,
+    )
+  }
+  return body.plan
+}
+
+export async function applyTemplateUpgrade(
+  wsId: string,
+  planDigest: string,
+  resolutions: Readonly<Record<string, TemplateUpgradeResolution>>,
+  layer: 'template' | 'alice-harness' = 'template',
+  projection?: SkillProjectionRequest,
+): Promise<TemplateUpgradeResult> {
+  const res = await fetch(`/api/workspaces/${encodeURIComponent(wsId)}/${layer}-upgrade`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ planDigest, resolutions, ...(projection ? { projection } : {}) }),
+  })
+  const body = await res.json().catch(() => ({})) as {
+    result?: TemplateUpgradeResult
+    plan?: TemplateUpgradePlan
+    error?: string
+    message?: string
+  }
+  if (!res.ok || !body.result) {
+    throw new TemplateUpgradeApiError(
+      body.error ?? 'upgrade_apply_failed',
+      body.message ?? `Template upgrade failed: HTTP ${res.status}`,
+      res.status,
+      body.plan,
+    )
+  }
+  return body.result
+}
+
+export interface HarnessSourceUpgradePlan {
+  readonly workspaceId: string
+  readonly template: string
+  readonly fromVersion: string
+  readonly fromCommit: string
+  readonly toVersion: string
+  readonly toCommit: string
+  readonly verified: boolean
+  readonly strategy: 'source-merge'
+  readonly protocolCompatible: boolean
+  readonly manifestVersion: number | null
+  readonly planDigest: string
+  readonly blocked: boolean
+  readonly blockers: readonly string[]
+  readonly activity: TemplateUpgradePlan['activity']
+  readonly changedPaths: readonly string[]
+  readonly conflictedPaths: readonly string[]
+}
+
+export interface HarnessSourceUpgradeResult {
+  readonly workspaceId: string
+  readonly fromVersion: string
+  readonly toVersion: string
+  readonly commit: string
+  readonly verified: boolean
+}
+
+export class HarnessSourceUpgradeApiError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+    readonly status: number,
+    readonly plan?: HarnessSourceUpgradePlan,
+  ) {
+    super(message)
+    this.name = 'HarnessSourceUpgradeApiError'
+  }
+}
+
+export async function getHarnessSourceUpgradePlan(wsId: string): Promise<HarnessSourceUpgradePlan> {
+  const res = await fetch(`/api/workspaces/${encodeURIComponent(wsId)}/source-upgrade`)
+  const body = await res.json().catch(() => ({})) as {
+    plan?: HarnessSourceUpgradePlan
+    error?: string
+    message?: string
+  }
+  if (!res.ok || !body.plan) {
+    throw new HarnessSourceUpgradeApiError(
+      body.error ?? 'upgrade_plan_failed',
+      body.message ?? `Harness source upgrade preview failed: HTTP ${res.status}`,
+      res.status,
+      body.plan,
+    )
+  }
+  return body.plan
+}
+
+export async function applyHarnessSourceUpgrade(
+  wsId: string,
+  planDigest: string,
+  targetVersion: string,
+): Promise<HarnessSourceUpgradeResult> {
+  const res = await fetch(`/api/workspaces/${encodeURIComponent(wsId)}/source-upgrade`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ planDigest, targetVersion }),
+  })
+  const body = await res.json().catch(() => ({})) as {
+    result?: HarnessSourceUpgradeResult
+    plan?: HarnessSourceUpgradePlan
+    error?: string
+    message?: string
+  }
+  if (!res.ok || !body.result) {
+    throw new HarnessSourceUpgradeApiError(
+      body.error ?? 'upgrade_apply_failed',
+      body.message ?? `Harness source upgrade failed: HTTP ${res.status}`,
+      res.status,
+      body.plan,
+    )
+  }
+  return body.result
+}
+
+export type WorkspaceAbsorbFileStatus = 'ready' | 'duplicate' | 'conflict'
+export type WorkspaceAbsorbResolution = 'target' | 'source' | 'both'
+
+export interface WorkspaceAbsorbFilePlan {
+  readonly path: string
+  readonly status: WorkspaceAbsorbFileStatus
+  readonly operation: 'add' | 'skip' | 'choose'
+  readonly sourcePreview: string | null
+  readonly targetPreview: string | null
+  readonly sourceTruncated: boolean
+  readonly targetTruncated: boolean
+  readonly sourceSize: number
+  readonly targetSize: number | null
+  readonly canUseSource: boolean
+  readonly keepBothPath: string
+}
+
+export interface WorkspaceAbsorbPlan {
+  readonly source: { readonly id: string; readonly tag: string; readonly displayName?: string }
+  readonly target: { readonly id: string; readonly tag: string; readonly displayName?: string }
+  readonly importRoot: string
+  readonly planDigest: string
+  readonly blocked: boolean
+  readonly blockers: readonly string[]
+  readonly activity: {
+    readonly source: TemplateUpgradePlan['activity']
+    readonly target: TemplateUpgradePlan['activity']
+  }
+  readonly sourceInventory: {
+    readonly sessions: number
+    readonly resumeIds: number
+    readonly openIssues: readonly string[]
+    readonly scheduledIssues: readonly string[]
+    readonly dirtyFiles: number
+  }
+  readonly files: readonly WorkspaceAbsorbFilePlan[]
+  readonly summary: {
+    readonly ready: number
+    readonly duplicates: number
+    readonly conflicts: number
+    readonly excluded: number
+    readonly bytes: number
+  }
+}
+
+export interface WorkspaceAbsorbResult {
+  readonly sourceWorkspaceId: string
+  readonly targetWorkspaceId: string
+  readonly commit: string
+  readonly changedPaths: readonly string[]
+  readonly skippedPaths: readonly string[]
+  readonly departedDir: string
+}
+
+export class WorkspaceAbsorbApiError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+    readonly status: number,
+    readonly plan?: WorkspaceAbsorbPlan,
+  ) {
+    super(message)
+    this.name = 'WorkspaceAbsorbApiError'
+  }
+}
+
+export async function getWorkspaceAbsorbPlan(
+  targetWorkspaceId: string,
+  sourceWorkspaceId: string,
+): Promise<WorkspaceAbsorbPlan> {
+  const res = await fetch(
+    `/api/workspaces/${encodeURIComponent(targetWorkspaceId)}/absorb/${encodeURIComponent(sourceWorkspaceId)}`,
+  )
+  const body = await res.json().catch(() => ({})) as {
+    plan?: WorkspaceAbsorbPlan
+    error?: string
+    message?: string
+  }
+  if (!res.ok || !body.plan) {
+    throw new WorkspaceAbsorbApiError(
+      body.error ?? 'absorb_plan_failed',
+      body.message ?? `Workspace preview failed: HTTP ${res.status}`,
+      res.status,
+      body.plan,
+    )
+  }
+  return body.plan
+}
+
+export async function applyWorkspaceAbsorb(
+  targetWorkspaceId: string,
+  sourceWorkspaceId: string,
+  planDigest: string,
+  resolutions: Readonly<Record<string, WorkspaceAbsorbResolution>>,
+): Promise<WorkspaceAbsorbResult> {
+  const res = await fetch(
+    `/api/workspaces/${encodeURIComponent(targetWorkspaceId)}/absorb/${encodeURIComponent(sourceWorkspaceId)}`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ planDigest, resolutions }),
+    },
+  )
+  const body = await res.json().catch(() => ({})) as {
+    result?: WorkspaceAbsorbResult
+    plan?: WorkspaceAbsorbPlan
+    error?: string
+    message?: string
+  }
+  if (!res.ok || !body.result) {
+    throw new WorkspaceAbsorbApiError(
+      body.error ?? 'absorb_apply_failed',
+      body.message ?? `Workspace absorb failed: HTTP ${res.status}`,
+      res.status,
+      body.plan,
+    )
+  }
+  return body.result
+}
+
+export async function listWorkspaces(): Promise<Workspace[]> {
+  const res = await fetch('/api/workspaces');
+  if (!res.ok) throw new Error(`list failed: ${res.status}`);
+  const body = (await res.json()) as { workspaces: Workspace[] };
+  return body.workspaces;
+}
+
+/** Create a Workspace from a template, optionally pinned to a source version. */
+export async function createWorkspace(
+  tag: string,
+  template: string,
+  sourceVersion?: string,
+): Promise<CreateResult> {
+  const body: Record<string, unknown> = { tag, template };
+  if (sourceVersion !== undefined) body['sourceVersion'] = sourceVersion;
+  const res = await fetch('/api/workspaces', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (res.ok) {
+    const body = (await res.json()) as { workspace: Workspace };
+    return { ok: true, workspace: body.workspace };
+  }
+  let err: CreateError;
+  try {
+    err = (await res.json()) as CreateError;
+  } catch {
+    err = { error: 'bootstrap_failed', message: `HTTP ${res.status}` };
+  }
+  return { ok: false, status: res.status, error: err };
+}
+
+export interface TemplateInfo {
+  readonly name: string;
+  readonly description?: string;
+  /** Human-readable name for UI surfaces (dashboard section headers, etc.). */
+  readonly displayName?: string;
+  /** Sort key for dashboard grouping. Lower = earlier. Templates without
+   *  a declared `groupOrder` sort after declared ones, by name. */
+  readonly groupOrder?: number;
+  /** Community-tier: bundles a third-party ecosystem maintained outside
+   *  OpenAlice. Rendered under a separate "Community" section. */
+  readonly community?: boolean;
+  readonly defaultAgents: readonly string[];
+  /** Template version, declared in README frontmatter. "0.0.0" when missing. */
+  readonly version: string;
+  /** True if the template ships a README.md (showcase detail page can load it). */
+  readonly hasReadme: boolean;
+  readonly source?: {
+    readonly repository: string;
+    readonly defaultVersion: string;
+    readonly versions: readonly {
+      readonly version: string;
+      readonly commit: string;
+    }[];
+  };
+}
+
+export async function listTemplates(): Promise<TemplateInfo[]> {
+  const res = await fetch('/api/workspaces/templates');
+  if (!res.ok) throw new Error(`list templates failed: ${res.status}`);
+  const body = (await res.json()) as { templates: TemplateInfo[] };
+  return body.templates;
+}
+
+/**
+ * Fetch a template's raw README markdown. Strips YAML frontmatter before
+ * returning — frontmatter is metadata, not content the user should see.
+ * Returns null when the template has no README.
+ */
+export async function fetchTemplateReadme(name: string): Promise<string | null> {
+  const res = await fetch(`/api/workspaces/templates/${encodeURIComponent(name)}/readme`);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`fetch readme failed: ${res.status}`);
+  const raw = await res.text();
+  return stripFrontmatter(raw);
+}
+
+/**
+ * Strip a leading YAML frontmatter block (`---` ... `---`) so the rendered
+ * README body doesn't show the metadata to the user. Conservative: only
+ * strips when frontmatter is at column 0; anything else passes through.
+ */
+export function stripFrontmatter(raw: string): string {
+  const text = raw.replace(/^﻿/, '');
+  if (!text.startsWith('---')) return text;
+  const closeMatch = /^---\s*$/m.exec(text.slice(3));
+  if (!closeMatch || closeMatch.index === undefined) return text;
+  // Skip past the closing fence and any trailing newline.
+  const tailStart = 3 + closeMatch.index + closeMatch[0].length;
+  return text.slice(tailStart).replace(/^\r?\n/, '');
+}
+
+export interface AgentCapabilities {
+  readonly parallelPerCwd: boolean;
+  readonly resumeLast: boolean;
+  readonly resumeById: boolean;
+  readonly transcriptDiscovery: 'fs-watch' | 'subprocess' | 'none';
+  readonly assignsSessionId?: boolean;
+  readonly headless?: boolean;
+  /** Present when the runtime can drive the browser conversation surface. */
+  readonly web?: WebSurfaceCapability;
+  readonly aiProvider?: AgentProviderCapabilities;
+}
+
+export type WebSessionWire = 'pi-rpc' | 'acp' | 'claude-stream-json' | 'codex-app-server';
+
+export interface WebSurfaceCapability {
+  readonly wire: WebSessionWire;
+  /** The runtime asks before tools run and those prompts reach the browser. */
+  readonly permissionPrompts: boolean;
+  /** A Session with no native id yet may still open in the Web surface. */
+  readonly freshSession: boolean;
+}
+
+/** Whether a Session's runtime can present in the Web conversation surface. */
+export function agentSupportsWeb(agents: readonly AgentInfo[] | undefined, agentId: string): boolean {
+  return Boolean(agents?.find((agent) => agent.id === agentId)?.capabilities.web);
+}
+
+export interface AgentProviderCapabilities {
+  readonly credentialSource: 'runtime-or-workspace' | 'workspace-required';
+  readonly wirePreference: readonly WireShape[];
+  readonly directVendors?: readonly string[];
+  readonly defaultWire?: WireShape;
+  readonly vendorPolicies?: Readonly<Record<string, {
+    readonly wirePreference: readonly WireShape[];
+    readonly legacyRequestedWireFallbacks?: Readonly<Partial<Record<WireShape, WireShape>>>;
+  }>>;
+  readonly modelRegistration?: {
+    readonly contextWindow?: boolean;
+    readonly reasoning?: boolean;
+    readonly effortVariants?: boolean;
+  };
+}
+
+export interface AgentInfo {
+  readonly id: string;
+  readonly displayName: string;
+  readonly kind?: 'agent' | 'utility';
+  readonly capabilities: AgentCapabilities;
+  /**
+   * Whether the runtime's CLI was found on the host PATH. Backend-probed per
+   * list call (see src/workspaces/agent-detect.ts). Optional for backward
+   * compat — treat a missing value as installed (don't gate on a stale shape).
+   */
+  readonly installed?: boolean;
+  /** Absolute path the CLI resolved to, when installed. */
+  readonly binPath?: string | null;
+  /** Opaque identity for the currently resolved executable. */
+  readonly fingerprint?: string | null;
+}
+
+export type AgentRuntimeReadinessStatus =
+  | 'unknown'
+  | 'checking'
+  | 'ready'
+  | 'not_installed'
+  | 'auth_required'
+  | 'provider_required'
+  | 'output_unrecognized'
+  | 'timeout'
+  | 'failed';
+
+export type AgentRuntimeReadinessSource =
+  | 'global-login'
+  | 'global-config'
+  | 'launcher-vault'
+  | 'workspace-override'
+  | 'managed-runtime'
+  | 'unknown';
+
+export type AgentRuntimeRepairTarget =
+  | 'runtime-install'
+  | 'cli-login'
+  | 'ai-provider'
+  | 'retry';
+
+export interface AgentRuntimeReadinessRow {
+  readonly agent: string;
+  readonly displayName: string;
+  readonly installed: boolean;
+  readonly binPath: string | null;
+  readonly fingerprint?: string | null;
+  readonly status: AgentRuntimeReadinessStatus;
+  readonly ready: boolean;
+  readonly source: AgentRuntimeReadinessSource;
+  readonly checkedAt: string | null;
+  readonly durationMs: number | null;
+  readonly repairTarget?: AgentRuntimeRepairTarget;
+  readonly message?: string;
+}
+
+export interface AgentRuntimeReadinessSnapshot {
+  readonly agents: Record<string, AgentRuntimeReadinessRow>;
+  readonly overallReady: boolean;
+  readonly checkedAt: string | null;
+}
+
+export async function listAgents(): Promise<AgentInfo[]> {
+  const res = await fetch('/api/workspaces/agents');
+  if (!res.ok) throw new Error(`list agents failed: ${res.status}`);
+  const body = (await res.json()) as { agents: AgentInfo[] };
+  return body.agents;
+}
+
+export type WorkspaceLaunchMode = 'direct' | 'node-shim' | 'bash-shim' | 'cmd-shim';
+export type WorkspaceLaunchEnvironmentSource = 'terminal' | 'workspace' | 'tools' | 'adapter';
+
+export interface WorkspaceLaunchEnvironmentEntry {
+  readonly key: string;
+  readonly source: WorkspaceLaunchEnvironmentSource;
+  readonly presentation: 'value' | 'configured' | 'redacted' | 'path-count';
+  readonly value?: string;
+  readonly count?: number;
+}
+
+export interface WorkspaceLaunchPlan {
+  readonly workspace: {
+    readonly id: string;
+    readonly tag: string;
+    readonly dir: string;
+  };
+  readonly agent: AgentInfo & {
+    readonly kind: 'agent' | 'utility';
+    readonly installed: boolean;
+    readonly binPath: string | null;
+  };
+  readonly launch: {
+    readonly intent: 'fresh';
+    readonly mode: WorkspaceLaunchMode;
+    readonly composedCommand: readonly string[];
+    readonly resolvedCommand: readonly string[];
+    readonly cwd: string;
+    readonly envPWD: string | null;
+    readonly environment: readonly WorkspaceLaunchEnvironmentEntry[];
+    readonly transcriptDir: string | null;
+  };
+}
+
+export async function getWorkspaceLaunchPlan(
+  id: string,
+  agent: string,
+): Promise<WorkspaceLaunchPlan> {
+  const query = new URLSearchParams({ agent });
+  const res = await fetch(
+    `/api/workspaces/${encodeURIComponent(id)}/launch-plan?${query.toString()}`,
+  );
+  if (!res.ok) {
+    const parsed = (await res.json().catch(() => null)) as { message?: string; error?: string } | null;
+    throw new Error(parsed?.message ?? parsed?.error ?? `load launch plan failed: ${res.status}`);
+  }
+  return (await res.json()) as WorkspaceLaunchPlan;
+}
+
+export async function getAgentRuntimeReadiness(): Promise<AgentRuntimeReadinessSnapshot> {
+  const res = await fetch('/api/agent-runtimes/readiness');
+  if (!res.ok) throw new Error(`get agent runtime readiness failed: ${res.status}`);
+  return (await res.json()) as AgentRuntimeReadinessSnapshot;
+}
+
+export async function probeAgentRuntimeReadiness(
+  agent?: string,
+  onSnapshot?: (snapshot: AgentRuntimeReadinessSnapshot) => void,
+): Promise<AgentRuntimeReadinessSnapshot> {
+  const res = await fetch('/api/agent-runtimes/readiness/probe', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(agent ? { agent } : {}),
+  });
+  if (!res.ok) {
+    const msg = await res.text().catch(() => '');
+    throw new Error(`probe agent runtime readiness failed: ${res.status} ${msg}`);
+  }
+  const started = (await res.json()) as {
+    probeId: string;
+    agents: string[];
+    snapshot: AgentRuntimeReadinessSnapshot;
+  };
+  let snapshot = started.snapshot;
+  onSnapshot?.(snapshot);
+  const targets = new Set(started.agents);
+  const deadline = Date.now() + 100_000;
+  while ([...targets].some((id) => snapshot.agents[id]?.status === 'checking')) {
+    if (Date.now() >= deadline) {
+      throw new Error(`agent runtime readiness probe ${started.probeId} did not settle`);
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 500));
+    snapshot = await getAgentRuntimeReadiness();
+    onSnapshot?.(snapshot);
+  }
+  return snapshot;
+}
+
+export async function getWorkspaceDefaultAgent(): Promise<string | null> {
+  const res = await fetch('/api/config/workspace-default-agent');
+  if (!res.ok) return null;
+  const body = (await res.json()) as { agent?: string | null };
+  return body.agent ?? null;
+}
+
+export async function setWorkspaceDefaultAgent(agent: string | null): Promise<string | null> {
+  const res = await fetch('/api/config/workspace-default-agent', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ agent }),
+  });
+  if (!res.ok) {
+    const msg = await res.text().catch(() => '');
+    throw new Error(`set workspace default agent failed: ${res.status} ${msg}`);
+  }
+  const body = (await res.json()) as { agent?: string | null };
+  return body.agent ?? null;
+}
+
+export async function getIssueDefaultAgent(): Promise<string | null> {
+  const res = await fetch('/api/config/issue-default-agent');
+  if (!res.ok) return null;
+  const body = (await res.json()) as { agent?: string | null };
+  return body.agent ?? null;
+}
+
+export async function setIssueDefaultAgent(agent: string | null): Promise<string | null> {
+  const res = await fetch('/api/config/issue-default-agent', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ agent }),
+  });
+  if (!res.ok) {
+    const msg = await res.text().catch(() => '');
+    throw new Error(`set issue default agent failed: ${res.status} ${msg}`);
+  }
+  const body = (await res.json()) as { agent?: string | null };
+  return body.agent ?? null;
+}
+
+// ── sessions ─────────────────────────────────────────────────────────────────
+//
+// One persistent product Session record shared by headless, terminal, and
+// Web execution surfaces. `pid` + `startedAt` are live read-side projections
+// and are non-null only when an interactive process is attached.
+// Persisted server-side at <OPENALICE_HOME>/workspaces/state/sessions/<wsId>.json
+// so records survive PTY death and server restarts.
+
+export interface SessionRecord {
+  readonly id: string;
+  readonly resumeId: string;
+  readonly wsId: string;
+  readonly agent: string;            // 'claude' | 'codex' | 'shell'
+  readonly name: string;              // sticky 'c1' / 'x1' / 'sh1'
+  readonly createdAt: string;
+  readonly lastActiveAt: string;
+  readonly state: 'running' | 'paused';
+  /**
+   * UI surface only; `agent` stays the runtime id. `webpi` is the persisted
+   * name of the browser conversation surface for every web-capable runtime.
+   */
+  readonly surface?: 'terminal' | 'webpi' | 'headless';
+  readonly pid: number | null;
+  readonly startedAt: number | null;
+  /** Resolved native/fallback sidebar title; null for an unseeded, unnamed Session. */
+  readonly title: string | null;
+  /** Workspace-owned coworker nametag. Missing means unnamed. */
+  readonly displayName?: string;
+  /** First headless run associated with this stable Alice Session. */
+  readonly sourceRunId?: string | null;
+  /** Visibility projected with the roster so first paint needs no second join. */
+  readonly presence?: 'active' | 'archived' | 'deleted';
+  /** Secret-free launch semantics pinned to this resumable Session. */
+  readonly runtime?: {
+    readonly credentialSource: 'native' | 'vault' | 'workspace';
+    readonly credentialSlug?: string;
+    readonly model?: string;
+    readonly reasoningEffort?: ModelReasoningEffort;
+  };
+}
+
+export interface SpawnedSession {
+  readonly sessionId: string;
+  readonly wsId: string;
+  readonly name: string;
+  readonly pid: number;
+  readonly startedAt: number;
+  readonly agent: string;
+  readonly resumeId: string;
+  readonly title: string | null;
+  /** Optional launch surface. Older servers omit it and therefore remain TUI-first. */
+  readonly surface?: 'terminal' | 'webpi';
+}
+
+// ── web conversation surface ─────────────────────────────────────────────────
+//
+// Mirrors src/workspaces/web-session/model.ts. The backend projects each
+// runtime's structured protocol (Pi RPC, ACP, Claude stream-json, Codex
+// app-server) into this one neutral shape; the browser never sees the wire.
+
+export type WebContentPart =
+  | { readonly type: 'text'; readonly text: string }
+  | { readonly type: 'thinking'; readonly thinking: string }
+  | { readonly type: 'toolCall'; readonly id: string; readonly name: string; readonly arguments: unknown }
+  | { readonly type: 'data'; readonly value: unknown };
+
+export type WebConversationMessage =
+  | { readonly role: 'user'; readonly content: readonly WebContentPart[] | string; readonly timestamp?: number }
+  | { readonly role: 'assistant'; readonly content: readonly WebContentPart[]; readonly timestamp?: number }
+  | {
+      readonly role: 'toolResult';
+      readonly toolCallId: string;
+      readonly toolName: string;
+      readonly content: readonly WebContentPart[] | string;
+      readonly isError: boolean;
+      readonly timestamp?: number;
+    }
+  | { readonly role: 'notice'; readonly text: string; readonly timestamp?: number }
+  | { readonly role: 'unknown'; readonly value: unknown; readonly timestamp?: number };
+
+export interface WebRequestOption {
+  readonly id: string;
+  readonly label: string;
+  readonly tone: 'allow' | 'deny' | 'neutral';
+}
+
+/** A tool permission, file-change approval, or question the runtime needs answered. */
+export interface WebPermissionRequest {
+  readonly id: string;
+  readonly kind: 'permission' | 'question';
+  readonly allowText?: boolean;
+  readonly secret?: boolean;
+  readonly title: string;
+  readonly description?: string;
+  readonly tool?: { readonly name: string; readonly input: unknown };
+  readonly options: readonly WebRequestOption[];
+  readonly createdAt: number;
+}
+
+export type WebSessionPhase =
+  | 'starting'
+  | 'idle'
+  | 'working'
+  | 'awaiting-input'
+  | 'compacting'
+  | 'retrying'
+  | 'stopped'
+  | 'failed';
+
+export interface WebSessionSnapshot {
+  readonly recordId: string;
+  readonly wsId: string;
+  readonly resumeId: string;
+  readonly agent: string;
+  readonly wire: WebSessionWire;
+  readonly nativeSessionId: string | null;
+  readonly pid: number | null;
+  readonly startedAt: number;
+  readonly phase: WebSessionPhase;
+  readonly messages: readonly WebConversationMessage[];
+  readonly streamingMessage: WebConversationMessage | null;
+  readonly requests: readonly WebPermissionRequest[];
+  readonly error: string | null;
+  readonly stderrTail: string;
+  readonly revision: number;
+}
+
+export interface SpawnOptions {
+  /** Product conversation identity; server resolves the native runtime id. */
+  readonly resumeId?: string;
+  /** Explicit runtime/tool adapter for this spawn. */
+  readonly agent?: string;
+  /**
+   * Seed a FRESH session with a first user message — the quick-chat launch
+   * ("type a message → you're in, agent already working"). Server-side it rides
+   * the adapter's interactive `composeCommand`; ignored when `resume` is set.
+   */
+  readonly initialPrompt?: string;
+}
+
+/** Secret-free product-Session birth stamp (mirrors backend SessionCreatedBy). */
+export type SessionCreatedBy =
+  | { readonly kind: 'interactive'; readonly surface: 'spawn' | 'quick-chat' | 'auto-quant' | 'manager' }
+  | {
+      readonly kind: 'issue';
+      readonly workspaceId: string;
+      readonly issueId: string;
+      readonly policy: 'new-each-run' | 'new-then-resume';
+      readonly fire: 'schedule' | 'manual' | 'retry' | 'comment';
+    }
+  | { readonly kind: 'headless'; readonly surface: 'api' }
+  | {
+      readonly kind: 'conversation';
+      readonly caller:
+        | { readonly kind: 'agent'; readonly resumeId: string; readonly workspaceId?: string }
+        | { readonly kind: 'human' };
+      readonly reason: string;
+      readonly subject?: unknown;
+    };
+
+export interface WorkspaceSessionDirectoryEntry {
+  readonly resumeId: string;
+  readonly agent: string;
+  readonly createdAt: number;
+  readonly updatedAt: number;
+  readonly lifecycle?: 'active' | 'retired';
+  readonly successorResumeId?: string;
+  readonly presence?: 'active' | 'archived' | 'deleted';
+  /** Workspace-owned coworker nametag. Missing means unnamed. */
+  readonly displayName?: string;
+  readonly resumable: boolean;
+  readonly active: boolean;
+  /** Present when this product Session was allocated after birth metadata shipped. */
+  readonly createdBy?: SessionCreatedBy;
+  /** Hidden Sessions remain available to their owning Issue and diagnostics. */
+  readonly rosterVisibility?: 'hidden';
+  /** Current Issue ownership/occupancy; shared roster preferences may hide it. */
+  readonly issueAttached?: true;
+  readonly runtime?: {
+    readonly credentialSource: 'native' | 'vault' | 'workspace';
+    readonly credentialSlug?: string;
+    readonly model?: string;
+    readonly reasoningEffort?: ModelReasoningEffort;
+  };
+  /** Backend-authoritative title with internal launch wrappers projected away. */
+  readonly presentationTitle?: string;
+  readonly latestExecution?: {
+    readonly taskId: string;
+    readonly status: 'running' | 'done' | 'failed' | 'interrupted';
+    readonly startedAt: number;
+    readonly finishedAt?: number;
+    readonly durationMs?: number;
+    readonly issueId?: string;
+    readonly assistantPreview?: string;
+  };
+  readonly interactive?: {
+    readonly name: string;
+    readonly title?: string;
+    readonly state: 'running' | 'paused';
+    readonly lastActiveAt: string;
+  };
+}
+
+export interface WorkspaceSessionDirectory {
+  readonly workspace: { readonly id: string; readonly tag: string };
+  readonly sessions: readonly WorkspaceSessionDirectoryEntry[];
+}
+
+export async function getWorkspaceSessionDirectory(id: string, resumeId?: string): Promise<WorkspaceSessionDirectory> {
+  const query = resumeId ? `?resumeId=${encodeURIComponent(resumeId)}` : '';
+  const res = await fetch(`/api/workspaces/${encodeURIComponent(id)}/resumes${query}`);
+  if (!res.ok) throw new Error(`Failed to load Workspace Sessions (${res.status})`);
+  return res.json() as Promise<WorkspaceSessionDirectory>;
+}
+
+export type SessionPresence = 'active' | 'archived' | 'deleted';
+
+export interface SessionPresenceResult {
+  readonly resumeId: string;
+  readonly presence: SessionPresence;
+  readonly lifecycle: 'active' | 'retired';
+}
+
+export interface SessionDisplayNameResult {
+  readonly resumeId: string;
+  readonly displayName?: string;
+}
+
+export async function setSessionDisplayName(
+  wsId: string,
+  resumeId: string,
+  displayName: string | null,
+): Promise<SessionDisplayNameResult> {
+  const res = await fetch(
+    `/api/workspaces/${encodeURIComponent(wsId)}/resumes/${encodeURIComponent(resumeId)}/metadata`,
+    {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ displayName }),
+    },
+  );
+  if (!res.ok) {
+    const parsed = (await res.json().catch(() => null)) as { error?: string; message?: string } | null;
+    throw new Error(parsed?.message ?? parsed?.error ?? `set session display name failed: ${res.status}`);
+  }
+  return res.json() as Promise<SessionDisplayNameResult>;
+}
+
+export async function setSessionPresence(
+  wsId: string,
+  resumeId: string,
+  presence: SessionPresence,
+): Promise<SessionPresenceResult> {
+  const res = await fetch(
+    `/api/workspaces/${encodeURIComponent(wsId)}/resumes/${encodeURIComponent(resumeId)}`,
+    {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ presence }),
+    },
+  );
+  if (!res.ok) {
+    const parsed = (await res.json().catch(() => null)) as { error?: string; message?: string } | null;
+    throw new Error(parsed?.message ?? parsed?.error ?? `set session presence failed: ${res.status}`);
+  }
+  return res.json() as Promise<SessionPresenceResult>;
+}
+
+export async function spawnSession(
+  id: string,
+  opts: SpawnOptions = {},
+): Promise<SpawnedSession> {
+  const body: Record<string, unknown> = {};
+  if (opts.resumeId !== undefined) body['resumeId'] = opts.resumeId;
+  if (opts.agent !== undefined) body['agent'] = opts.agent;
+  if (opts.initialPrompt !== undefined) body['initialPrompt'] = opts.initialPrompt;
+  const res = await fetch(
+    `/api/workspaces/${encodeURIComponent(id)}/sessions/spawn`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+  );
+  if (!res.ok) {
+    const msg = await res.text().catch(() => '');
+    throw new Error(`spawn session failed: ${res.status} ${msg}`);
+  }
+  return (await res.json()) as SpawnedSession;
+}
+
+export interface OpenHeadlessSessionOptions {
+  readonly title?: string;
+}
+
+export interface SessionSignatureIdentity {
+  readonly signature: string;
+  readonly resumeId: string;
+  readonly workspaceId: string;
+  readonly agent: string;
+  readonly resumable: boolean;
+}
+
+export async function resolveSessionSignature(resumeId: string): Promise<SessionSignatureIdentity> {
+  const res = await fetch(`/api/workspaces/signatures/${encodeURIComponent(resumeId)}`);
+  if (!res.ok) throw new Error(res.status === 404 ? 'Session signature not found' : `signature lookup failed: ${res.status}`);
+  return (await res.json()) as SessionSignatureIdentity;
+}
+
+export interface OpenHeadlessSessionResult {
+  readonly session: SessionRecord;
+  readonly created: boolean;
+}
+
+/** Resolve the persistent Session row and attach it to the Ask Alice surface. */
+export async function openResumeSession(
+  wsId: string,
+  resumeId: string,
+  opts: OpenHeadlessSessionOptions = {},
+): Promise<OpenHeadlessSessionResult> {
+  const res = await fetch(
+    `/api/workspaces/${encodeURIComponent(wsId)}/resumes/${encodeURIComponent(resumeId)}/session`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(opts),
+    },
+  );
+  if (!res.ok) {
+    const parsed = (await res.json().catch(() => null)) as { error?: string; message?: string } | null;
+    throw new Error(parsed?.message ?? parsed?.error ?? `open headless session failed: ${res.status}`);
+  }
+  return (await res.json()) as OpenHeadlessSessionResult;
+}
+
+/** Response of the quick-chat launch: the (reused-or-created) chat workspace + the seeded session. */
+export interface QuickChatResult {
+  readonly workspace: Workspace;
+  readonly session: SpawnedSession;
+}
+
+export interface AutoQuantDefaultWorkspaceStatus {
+  readonly defaultWorkspaceId: string | null
+  readonly configuredWorkspaceId: string | null
+  readonly ready: boolean
+}
+
+export async function getAutoQuantDefaultWorkspace(): Promise<AutoQuantDefaultWorkspaceStatus> {
+  const res = await fetch('/api/workspaces/auto-quant/default-workspace')
+  const body = (await res.json().catch(() => null)) as
+    | (AutoQuantDefaultWorkspaceStatus & { message?: string })
+    | null
+  if (!res.ok || !body) {
+    throw new Error(body?.message ?? `AutoQuant preference load failed: ${res.status}`)
+  }
+  return body
+}
+
+export async function setAutoQuantDefaultWorkspace(
+  workspaceId: string,
+): Promise<{ defaultWorkspaceId: string; ready: true }> {
+  const res = await fetch('/api/workspaces/auto-quant/default-workspace', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ workspaceId }),
+  })
+  const body = (await res.json().catch(() => null)) as
+    | { defaultWorkspaceId?: string; ready?: boolean; message?: string; error?: string }
+    | null
+  if (!res.ok || body?.ready !== true || typeof body.defaultWorkspaceId !== 'string') {
+    throw new Error(body?.message ?? body?.error ?? `AutoQuant preference save failed: ${res.status}`)
+  }
+  return { defaultWorkspaceId: body.defaultWorkspaceId, ready: true }
+}
+
+export async function initializeAutoQuantWorkspace(): Promise<Workspace> {
+  const res = await fetch('/api/workspaces/auto-quant/initialize', { method: 'POST' })
+  const body = (await res.json().catch(() => null)) as
+    | { workspace?: Workspace; message?: string; error?: string }
+    | null
+  if (!res.ok || !body?.workspace) {
+    throw new Error(body?.message ?? body?.error ?? `AutoQuant initialization failed: ${res.status}`)
+  }
+  return body.workspace
+}
+
+export type AutoPredictionDefaultWorkspaceStatus = AutoQuantDefaultWorkspaceStatus
+
+export async function getAutoPredictionDefaultWorkspace(): Promise<AutoPredictionDefaultWorkspaceStatus> {
+  const res = await fetch('/api/workspaces/auto-prediction/default-workspace')
+  const body = (await res.json().catch(() => null)) as
+    | (AutoPredictionDefaultWorkspaceStatus & { message?: string })
+    | null
+  if (!res.ok || !body) {
+    throw new Error(body?.message ?? `Auto Prediction preference load failed: ${res.status}`)
+  }
+  return body
+}
+
+export async function setAutoPredictionDefaultWorkspace(
+  workspaceId: string,
+): Promise<{ defaultWorkspaceId: string; ready: true }> {
+  const res = await fetch('/api/workspaces/auto-prediction/default-workspace', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ workspaceId }),
+  })
+  const body = (await res.json().catch(() => null)) as
+    | { defaultWorkspaceId?: string; ready?: boolean; message?: string; error?: string }
+    | null
+  if (!res.ok || body?.ready !== true || typeof body.defaultWorkspaceId !== 'string') {
+    throw new Error(body?.message ?? body?.error ?? `Auto Prediction preference save failed: ${res.status}`)
+  }
+  return { defaultWorkspaceId: body.defaultWorkspaceId, ready: true }
+}
+
+export async function initializeAutoPredictionWorkspace(): Promise<Workspace> {
+  const res = await fetch('/api/workspaces/auto-prediction/initialize', { method: 'POST' })
+  const body = (await res.json().catch(() => null)) as
+    | { workspace?: Workspace; message?: string; error?: string }
+    | null
+  if (!res.ok || !body?.workspace) {
+    throw new Error(body?.message ?? body?.error ?? `Auto Prediction initialization failed: ${res.status}`)
+  }
+  return body.workspace
+}
+
+export async function initializeChatWorkspace(): Promise<Workspace> {
+  const res = await fetch('/api/workspaces/chat/initialize', { method: 'POST' })
+  const body = (await res.json().catch(() => null)) as
+    | { workspace?: Workspace; message?: string; error?: string }
+    | null
+  if (!res.ok || !body?.workspace) {
+    throw new Error(body?.message ?? body?.error ?? `Ask Alice initialization failed: ${res.status}`)
+  }
+  return body.workspace
+}
+
+export const MANAGER_WORKSPACE_ID = 'workspace-manager'
+
+export interface ManagerWorkspaceSnapshot {
+  readonly id: typeof MANAGER_WORKSPACE_ID
+  readonly tag: string
+  readonly activeWorkspaceCount: number
+  readonly sessions: readonly SessionRecord[]
+}
+
+export interface ManagerQuickStartResult {
+  readonly manager: ManagerWorkspaceSnapshot
+  readonly session: SessionRecord
+  /** Pi opens in the Web surface; native TUI runtimes return no structured snapshot. */
+  readonly snapshot: WebSessionSnapshot | null
+}
+
+export async function getWorkspaceManager(): Promise<ManagerWorkspaceSnapshot> {
+  const res = await fetch('/api/workspaces/manager')
+  const body = (await res.json().catch(() => null)) as { manager?: ManagerWorkspaceSnapshot; message?: string } | null
+  if (!res.ok || !body?.manager) throw new Error(body?.message ?? `manager load failed: ${res.status}`)
+  return body.manager
+}
+
+export async function quickStartWorkspaceManager(
+  prompt: string,
+  agent: string,
+  credentialSlug?: string,
+  model?: string | null,
+  reasoningEffort?: ModelReasoningEffort,
+  credentialSource?: 'native',
+): Promise<ManagerQuickStartResult> {
+  const request: Record<string, unknown> = { prompt, agent };
+  if (credentialSource !== undefined) request['credentialSource'] = credentialSource;
+  if (credentialSlug !== undefined) request['credentialSlug'] = credentialSlug;
+  if (model) request['model'] = model;
+  if (reasoningEffort) request['reasoningEffort'] = reasoningEffort;
+  const res = await fetch('/api/workspaces/manager/quick-start', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(request),
+  })
+  const body = (await res.json().catch(() => null)) as (ManagerQuickStartResult & { message?: string; error?: string }) | null
+  if (!res.ok || !body?.manager || !body.session || !('snapshot' in body)) {
+    throw new Error(body?.message ?? body?.error ?? `manager start failed: ${res.status}`)
+  }
+  return body
+}
+
+/** Error thrown by `quickChat`, carrying the backend error `code` when present
+ *  (e.g. `no_ai_credential` → the composer bounces the user to Settings). */
+export class QuickChatError extends Error {
+  constructor(message: string, readonly code?: string) {
+    super(message);
+    this.name = 'QuickChatError';
+  }
+}
+
+/**
+ * Quick-chat launch — the "type a message → you're in" front door. One POST
+ * reuses-or-creates the chat workspace and spawns a fresh session seeded with
+ * `prompt`; the returned `session.sessionId` is what the caller attaches to.
+ * AI access, model, and effort are independent optional Session overrides.
+ * Omitting access keeps normal Workspace/runtime resolution; an explicit
+ * native source bypasses Workspace provider files, while a selected vault
+ * credential never rewrites the Workspace merely to launch.
+ */
+export async function quickChat(
+  prompt: string,
+  agent?: string,
+  credentialSlug?: string,
+  targetWsId?: string,
+  template?: 'chat' | 'auto-quant-v2' | 'auto-prediction',
+  model?: string | null,
+  reasoningEffort?: ModelReasoningEffort,
+  credentialSource?: 'native',
+      surface?: 'terminal' | 'webpi',
+): Promise<QuickChatResult> {
+  const body: Record<string, unknown> = { prompt };
+  if (surface) body['surface'] = surface;
+  if (credentialSource !== undefined) body['credentialSource'] = credentialSource;
+  if (agent !== undefined) body['agent'] = agent;
+  if (credentialSlug !== undefined) body['credentialSlug'] = credentialSlug;
+  if (targetWsId !== undefined) body['targetWsId'] = targetWsId;
+  if (template !== undefined) body['template'] = template;
+  if (model) body['model'] = model;
+  if (reasoningEffort) body['reasoningEffort'] = reasoningEffort;
+  const res = await fetch('/api/workspaces/quick-chat', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const parsed = (await res.json().catch(() => null)) as { error?: string } | null;
+    throw new QuickChatError(`quick chat failed: ${res.status} ${parsed?.error ?? ''}`, parsed?.error);
+  }
+  return (await res.json()) as QuickChatResult;
+}
+
+/** Pause a session — kills its PTY but keeps the record so it can be resumed later. */
+export async function pauseSession(wsId: string, sessionId: string): Promise<boolean> {
+  const res = await fetch(
+    `/api/workspaces/${encodeURIComponent(wsId)}/sessions/${encodeURIComponent(sessionId)}/pause`,
+    { method: 'POST' },
+  );
+  return res.ok;
+}
+
+/**
+ * Resume a paused session. Server re-spawns the PTY using the adapter's resume
+ * semantic (claude: --resume <id> or --continue; codex: resume --last; shell:
+ * fresh PTY w/ scrollback restore in S5).
+ */
+export async function resumeSession(
+  wsId: string,
+  sessionId: string,
+): Promise<SpawnedSession> {
+  const res = await fetch(
+    `/api/workspaces/${encodeURIComponent(wsId)}/sessions/${encodeURIComponent(sessionId)}/resume`,
+    { method: 'POST' },
+  );
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: string; message?: string } | null;
+    throw new Error(body?.message ?? body?.error ?? `resume session failed: ${res.status}`);
+  }
+  const body = await res.json().catch(() => null) as SpawnedSession | null;
+  if (!body || body.sessionId !== sessionId || body.wsId !== wsId
+    || typeof body.pid !== 'number' || !Number.isFinite(body.pid)
+    || typeof body.startedAt !== 'number' || !Number.isFinite(body.startedAt)) {
+    throw new Error('Unable to resume this Session: the server returned an invalid response. Please try again.');
+  }
+  return body;
+}
+
+export interface PausedSessionRuntimeUpdate {
+  readonly credentialSource: 'native' | 'vault';
+  readonly credentialSlug?: string | null;
+  readonly model?: string | null;
+  readonly reasoningEffort?: ModelReasoningEffort | null;
+}
+
+/** Replace one paused Session's secret-free AI binding. The Session remains
+ * paused; the next resume projects this binding into the native runtime. */
+export async function updatePausedSessionRuntime(
+  wsId: string,
+  sessionId: string,
+  update: PausedSessionRuntimeUpdate,
+): Promise<SessionRecord> {
+  const res = await fetch(
+    `/api/workspaces/${encodeURIComponent(wsId)}/sessions/${encodeURIComponent(sessionId)}/runtime`,
+    {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(update),
+    },
+  );
+  const body = (await res.json().catch(() => null)) as {
+    session?: SessionRecord;
+    error?: string;
+    message?: string;
+  } | null;
+  if (!res.ok || !body?.session) {
+    throw new Error(body?.message ?? body?.error ?? `Session AI configuration update failed: ${res.status}`);
+  }
+  return body.session;
+}
+
+export interface ResumeRuntimeUpdateResult {
+  readonly resumeId: string;
+  readonly agent: string;
+  readonly runtime: NonNullable<WorkspaceSessionDirectoryEntry['runtime']>;
+}
+
+/** Replace credential/model/effort on an idle product Session by resumeId.
+ * Agent runtime stays frozen. Used by the Issue page after a Session owner
+ * has already been materialized. */
+export async function updateResumeRuntime(
+  wsId: string,
+  resumeId: string,
+  update: PausedSessionRuntimeUpdate,
+): Promise<ResumeRuntimeUpdateResult> {
+  const res = await fetch(
+    `/api/workspaces/${encodeURIComponent(wsId)}/resumes/${encodeURIComponent(resumeId)}/runtime`,
+    {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(update),
+    },
+  );
+  const body = (await res.json().catch(() => null)) as {
+    resumeId?: string;
+    agent?: string;
+    runtime?: ResumeRuntimeUpdateResult['runtime'];
+    error?: string;
+    message?: string;
+  } | null;
+  if (!res.ok || !body?.resumeId || !body.agent || !body.runtime) {
+    throw new Error(body?.message ?? body?.error ?? `Session AI configuration update failed: ${res.status}`);
+  }
+  return { resumeId: body.resumeId, agent: body.agent, runtime: body.runtime };
+}
+
+function webSessionUrl(wsId: string, sessionId: string, tail = ''): string {
+  return `/api/workspaces/${encodeURIComponent(wsId)}/sessions/${encodeURIComponent(sessionId)}/web${tail}`;
+}
+
+async function webSessionMutation(url: string, action: string, payload?: unknown): Promise<WebSessionSnapshot> {
+  const res = await fetch(url, {
+    method: 'POST',
+    ...(payload === undefined
+      ? {}
+      : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) }),
+  });
+  const body = (await res.json().catch(() => null)) as { snapshot?: WebSessionSnapshot; message?: string } | null;
+  if (!res.ok || !body?.snapshot) throw new Error(body?.message ?? `Web ${action} failed: ${res.status}`);
+  return body.snapshot;
+}
+
+export async function openWebSession(wsId: string, sessionId: string): Promise<WebSessionSnapshot> {
+  return webSessionMutation(webSessionUrl(wsId, sessionId, '/open'), 'open');
+}
+
+export async function getWebSession(
+  wsId: string,
+  sessionId: string,
+  revision?: number,
+): Promise<WebSessionSnapshot | null> {
+  const query = revision === undefined ? '' : `?revision=${encodeURIComponent(String(revision))}`;
+  const res = await fetch(webSessionUrl(wsId, sessionId, query));
+  const body = (await res.json().catch(() => null)) as {
+    snapshot?: WebSessionSnapshot;
+    unchanged?: boolean;
+    message?: string;
+  } | null;
+  if (!res.ok) throw new Error(body?.message ?? `Web read failed: ${res.status}`);
+  if (body?.unchanged) return null;
+  if (!body?.snapshot) throw new Error('Web response has no snapshot');
+  return body.snapshot;
+}
+
+export async function promptWebSession(
+  wsId: string,
+  sessionId: string,
+  message: string,
+): Promise<WebSessionSnapshot> {
+  return webSessionMutation(webSessionUrl(wsId, sessionId, '/prompt'), 'prompt', { message });
+}
+
+export async function abortWebSession(wsId: string, sessionId: string): Promise<WebSessionSnapshot> {
+  return webSessionMutation(webSessionUrl(wsId, sessionId, '/abort'), 'abort');
+}
+
+/** Answer an offered option, or use an empty optionId and text for a question. */
+export async function respondWebSession(
+  wsId: string,
+  sessionId: string,
+  requestId: string,
+  optionId: string,
+  text?: string,
+): Promise<WebSessionSnapshot> {
+  return webSessionMutation(webSessionUrl(wsId, sessionId, '/respond'), 'respond', { requestId, optionId, ...(text !== undefined ? { text } : {}) });
+}
+
+/** Remove a conversation from the active floor (kills its process first). */
+export async function deleteSession(wsId: string, sessionId: string): Promise<boolean> {
+  const res = await fetch(
+    `/api/workspaces/${encodeURIComponent(wsId)}/sessions/${encodeURIComponent(sessionId)}`,
+    { method: 'DELETE' },
+  );
+  return res.ok;
+}
+
+export async function deleteWorkspace(id: string): Promise<boolean> {
+  const res = await fetch(`/api/workspaces/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null) as { message?: string } | null
+    throw new Error(body?.message ?? `offboard failed: ${res.status}`)
+  }
+  return res.ok;
+}
+
+export interface WorkspaceOffboardingAssessment {
+  readonly workspace: { readonly id: string; readonly tag: string; readonly dir: string }
+  readonly canOffboard: boolean
+  readonly blockers: readonly string[]
+  readonly runningHeadless: readonly { readonly taskId: string; readonly resumeId: string; readonly agent: string }[]
+  readonly untrackedHeadlessActive: boolean
+  readonly runningSessions: number
+  readonly sessionRecords: number
+  readonly resumeIds: readonly string[]
+  readonly openIssueIds: readonly string[]
+  readonly scheduledIssueIds: readonly string[]
+  readonly git: GitStatus | null
+}
+
+export async function getWorkspaceOffboardingAssessment(id: string): Promise<WorkspaceOffboardingAssessment> {
+  const res = await fetch(`/api/workspaces/${encodeURIComponent(id)}/offboarding`)
+  if (!res.ok) throw new Error(`offboarding assessment failed: ${res.status}`)
+  return ((await res.json()) as { assessment: WorkspaceOffboardingAssessment }).assessment
+}
+
+export async function offboardWorkspace(
+  id: string,
+  input: { reason: string; notes?: string },
+): Promise<void> {
+  const res = await fetch(`/api/workspaces/${encodeURIComponent(id)}/offboard`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  if (!res.ok) {
+    const body = await res.json().catch(() => null) as { message?: string } | null
+    throw new Error(body?.message ?? `offboard failed: ${res.status}`)
+  }
+}
+
+export type WorkspaceLifecycleState =
+  | 'active'
+  | 'offboarding'
+  | 'departed'
+  | 'restoring'
+  | 'purging'
+  | 'purged'
+
+export interface DepartedWorkspace {
+  readonly id: string
+  readonly tag: string
+  readonly activeDir: string
+  readonly departedDir?: string
+  readonly createdAt: string
+  readonly updatedAt: string
+  readonly departedAt?: string
+  readonly purgedAt?: string
+  readonly lifecycle: WorkspaceLifecycleState
+  readonly reason?: string
+  readonly absorbedIntoWorkspaceId?: string
+  readonly absorbedAt?: string
+  readonly absorbCommit?: string
+  readonly legacyImported?: boolean
+  readonly handoff?: {
+    readonly preparedAt: string
+    readonly notes?: string
+    readonly dirtyFiles: readonly string[]
+    readonly openIssueIds: readonly string[]
+    readonly scheduledIssueIds: readonly string[]
+    readonly resumeIds: readonly string[]
+    readonly successors?: Readonly<Record<string, string>>
+    readonly sessionRecords: number
+  }
+}
+
+export async function listDepartedWorkspaces(): Promise<DepartedWorkspace[]> {
+  const res = await fetch('/api/workspaces/departed')
+  if (!res.ok) throw new Error(`list departed workspaces failed: ${res.status}`)
+  return ((await res.json()) as { workspaces: DepartedWorkspace[] }).workspaces
+}
+
+export async function restoreWorkspace(id: string): Promise<void> {
+  const res = await fetch(`/api/workspaces/departed/${encodeURIComponent(id)}/restore`, { method: 'POST' })
+  if (!res.ok) {
+    const body = await res.json().catch(() => null) as { message?: string } | null
+    throw new Error(body?.message ?? `restore failed: ${res.status}`)
+  }
+}
+
+export async function purgeDepartedWorkspace(id: string): Promise<void> {
+  const res = await fetch(`/api/workspaces/departed/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  if (!res.ok) {
+    const body = await res.json().catch(() => null) as { message?: string } | null
+    throw new Error(body?.message ?? `purge failed: ${res.status}`)
+  }
+}
+
+export type WorkspaceMetadataPatch = {
+  displayName?: string | null;
+  description?: string | null;
+};
+
+export async function updateWorkspaceMetadata(
+  id: string,
+  metadata: WorkspaceMetadataPatch,
+): Promise<Workspace> {
+  const res = await fetch(`/api/workspaces/${encodeURIComponent(id)}/metadata`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(metadata),
+  });
+  if (!res.ok) {
+    const msg = await res.text().catch(() => '');
+    throw new Error(`update workspace metadata failed: ${res.status} ${msg}`);
+  }
+  const body = (await res.json()) as { workspace: Workspace };
+  return body.workspace;
+}
+
+export async function updateWorkspaceRuntimeDefaults(
+  id: string,
+  input: Readonly<Record<WorkspaceRuntimeMode, {
+    readonly defaultAgent: string | null
+    readonly agents: Readonly<Record<string, WorkspaceRuntimePreference>>
+  }>>,
+): Promise<Workspace> {
+  const res = await fetch(
+    `/api/workspaces/${encodeURIComponent(id)}/runtime-settings`,
+    {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    },
+  )
+  const body = await res.json().catch(() => null) as { workspace?: Workspace; message?: string } | null
+  if (!res.ok || !body?.workspace) {
+    throw new Error(body?.message ?? `update Workspace AI preferences failed: ${res.status}`)
+  }
+  return body.workspace
+}
+
+/**
+ * Kill the PTY for this workspace. Server-side PersistentSession disposes,
+ * memory is freed, on-disk Claude Code session JSONLs are preserved. The
+ * workspace itself stays in the registry. Idempotent.
+ */
+export async function stopWorkspace(id: string): Promise<boolean> {
+  const res = await fetch(`/api/workspaces/${encodeURIComponent(id)}/stop`, {
+    method: 'POST',
+  });
+  return res.ok;
+}
+
+// ── git ──────────────────────────────────────────────────────────────────────
+
+export interface GitLogEntry {
+  readonly hash: string;
+  readonly subject: string;
+  readonly relTime: string;
+  readonly authorTime: string;
+}
+
+export interface GitStatusFile {
+  readonly path: string;
+  readonly status: string;
+}
+
+export interface GitStatus {
+  readonly branch: string | null;
+  readonly clean: boolean;
+  readonly files: readonly GitStatusFile[];
+}
+
+export async function getGitLog(id: string, limit = 30): Promise<GitLogEntry[]> {
+  const res = await fetch(
+    `/api/workspaces/${encodeURIComponent(id)}/git/log?limit=${limit}`,
+  );
+  if (!res.ok) throw new Error(`git log failed: ${res.status}`);
+  const body = (await res.json()) as { entries: GitLogEntry[] };
+  return body.entries;
+}
+
+export async function getGitStatus(id: string): Promise<GitStatus> {
+  const res = await fetch(`/api/workspaces/${encodeURIComponent(id)}/git/status`);
+  if (!res.ok) throw new Error(`git status failed: ${res.status}`);
+  return (await res.json()) as GitStatus;
+}
+
+// ── files ────────────────────────────────────────────────────────────────────
+
+export interface FileEntry {
+  readonly name: string;
+  readonly kind: 'file' | 'dir' | 'symlink' | 'other';
+  readonly sizeBytes: number | null;
+  readonly mtime: string;
+}
+
+export interface DirListing {
+  readonly path: string;
+  readonly entries: readonly FileEntry[];
+}
+
+function electronWorkspaceBridge(): NonNullable<Window['openAlice']>['workspace'] | undefined {
+  return typeof window !== 'undefined' ? window.openAlice?.workspace : undefined;
+}
+
+export async function listFiles(id: string, relPath: string): Promise<DirListing> {
+  // Electron app mode has a native file transport. Browser/dev/Docker keep the
+  // HTTP path, which is still the right shape for self-hosting and ordinary
+  // browser debugging.
+  const bridge = electronWorkspaceBridge();
+  if (bridge) return bridge.listFiles({ id, path: relPath });
+  const qs = relPath ? `?path=${encodeURIComponent(relPath)}` : '';
+  const res = await fetch(`/api/workspaces/${encodeURIComponent(id)}/files${qs}`);
+  if (!res.ok) throw new Error(`list files failed: ${res.status}`);
+  return (await res.json()) as DirListing;
+}
+
+/**
+ * Read a single UTF-8 text file from inside a workspace. Returns a
+ * discriminated result so the caller (Inbox detail pane) can render
+ * tombstone variants without parsing error strings.
+ */
+export type ReadFileResult =
+  | { kind: 'ok'; content: string }
+  | { kind: 'workspace_missing' }
+  | { kind: 'file_missing' }
+  | { kind: 'too_large'; sizeBytes: number }
+  | { kind: 'invalid_path' }
+  | { kind: 'error'; message: string };
+
+export async function readWorkspaceFile(id: string, relPath: string): Promise<ReadFileResult> {
+  const bridge = electronWorkspaceBridge();
+  if (bridge) return bridge.readFile({ id, path: relPath });
+  const qs = `?path=${encodeURIComponent(relPath)}`;
+  let res: Response;
+  try {
+    res = await fetch(`/api/workspaces/${encodeURIComponent(id)}/file${qs}`);
+  } catch (err) {
+    return { kind: 'error', message: (err as Error).message };
+  }
+  if (res.ok) {
+    const body = (await res.json()) as { content: string };
+    return { kind: 'ok', content: body.content };
+  }
+  // Map known error shapes to discriminated variants. Unknown → generic error.
+  const body = (await res.json().catch(() => null)) as { error?: string; sizeBytes?: number } | null;
+  switch (body?.error) {
+    case 'workspace_not_found': return { kind: 'workspace_missing' };
+    case 'file_not_found':      return { kind: 'file_missing' };
+    case 'file_too_large':      return { kind: 'too_large', sizeBytes: body.sizeBytes ?? 0 };
+    case 'invalid_path':        return { kind: 'invalid_path' };
+    default:                    return { kind: 'error', message: body?.error ?? `HTTP ${res.status}` };
+  }
+}
+
+// ── Agent provider config ───────────────────────────────────────────────────
+
+export interface AgentConfig {
+  readonly baseUrl: string | null;
+  readonly apiKey: string | null;
+  readonly model: string | null;
+  /** Optional custom-model context window for opencode/Pi provider overrides. */
+  readonly contextWindow?: number | null;
+  /** Pi/opencode custom-model reasoning capability when explicitly registered. */
+  readonly reasoning?: boolean | null;
+  /** Workspace-local reasoning effort projected into the runtime's native field. */
+  readonly reasoningEffort?: ModelReasoningEffort | null;
+  /** Wire protocol the endpoint speaks — drives how the adapter is configured. */
+  readonly wireShape?: WireShape | null;
+  /** Codex only — wire format for the upstream API. */
+  readonly wireApi?: 'chat' | 'responses' | null;
+  /** Header mode whenever wireShape is Anthropic Messages. */
+  readonly authMode?: 'x-api-key' | 'bearer';
+}
+
+export interface AgentConfigBundle {
+  readonly claude: AgentConfig | null;
+  readonly codex: AgentConfig | null;
+  readonly grok?: AgentConfig | null;
+  readonly opencode: AgentConfig | null;
+  readonly pi: AgentConfig | null;
+}
+
+export type AgentId = 'claude' | 'codex' | 'cursor' | 'agy' | 'grok' | 'omp' | 'opencode' | 'pi';
+
+export type AgentCredentialSource =
+  | 'runtime-login'
+  | 'workspace-config'
+  | 'launcher-vault'
+  | 'missing'
+  | 'unknown-agent';
+
+export interface AgentCredentialReadiness {
+  readonly agent: string;
+  readonly ready: boolean;
+  readonly requiresCredential: boolean;
+  readonly source: AgentCredentialSource;
+  readonly hasWorkspaceConfig: boolean;
+  readonly hasUsableWorkspaceConfig: boolean;
+  readonly detectedCredentialSlug: string | null;
+  readonly compatibleCredentialSlugs: readonly string[];
+  readonly injectableCredentialSlugs: readonly string[];
+  readonly settingsTarget?: 'ai-provider';
+  readonly message?: string;
+}
+
+export interface AgentReadinessBundle {
+  readonly agents: Record<string, AgentCredentialReadiness>;
+}
+
+// ── Central credential store ──────────────────────────────────────────────
+//
+// Alice's reusable credentials (`data/config/ai-provider-manager.json`). The
+// modal's "Load from saved credential" picker reads these; "Save to Alice"
+// writes a new one. apiKey is returned so a picked credential can be flashed
+// into the form (same exposure as agent-profiles; admin-token gated).
+
+export interface SavedCredential {
+  readonly slug: string;
+  readonly vendor: string;
+  readonly label?: string;
+  readonly authType: 'api-key' | 'subscription';
+  /** Wire capabilities: each shape this key speaks → its endpoint baseUrl. */
+  readonly wires: Partial<Record<WireShape, string>>;
+  /** Last model run against this key, when remembered. Absent until first use. */
+  readonly lastModel?: string;
+  /** Model injection resolves right now (lastModel, then the vendor default). */
+  readonly resolvedModel?: string;
+  /** Registered or explicitly model-scoped context limit projected for this runtime. */
+  readonly resolvedContextWindow?: number;
+  /** Registered reasoning metadata this runtime would receive on injection. */
+  readonly resolvedReasoning?: boolean;
+  readonly resolvedReasoningEffort?: ModelReasoningEffort;
+  readonly resolvedReasoningMode?: ModelReasoningMode;
+  /** Omitted in the per-agent (`?agent=`) listing — only the unfiltered list returns it. */
+  readonly apiKey?: string | null;
+}
+
+export async function listCredentials(): Promise<SavedCredential[]> {
+  const res = await fetch('/api/workspaces/credentials');
+  if (!res.ok) throw new Error(`list credentials failed: ${res.status}`);
+  const body = (await res.json()) as { credentials: SavedCredential[] };
+  return body.credentials;
+}
+
+/** List only the credentials the given agent can be driven by (wire-compatible). */
+export async function listAgentCredentials(agent: string): Promise<SavedCredential[]> {
+  const res = await fetch(`/api/workspaces/credentials?agent=${encodeURIComponent(agent)}`);
+  if (!res.ok) throw new Error(`list agent credentials failed: ${res.status}`);
+  const body = (await res.json()) as { credentials: SavedCredential[] };
+  return body.credentials;
+}
+
+/** Which vault credential a workspace's agent is currently configured with (null = none/hand-edited). */
+export interface WorkspaceCredentialDetection {
+  /** True when the runtime has any usable native Workspace config, even when its key is hand-edited. */
+  readonly configured: boolean;
+  readonly slug: string | null;
+  readonly model: string | null;
+  readonly contextWindow: number | null;
+  readonly wireShape: WireShape | null;
+  readonly reasoning?: boolean | null;
+  readonly reasoningEffort?: ModelReasoningEffort | null;
+  readonly reasoningMode?: ModelReasoningMode | null;
+  /** Registered thinking-switch default when the model has no native effort tier. */
+  readonly reasoningDefaultEnabled?: boolean | null;
+  readonly interactiveSetupStatus?:
+    | 'ready'
+    | 'runtime-onboarding-required'
+    | 'workspace-trust-required'
+    | 'unknown';
+}
+
+export async function detectWorkspaceCredential(
+  wsId: string,
+  agent: string,
+): Promise<WorkspaceCredentialDetection> {
+  const res = await fetch(
+    `/api/workspaces/${encodeURIComponent(wsId)}/agent-config/${encodeURIComponent(agent)}/credential`,
+  );
+  if (!res.ok) return {
+    configured: false,
+    slug: null,
+    model: null,
+    contextWindow: null,
+    wireShape: null,
+    reasoning: null,
+    reasoningEffort: null,
+    reasoningMode: null,
+  };
+  return (await res.json()) as WorkspaceCredentialDetection;
+}
+
+/** Persist a hand-entered provider as a reusable central credential. Returns the slug. */
+export async function saveCredential(input: {
+  apiKey: string;
+  baseUrl?: string;
+  agent?: AgentId;
+  label?: string;
+  wireShape?: WireShape;
+}): Promise<{ slug: string; vendor: string }> {
+  const res = await fetch('/api/workspaces/credentials', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const msg = await res.text().catch(() => '');
+    throw new Error(`save credential failed: ${res.status} ${msg}`);
+  }
+  return (await res.json()) as { slug: string; vendor: string };
+}
+
+export async function getAgentConfig(wsId: string): Promise<AgentConfigBundle> {
+  const res = await fetch(`/api/workspaces/${encodeURIComponent(wsId)}/agent-config`);
+  if (!res.ok) throw new Error(`get agent config failed: ${res.status}`);
+  return (await res.json()) as AgentConfigBundle;
+}
+
+export async function getAgentReadiness(wsId: string): Promise<AgentReadinessBundle> {
+  const res = await fetch(`/api/workspaces/${encodeURIComponent(wsId)}/agent-readiness`);
+  if (!res.ok) throw new Error(`get agent readiness failed: ${res.status}`);
+  return (await res.json()) as AgentReadinessBundle;
+}
+
+export async function saveAgentConfig(
+  wsId: string,
+  agent: AgentId,
+  cfg: AgentConfig,
+): Promise<void> {
+  const res = await fetch(
+    `/api/workspaces/${encodeURIComponent(wsId)}/agent-config/${agent}`,
+    {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(cfg),
+    },
+  );
+  if (!res.ok) {
+    const msg = await res.text().catch(() => '');
+    throw new Error(`save agent config failed: ${res.status} ${msg}`);
+  }
+}
+
+export interface AgentTestResult {
+  readonly ok: boolean;
+  readonly response?: string;
+  readonly error?: string;
+}
+
+export interface AgentTestInput {
+  readonly baseUrl: string;
+  readonly apiKey: string;
+  readonly model: string;
+  /** Wire protocol to probe with (shared dispatcher). */
+  readonly wireShape?: WireShape;
+  /** Codex only. */
+  readonly wireApi?: 'chat' | 'responses';
+  /** Claude only. */
+  readonly authMode?: 'x-api-key' | 'bearer';
+}
+
+export async function testAgentConfig(
+  wsId: string,
+  agent: AgentId,
+  cfg: AgentTestInput,
+): Promise<AgentTestResult> {
+  const res = await fetch(
+    `/api/workspaces/${encodeURIComponent(wsId)}/agent-config/${agent}/test`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(cfg),
+    },
+  );
+  try {
+    return (await res.json()) as AgentTestResult;
+  } catch {
+    return { ok: false, error: `HTTP ${res.status}` };
+  }
+}
+
+/** Read-only content URL, also forwarded through the desktop app protocol. */
+export function workspaceContentHref(wsId: string, path: string) {
+  return `/api/workspaces/${encodeURIComponent(wsId)}/content?path=${encodeURIComponent(path)}`
+}

@@ -1,0 +1,463 @@
+import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react'
+import {
+  AlertTriangle,
+  ArrowRight,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  FileDiff,
+  GitCommitHorizontal,
+  LoaderCircle,
+  RefreshCw,
+  ShieldCheck,
+} from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+
+import { CenteredLoading, EmptyState } from '../StateViews'
+import { Button } from '../ui/button'
+import { useWorkspace } from '../../tabs/store'
+import { SelectionCheckIcon } from '../ui/selection-check-icon'
+import {
+  applyTemplateUpgrade,
+  getTemplateUpgradePlan,
+  TemplateUpgradeApiError,
+  type SkillProjectionRequest,
+  type TemplateUpgradeFilePlan,
+  type TemplateUpgradePlan,
+  type TemplateUpgradeResolution,
+  type TemplateUpgradeResult,
+} from './api'
+
+interface Props {
+  readonly projection?: SkillProjectionRequest
+  readonly layer?: 'template' | 'alice-harness'
+  readonly wsId: string
+  readonly onWorkspaceChanged: () => void
+  readonly onClose: () => void
+}
+
+/**
+ * A review surface, not an "update everything" button. It makes the three-way
+ * contract visible in user language: safe template-only changes, protected
+ * Workspace customizations, and the small set of files needing a decision.
+ */
+export function WorkspaceTemplateUpgradePanel({
+  wsId,
+  layer = 'template', projection,
+  onWorkspaceChanged,
+  onClose,
+}: Props): ReactElement {
+  const { t } = useTranslation()
+  const { openOrFocus } = useWorkspace()
+  const [plan, setPlan] = useState<TemplateUpgradePlan | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [applying, setApplying] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [unsupported, setUnsupported] = useState(false)
+  const [result, setResult] = useState<TemplateUpgradeResult | null>(null)
+  const [resolutions, setResolutions] = useState<Record<string, TemplateUpgradeResolution>>({})
+
+  const load = useCallback(async (): Promise<void> => {
+    setLoading(true)
+    setError(null)
+    setUnsupported(false)
+    try {
+      const next = await (layer === 'template' ? getTemplateUpgradePlan(wsId) : getTemplateUpgradePlan(wsId, layer, projection))
+      setPlan(next)
+      setResolutions((current) => Object.fromEntries(
+        Object.entries(current).filter(([path]) =>
+          next.files.some((file) => file.path === path && file.status === 'conflict')),
+      ))
+    } catch (err) {
+      if (err instanceof TemplateUpgradeApiError && err.code === 'unsupported') {
+        setUnsupported(true)
+      }
+      setError((err as Error).message)
+    } finally {
+      setLoading(false)
+    }
+  }, [wsId, layer, projection])
+
+  useEffect(() => { void load() }, [load])
+
+  const conflicts = useMemo(
+    () => plan?.files.filter((file) => file.status === 'conflict') ?? [],
+    [plan],
+  )
+  const unresolved = conflicts.filter((file) => !resolutions[file.path]).length
+  const current = projection ? !plan?.files.some((file) => file.status === 'ready' || file.status === 'conflict') : plan?.fromVersion === plan?.toVersion && (layer === 'template' || !plan?.files.some((file) => file.status === 'ready' || file.status === 'conflict'))
+  const canApply = !!plan && !current && !plan.blocked && unresolved === 0 && !applying
+
+  const apply = async (): Promise<void> => {
+    if (!plan || !canApply) return
+    setApplying(true)
+    setError(null)
+    try {
+      const next = await (layer === 'template' ? applyTemplateUpgrade(wsId, plan.planDigest, resolutions) : applyTemplateUpgrade(wsId, plan.planDigest, resolutions, layer, projection))
+      setResult(next)
+      onWorkspaceChanged()
+      await load()
+    } catch (err) {
+      if (err instanceof TemplateUpgradeApiError && err.plan) { setPlan(err.plan); setResolutions({}) }
+      setError((err as Error).message)
+    } finally {
+      setApplying(false)
+    }
+  }
+
+  if (loading && !plan) {
+    return <CenteredLoading label={t('workspace.upgradeLoading')} />
+  }
+
+  if (unsupported) {
+    return (
+      <div className="flex min-h-[360px] items-center justify-center px-6">
+        <EmptyState
+          icon={<ShieldCheck />}
+          title={t('workspace.upgradeUnavailableTitle')}
+          description={error ?? undefined}
+        />
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex-1 space-y-4 overflow-y-auto p-4 sm:p-5">
+        {plan && (
+          <>
+            <section className="oa-status-surface overflow-hidden rounded-lg border border-border bg-secondary/35">
+              <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 text-[12px] font-semibold text-muted-foreground">
+                    <FileDiff size={14} />
+                    {projection ? projection.skill : layer === 'alice-harness' ? 'Alice Harness' : t('workspace.upgradeManagedAssets')}
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-[18px] font-semibold text-foreground">
+                    {projection ? t(`skillManager.${projection.action}`) : <>
+                    <span className="break-all">{plan.fromVersion === 'unversioned' ? t('aliceHarness.unversioned') : `v${plan.fromVersion}`}</span>
+                    <ArrowRight size={17} className="text-muted-foreground" />
+                    <span className={`break-all ${current ? '' : 'text-primary'}`}>v{plan.toVersion}</span></>}
+                  </div>
+                  <p className="mt-1 max-w-xl text-[12px] leading-relaxed text-muted-foreground">
+                    {projection ? t('skillManager.scopeHint') : current
+                      ? t('workspace.upgradeCurrentDescription')
+                      : t('workspace.upgradeDescription')}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  onClick={() => void load()}
+                  disabled={loading || applying}
+                  variant="outline"
+                  className="shrink-0"
+                >
+                  <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
+                  {t('workspace.upgradeRefresh')}
+                </Button>
+              </div>
+              {!current && (
+                <div className="grid grid-cols-3 border-t border-border bg-background/45">
+                  <Metric value={plan.summary.ready} label={t('workspace.upgradeReadyShort')} tone="accent" />
+                  <Metric value={plan.summary.preserved} label={t('workspace.upgradePreservedShort')} tone="neutral" />
+                  <Metric value={plan.summary.conflicts} label={t('workspace.upgradeConflictsShort')} tone="warning" />
+                </div>
+              )}
+            </section>
+
+            {plan.source === 'legacy-root-commit' && !current && (
+              <div className="rounded-lg border border-border/70 bg-secondary/25 px-3 py-2.5 text-[11px] leading-relaxed text-muted-foreground">
+                {t('workspace.upgradeLegacyBaseline')}
+              </div>
+            )}
+
+            {plan.blockers.length > 0 && (
+              <div className="rounded-lg border border-warning/35 bg-warning/8 px-3 py-3 text-[12px] text-foreground">
+                <div className="flex items-center gap-2 font-semibold text-warning">
+                  <AlertTriangle size={15} />
+                  {t('workspace.upgradeBlockedTitle')}
+                </div>
+                <ul className="mt-2 space-y-1.5 pl-5 text-muted-foreground">
+                  {plan.blockers.includes('active_sessions') && plan.activity.sessions.length === 0 && plan.activity.headless.length === 0 && (
+                    <li>{t('workspace.upgradeBlockedSessions')}</li>
+                  )}
+                  {plan.activity.sessions.map((session) => (
+                    <li key={session.sessionId}>
+                      {t('workspace.upgradeBlockedSessionItem', {
+                        name: session.name,
+                        agent: session.agent,
+                        surface: session.surface === 'webpi' ? 'Web' : 'TUI',
+                      })}
+                    </li>
+                  ))}
+                  {plan.activity.headless.map((run, index) => (
+                    <li key={run.taskId ?? `${run.agent}-${run.startedAt}-${index}`}>
+                      {t('workspace.upgradeBlockedHeadlessItem', {
+                        agent: run.agent,
+                        run: run.taskId ?? t('workspace.upgradeSynchronousRun'),
+                      })}
+                    </li>
+                  ))}
+                  {plan.blockers.includes('staged_changes') && <li>{t('workspace.upgradeBlockedStaged')}</li>}
+                </ul>
+              </div>
+            )}
+
+            {!current && plan.summary.ready > 0 && (
+              <FileGroup
+                title={t('workspace.upgradeReadyTitle')}
+                files={plan.files.filter((file) => file.status === 'ready')}
+                defaultOpen
+                tone="accent"
+              />
+            )}
+
+            {!current && plan.summary.preserved > 0 && (
+              <FileGroup
+                title={t('workspace.upgradePreservedTitle')}
+                files={plan.files.filter((file) => file.status === 'preserved')}
+                tone="neutral"
+              />
+            )}
+
+            {!current && conflicts.length > 0 && (
+              <section className="rounded-lg border border-warning/35 bg-secondary/20">
+                <div className="border-b border-border px-4 py-3">
+                  <div className="flex items-center gap-2 text-[13px] font-semibold text-foreground">
+                    <AlertTriangle size={15} className="text-warning" />
+                    {t('workspace.upgradeConflictTitle')}
+                    <span className="rounded-full bg-warning/12 px-2 py-0.5 text-[10px] text-warning">
+                      {conflicts.length}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                    {t('workspace.upgradeConflictDescription')}
+                  </p>
+                  <Button type="button" variant="outline" className="mt-3" onClick={() => {
+                    openOrFocus({ kind: 'chat-landing', params: {
+                      targetWsId: wsId,
+                      initialPrompt: `Upgrade this Workspace's ${layer === 'alice-harness' ? 'Alice Harness Skills' : 'managed template files'} to the current Project version. Run alice ${layer === 'alice-harness' ? 'harness' : 'template'} upgrade${projection ? ` --skill ${projection.skill} --action ${projection.action}` : ''} --mode detailed. Git could not merge some edits automatically. Compare the base, local and incoming files; preserve my custom intent while adopting current instructions and CLI syntax. Edit the conflicting files, preview again, then apply the same scoped command using --keep-workspace for files you resolved. Do not change unrelated files or Skill enablement preferences.`,
+                    } })
+                    onClose()
+                  }}>{t('workspace.upgradeResolveInChat')}</Button>
+                </div>
+                <div className="divide-y divide-border">
+                  {conflicts.map((file) => (
+                    <ConflictFile
+                      key={file.path}
+                      file={file}
+                      value={resolutions[file.path]}
+                      onChange={(value) => setResolutions((currentResolutions) => ({
+                        ...currentResolutions,
+                        [file.path]: value,
+                      }))}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {result && current && (
+              <div className="rounded-lg border border-success/35 bg-success/8 px-4 py-3">
+                <div className="flex items-center gap-2 text-[13px] font-semibold text-success">
+                  <Check size={16} />
+                  {t('workspace.upgradeCompleteTitle')}
+                </div>
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  {t('workspace.upgradeCompleteDescription', {
+                    count: result.changedPaths.length,
+                    commit: result.commit.slice(0, 8),
+                  })}
+                </p>
+              </div>
+            )}
+          </>
+        )}
+
+        {error && !unsupported && (
+          <div className="rounded-lg border border-destructive/35 bg-destructive/8 px-3 py-2.5 text-[12px] text-destructive" role="alert">
+            {error}
+          </div>
+        )}
+      </div>
+
+      <div className="flex flex-col gap-2 border-t border-border bg-secondary/30 p-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-h-5 text-[11px] text-muted-foreground">
+          {plan && !current && conflicts.length > 0 && (
+            unresolved > 0
+              ? t('workspace.upgradeUnresolved', { count: unresolved })
+              : t('workspace.upgradeAllResolved')
+          )}
+          {plan && !current && conflicts.length === 0 && (projection?.action === 'restore' ? t('skillManager.restoreHint') : t('workspace.upgradeNoConflicts'))}
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="outline" onClick={onClose} disabled={applying}>
+            {current ? t('common.close') : t('createWorkspace.cancel')}
+          </Button>
+          {!current && (
+            <Button
+              type="button"
+              onClick={() => void apply()}
+              disabled={!canApply}
+            >
+              {applying ? <LoaderCircle size={14} className="animate-spin" /> : <GitCommitHorizontal size={14} />}
+              {applying ? t('workspace.upgradeApplying') : projection ? t(`skillManager.${projection.action}`) : t('workspace.upgradeApply')}
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+function Metric({ value, label, tone }: {
+  value: number
+  label: string
+  tone: 'accent' | 'neutral' | 'warning'
+}): ReactElement {
+  const valueClass = tone === 'accent'
+    ? 'text-primary'
+    : tone === 'warning'
+      ? 'text-warning'
+      : 'text-foreground'
+  return (
+    <div className="border-r border-border px-3 py-2.5 text-center last:border-r-0">
+      <div className={`text-[16px] font-semibold tabular-nums ${valueClass}`}>{value}</div>
+      <div className="mt-0.5 truncate text-[10px] text-muted-foreground">{label}</div>
+    </div>
+  )
+}
+
+function FileGroup({ title, files, defaultOpen = false, tone }: {
+  title: string
+  files: readonly TemplateUpgradeFilePlan[]
+  defaultOpen?: boolean
+  tone: 'accent' | 'neutral'
+}): ReactElement {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <section className="rounded-lg border border-border bg-secondary/20">
+      <Button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        variant="ghost"
+        className="h-auto w-full justify-start gap-3 whitespace-normal rounded-lg px-4 py-3 text-left"
+      >
+        {open ? <ChevronDown size={15} className="mt-0.5 text-muted-foreground" /> : <ChevronRight size={15} className="mt-0.5 text-muted-foreground" />}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 text-[13px] font-semibold text-foreground">
+            {title}
+            <span className={`rounded-full px-2 py-0.5 text-[10px] ${tone === 'accent' ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'}`}>
+              {files.length}
+            </span>
+          </div>
+        </div>
+      </Button>
+      {open && (
+        <div className="border-t border-border px-4 py-2">
+          {files.map((file) => (
+            <div key={file.path} className="flex items-center gap-2 border-b border-border/60 py-2 last:border-b-0">
+              {file.status === 'ready'
+                ? <Check size={13} className="shrink-0 text-primary" />
+                : <ShieldCheck size={13} className="shrink-0 text-muted-foreground" />}
+              <code className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground" title={file.path}>{file.path}</code>
+              <span className="shrink-0 text-[10px] capitalize text-muted-foreground">{file.mergedPreview !== undefined ? t('workspace.upgradeMerged') : file.operation}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function ConflictFile({ file, value, onChange }: {
+  file: TemplateUpgradeFilePlan
+  value?: TemplateUpgradeResolution
+  onChange: (value: TemplateUpgradeResolution) => void
+}): ReactElement {
+  const { t } = useTranslation()
+  const [previewOpen, setPreviewOpen] = useState(false)
+  return (
+    <div className="px-4 py-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <code className="block truncate font-mono text-[11px] font-semibold text-foreground" title={file.path}>{file.path}</code>
+          <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{file.note}</p>
+        </div>
+        <div className="flex shrink-0 rounded-lg border border-border bg-background p-0.5" role="radiogroup" aria-label={file.path}>
+          <Choice active={value === 'workspace'} onClick={() => onChange('workspace')}>
+            {t('workspace.upgradeKeepWorkspace')}
+          </Choice>
+          <Choice
+            active={value === 'template'}
+            disabled={!file.canUseTemplate}
+            onClick={() => onChange('template')}
+          >
+            {t('workspace.upgradeUseTemplate')}
+          </Choice>
+        </div>
+      </div>
+      <Button
+        type="button"
+        onClick={() => setPreviewOpen((open) => !open)}
+        variant="ghost"
+        size="sm"
+        className="mt-2 px-1 text-[11px] text-muted-foreground"
+        aria-expanded={previewOpen}
+      >
+        {previewOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        {t('workspace.upgradeCompare')}
+      </Button>
+      {previewOpen && (
+        <div className={`mt-2 grid gap-2 ${file.basePreview !== undefined ? 'lg:grid-cols-3' : 'lg:grid-cols-2'}`}>
+          {file.basePreview !== undefined && <Preview title={t('workspace.upgradeBaseCopy')} value={file.basePreview} truncated={file.baseTruncated ?? false} />}
+          <Preview title={t('workspace.upgradeWorkspaceCopy')} value={file.currentPreview} truncated={file.currentTruncated} />
+          <Preview title={t('workspace.upgradeTemplateCopy')} value={file.templatePreview} truncated={file.templateTruncated} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Choice({ active, disabled = false, onClick, children }: {
+  active: boolean
+  disabled?: boolean
+  onClick: () => void
+  children: React.ReactNode
+}): ReactElement {
+  return (
+    <Button
+      type="button"
+      role="radio"
+      aria-checked={active}
+      disabled={disabled}
+      onClick={onClick}
+      variant="ghost"
+      size="xs"
+      className={active ? 'bg-muted text-foreground' : 'text-muted-foreground'}
+    >
+      {active && <SelectionCheckIcon />}
+      {children}
+    </Button>
+  )
+}
+
+function Preview({ title, value, truncated }: {
+  title: string
+  value: string | null
+  truncated: boolean
+}): ReactElement {
+  const { t } = useTranslation()
+  return (
+    <div className="min-w-0 overflow-hidden rounded-lg border border-border bg-background">
+      <div className="flex items-center justify-between border-b border-border px-2.5 py-1.5 text-[10px] font-semibold text-muted-foreground">
+        <span>{title}</span>
+        {truncated && <span>{t('workspace.upgradePreviewTruncated')}</span>}
+      </div>
+      <pre className="max-h-52 overflow-auto whitespace-pre-wrap break-words px-2.5 py-2 font-mono text-[10px] leading-relaxed text-foreground">
+        {value ?? t('workspace.upgradeFileMissing')}
+      </pre>
+    </div>
+  )
+}

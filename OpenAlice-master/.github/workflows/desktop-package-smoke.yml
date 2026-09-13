@@ -1,0 +1,259 @@
+name: Desktop Package Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      host:
+        description: Native host for manual rehearsal; promotion PRs always retain every host.
+        type: choice
+        default: all
+        options: [all, macos-14, macos-15-intel, windows-latest]
+  pull_request:
+    branches: [master]
+    paths:
+      - ".github/workflows/desktop-package-smoke.yml"
+      - ".github/workflows/release.yml"
+      - "apps/desktop/**"
+      - "packages/guardian-runtime/**"
+      - "build/entitlements*.plist"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "scripts/assert-desktop-package.mjs"
+      - "scripts/desktop-after-pack.mjs"
+      - "scripts/desktop-package-artifact.mjs"
+      - "scripts/desktop-packaged-smoke.mjs"
+      - "scripts/desktop-packaged-smoke-plan.mjs"
+      - "scripts/desktop-upgrade-smoke.mjs"
+      - "scripts/desktop-upgrade-smoke-lib.mjs"
+      - "scripts/desktop-existing-owner-smoke.mjs"
+      - "scripts/build-broker-packs.ts"
+      - "scripts/broker-pack-upgrade-smoke.ts"
+      - "scripts/guardian/**"
+      - "scripts/pnpm-command.mjs"
+      - "scripts/pnpm-command.spec.ts"
+      - "scripts/prepare-desktop-release-assets.mjs"
+      - "scripts/verify-desktop-update-assets.mjs"
+      - "scripts/smoke-packaged-toolchain.mjs"
+      - "scripts/verify-broker-packs.ts"
+      - "scripts/workspace-acceptance-ai-mock.mjs"
+      - "scripts/workspace-acceptance-receipt.mjs"
+      - "scripts/workspace-acceptance-receipt.spec.ts"
+      - "scripts/vendor-managed-runtime.mjs"
+      - "default/**"
+      - "src/ai-providers/**"
+      - "src/core/**"
+      - "src/server/cli.ts"
+      - "src/server/cli-commands.ts"
+      - "src/tool/**"
+      - "src/webui/plugin.ts"
+      - "src/webui/routes/issues.ts"
+      - "src/webui/routes/workspaces.ts"
+      - "src/workspaces/**"
+      - "services/uta/**"
+      - "services/connector/**"
+      - "packages/connector-protocol/**"
+      - "packages/uta-broker-*/**"
+concurrency:
+  group: desktop-package-smoke-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  preflight:
+    name: fast preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      beta_release_prep: ${{ steps.beta-release-prep.outcome == 'success' && steps.beta-release-prep.outputs.beta_release_prep || 'false' }}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Detect exact beta release preparation
+        id: beta-release-prep
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git show "${BASE_SHA}:scripts/classify-beta-release-prep.mjs" > "$RUNNER_TEMP/classify-beta-release-prep.mjs"
+          node "$RUNNER_TEMP/classify-beta-release-prep.mjs" --github-output "$GITHUB_OUTPUT"
+
+      - uses: pnpm/action-setup@v6
+        if: steps.beta-release-prep.outcome != 'success' || steps.beta-release-prep.outputs.beta_release_prep != 'true'
+
+      - uses: actions/setup-node@v7
+        if: steps.beta-release-prep.outcome != 'success' || steps.beta-release-prep.outputs.beta_release_prep != 'true'
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        if: steps.beta-release-prep.outcome != 'success' || steps.beta-release-prep.outputs.beta_release_prep != 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify CI workflow contracts
+        if: steps.beta-release-prep.outcome != 'success' || steps.beta-release-prep.outputs.beta_release_prep != 'true'
+        run: pnpm test:contract:workflow
+
+      - name: Typecheck root workspace
+        if: steps.beta-release-prep.outcome != 'success' || steps.beta-release-prep.outputs.beta_release_prep != 'true'
+        run: npx tsc --noEmit
+        timeout-minutes: 5
+
+  broker-packs-windows:
+    name: broker-packs windows-latest
+    needs: preflight
+    if: >-
+      needs.preflight.outputs.beta_release_prep != 'true' &&
+      (github.event_name != 'workflow_dispatch' || inputs.host == 'all' || inputs.host == 'windows-latest')
+    runs-on: windows-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the N-1 Broker Pack smoke resolves the previous release tag
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: ".bun-version"
+
+      - name: Build optional Broker Packs on Windows
+        run: pnpm broker-packs:build
+        timeout-minutes: 20
+
+      - name: Verify Broker Packs in compiled runtime
+        run: pnpm exec tsx scripts/verify-broker-packs.ts --compiled
+        timeout-minutes: 10
+
+      - name: Prove previous-release Broker Pack upgrade on Windows
+        run: pnpm broker-packs:upgrade-smoke
+        timeout-minutes: 10
+
+  package:
+    name: package ${{ matrix.os }}
+    needs: preflight
+    if: needs.preflight.outputs.beta_release_prep != 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include: >-
+          ${{ fromJSON(
+            github.event_name == 'workflow_dispatch' && inputs.host == 'macos-14' && '[{"os":"macos-14","arch":"arm64"}]' ||
+            github.event_name == 'workflow_dispatch' && inputs.host == 'macos-15-intel' && '[{"os":"macos-15-intel","arch":"x64"}]' ||
+            github.event_name == 'workflow_dispatch' && inputs.host == 'windows-latest' && '[{"os":"windows-latest","arch":"x64"}]' ||
+            '[{"os":"macos-14","arch":"arm64"},{"os":"macos-15-intel","arch":"x64"},{"os":"windows-latest","arch":"x64"}]'
+          ) }}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the N-1 Broker Pack smoke resolves the previous release tag
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # macOS still uses dugite's embedded Git. Windows keeps only dugite's JS
+      # wrapper and routes it to managed PortableGit in the packaged smoke.
+      - name: Verify bundled git (dugite) was fetched
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          node -e "const{existsSync}=require('fs');const{dirname,join}=require('path');const g=join(dirname(require.resolve('dugite/package.json')),'git');if(!existsSync(g)){console.error('dugite embedded git MISSING at '+g);process.exit(1)}console.log('dugite embedded git OK '+g)"
+
+      - name: Verify package inspectors on the native host
+        run: pnpm exec vitest run scripts/assert-desktop-package.spec.ts scripts/desktop-after-pack.spec.ts scripts/smoke-packaged-toolchain.spec.ts
+
+      - name: Build Alice + UTA + desktop shell
+        run: pnpm electron:build
+
+      - name: Smoke Guardian takeover through Electron
+        run: pnpm electron:smoke:guardian-recovery --skip-build
+        timeout-minutes: 5
+
+      - name: Smoke existing-owner browser handoff through Electron
+        run: pnpm electron:smoke:existing-owner --skip-build
+        timeout-minutes: 5
+
+      - name: Vendor managed workspace runtime
+        run: pnpm vendor:runtime
+
+      - name: Verify managed Pi runtime
+        run: node vendor/pi/node_modules/@earendil-works/pi-coding-agent/dist/cli.js --version
+
+      - name: Package unpacked desktop app
+        shell: bash
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: |
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            ulimit -n 65536 || ulimit -n 32768 || ulimit -n 16384 || ulimit -n 10240
+            echo "open files limit: $(ulimit -n)"
+          fi
+          pnpm -F @traderalice/desktop exec electron-builder --dir --projectDir ../.. --publish never --${{ matrix.arch }}
+
+      - name: Assert packaged resource layout
+        run: pnpm electron:assert-package
+
+      - name: Smoke packaged managed toolchain
+        run: pnpm electron:smoke-toolchain
+
+      - name: Prove packaged Workspace CLI acceptance
+        if: runner.os != 'Windows'
+        run: pnpm electron:smoke:workspace --skip-build --skip-pack
+        timeout-minutes: 5
+        env:
+          OPENALICE_SMOKE_RECEIPT_PATH: ${{ runner.temp }}/openalice-workspace-acceptance.json
+
+      # Re-run the cached desktop build through the Node wrapper on Windows.
+      # This guards the pnpm.cmd quoting path used by local packaged smokes.
+      - name: Prove packaged Workspace CLI acceptance and Windows build wrapper
+        if: runner.os == 'Windows'
+        run: pnpm electron:smoke:workspace --skip-pack
+        timeout-minutes: 10
+        env:
+          OPENALICE_SMOKE_RECEIPT_PATH: ${{ runner.temp }}/openalice-workspace-acceptance.json
+
+      - name: Upload Workspace acceptance receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: workspace-acceptance-${{ matrix.os }}
+          path: ${{ runner.temp }}/openalice-workspace-acceptance.json
+          if-no-files-found: warn
+
+      - name: Prove previous desktop release state upgrades to the candidate
+        run: >-
+          pnpm electron:smoke:upgrade --
+          --candidate-package-root dist/electron-app
+          --receipt "${{ runner.temp }}/openalice-desktop-upgrade.json"
+        timeout-minutes: 15
+
+      - name: Upload desktop upgrade acceptance receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-upgrade-acceptance-${{ matrix.os }}
+          path: ${{ runner.temp }}/openalice-desktop-upgrade.json
+          if-no-files-found: error

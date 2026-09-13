@@ -1,0 +1,45 @@
+import type { ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
+import { PageSidebarLayout, type PageSidebarControls } from '../components/PageSidebarLayout'
+
+type NavTitleKey =
+  | 'nav.item.tracked'
+  | 'nav.item.workspaces'
+  | 'nav.item.settings'
+  | 'nav.item.market'
+  | 'nav.item.trading'
+  | 'nav.item.automation'
+
+interface PageSidebarShellProps {
+  storageKey: string
+  titleKey: NavTitleKey
+  defaultWidth: number
+  sidebar: ReactNode | ((controls: PageSidebarControls) => ReactNode)
+  actions?: ReactNode
+  children: ReactNode
+  desktopMinWidth?: number
+}
+
+export function PageSidebarShell({
+  storageKey,
+  titleKey,
+  defaultWidth,
+  sidebar,
+  actions,
+  children,
+  desktopMinWidth,
+}: PageSidebarShellProps) {
+  const { t } = useTranslation()
+  return (
+    <PageSidebarLayout
+      storageKey={storageKey}
+      title={t(titleKey)}
+      defaultWidth={defaultWidth}
+      actions={actions}
+      sidebar={sidebar}
+      desktopMinWidth={desktopMinWidth}
+    >
+      {children}
+    </PageSidebarLayout>
+  )
+}

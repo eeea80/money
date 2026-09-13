@@ -1,0 +1,467 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+import type { ProvenanceRecord } from '../core/provenance-store.js'
+import type { CliAdapter } from './cli-adapter.js'
+import {
+  createWorkspaceConversationControl,
+  resolveWorkspaceConversationTarget,
+} from './conversation-control.js'
+import { headlessLogPaths, type HeadlessTaskRecord } from './headless-task-registry.js'
+import type { WorkspaceService } from './service.js'
+
+const dirs: string[] = []
+afterEach(async () => {
+  await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
+})
+
+function fakeAdapter(id = 'pi'): CliAdapter {
+  return {
+    id,
+    kind: 'agent',
+    capabilities: { headless: true },
+    composeHeadlessCommand: () => [id],
+  } as unknown as CliAdapter
+}
+
+function fakeService(opts: {
+  identity?: { resumeId: string; wsId: string; agent: string; agentSessionId?: string } | null
+  provenance?: ProvenanceRecord | null
+  reconstruction?: ProvenanceRecord | null
+  task?: HeadlessTaskRecord | null
+  logsDir?: string
+  defaultAgent?: string
+  workspaceTemplate?: string
+} = {}) {
+  const adapter = fakeAdapter(opts.defaultAgent)
+  const workspace = {
+    id: 'ws-peer',
+    tag: 'peer-desk',
+    dir: '/tmp/peer-desk',
+    createdAt: '2026-07-11T00:00:00.000Z',
+    ...(opts.workspaceTemplate ? { template: opts.workspaceTemplate } : {}),
+  }
+  const dispatchHeadlessTask = vi.fn(async () => ({
+    taskId: 'task-follow-up',
+    resumeId: opts.identity?.resumeId ?? 'resume-fresh',
+  }))
+  const appendProvenance = vi.fn(async (input) => ({ id: 'p-new', ...input }))
+  const svc = {
+    config: { launcherRepoRoot: '/repo' },
+    registry: { get: (id: string) => id === workspace.id ? workspace : undefined },
+    adapters: { get: (id: string) => id === adapter.id ? adapter : undefined },
+    resumeRegistry: { get: (id: string) => opts.identity?.resumeId === id ? opts.identity : null },
+    provenanceStore: {
+      latest: vi.fn((query: { action?: string }) => query.action === 'reconstructed'
+        ? opts.reconstruction ?? null
+        : opts.provenance ?? null),
+      append: appendProvenance,
+    },
+    resolveHeadlessDefaultAgentId: vi.fn(async () => opts.defaultAgent ?? 'pi'),
+    resolveDefaultAgentId: vi.fn(async () => 'pi'),
+    resolveOrCreateChatWorkspace: vi.fn(async () => ({ ok: true as const, workspace })),
+    dispatchHeadlessTask,
+    headlessTasks: { get: () => opts.task ?? null },
+    headlessLogsDir: opts.logsDir ?? '/tmp/logs',
+    recordAgentRuntime: vi.fn(async () => undefined),
+  } as unknown as WorkspaceService
+  return { svc, adapter, workspace, dispatchHeadlessTask, appendProvenance }
+}
+
+const origin = {
+  kind: 'session' as const,
+  workspaceId: 'ws-peer',
+  resumeId: 'resume-peer',
+  agent: 'pi',
+}
+
+function issueProvenance(originValue: ProvenanceRecord['origin'] = origin): ProvenanceRecord {
+  return {
+    id: 'p-1',
+    artifact: { kind: 'issue', workspaceId: 'ws-peer', issueId: 'audit' },
+    action: 'created',
+    origin: originValue,
+    at: 1,
+  }
+}
+
+describe('Workspace conversation target resolution', () => {
+  it('resolves an Issue creator to its exact resumable product Session', () => {
+    const identity = { ...origin, wsId: origin.workspaceId, agentSessionId: 'native-private' }
+    const { svc } = fakeService({ identity, provenance: issueProvenance() })
+    expect(resolveWorkspaceConversationTarget(svc, {
+      kind: 'issue', workspaceId: 'ws-peer', issueId: 'audit',
+    })).toEqual({
+      mode: 'exact',
+      origin,
+      artifact: { kind: 'issue', workspaceId: 'ws-peer', issueId: 'audit' },
+    })
+  })
+
+  it('keeps an archived Session as the exact follow-up target', () => {
+    const identity = {
+      ...origin,
+      wsId: origin.workspaceId,
+      agentSessionId: 'native-private',
+      presence: 'archived' as const,
+    }
+    const { svc } = fakeService({ identity, provenance: issueProvenance() })
+    expect(resolveWorkspaceConversationTarget(svc, {
+      kind: 'issue', workspaceId: 'ws-peer', issueId: 'audit',
+    })).toEqual({
+      mode: 'exact',
+      origin,
+      artifact: { kind: 'issue', workspaceId: 'ws-peer', issueId: 'audit' },
+    })
+  })
+
+  it('does not replace a soft-deleted Session with a fresh worker', () => {
+    const identity = {
+      ...origin,
+      wsId: origin.workspaceId,
+      agentSessionId: 'native-private',
+      presence: 'deleted' as const,
+    }
+    const { svc } = fakeService({ identity, provenance: issueProvenance() })
+    expect(resolveWorkspaceConversationTarget(svc, {
+      kind: 'issue', workspaceId: 'ws-peer', issueId: 'audit',
+    })).toMatchObject({
+      mode: 'unavailable', reason: 'deleted-session', attributedOrigin: origin,
+    })
+  })
+
+  it('does not replace an attributed but unresumable Session with a fresh worker', () => {
+    const identity = { ...origin, wsId: origin.workspaceId }
+    const { svc } = fakeService({ identity, provenance: issueProvenance() })
+    expect(resolveWorkspaceConversationTarget(svc, {
+      kind: 'issue', workspaceId: 'ws-peer', issueId: 'audit',
+    })).toMatchObject({
+      mode: 'unavailable', reason: 'missing-native-session', attributedOrigin: origin,
+    })
+  })
+
+  it('reconstructs inside a known Workspace only when no Session origin exists', () => {
+    const { svc } = fakeService()
+    expect(resolveWorkspaceConversationTarget(svc, {
+      kind: 'report', workspaceId: 'ws-peer', path: 'research/report.md',
+    })).toMatchObject({
+      mode: 'reconstructed', workspaceId: 'ws-peer', reason: 'missing-origin',
+    })
+  })
+
+  it('treats a human-authored artifact as reconstruction, not exact authorship', () => {
+    const { svc } = fakeService({ provenance: issueProvenance({ kind: 'human' }) })
+    expect(resolveWorkspaceConversationTarget(svc, {
+      kind: 'issue', workspaceId: 'ws-peer', issueId: 'audit',
+    })).toMatchObject({
+      mode: 'reconstructed', workspaceId: 'ws-peer', reason: 'non-session-origin',
+    })
+  })
+
+  it('cannot reconstruct a trade decision without an attributed Session or Workspace', () => {
+    const { svc } = fakeService()
+    expect(resolveWorkspaceConversationTarget(svc, {
+      kind: 'trade-decision', accountId: 'alpaca-paper', decisionId: 'commit-1',
+    })).toMatchObject({ mode: 'unavailable', reason: 'missing-workspace' })
+  })
+
+  it('keeps a previously recruited reconstruction worker without calling it the author', () => {
+    const identity = { ...origin, wsId: origin.workspaceId, agentSessionId: 'native-private' }
+    const reconstruction = {
+      ...issueProvenance(),
+      id: 'p-reconstructed',
+      action: 'reconstructed' as const,
+    }
+    const { svc } = fakeService({ identity, reconstruction })
+    expect(resolveWorkspaceConversationTarget(svc, {
+      kind: 'issue', workspaceId: 'ws-peer', issueId: 'audit',
+    })).toMatchObject({
+      mode: 'reconstructed', reason: 'prior-reconstruction', origin,
+    })
+  })
+})
+
+describe('Workspace conversation control', () => {
+  it('creates a fresh Session in the resolved default Chat Workspace', async () => {
+    const { svc, workspace, dispatchHeadlessTask } = fakeService()
+    const rememberRecentChatWorkspace = vi.fn(async () => undefined)
+    const result = await createWorkspaceConversationControl(svc, {
+      readQuickChatPreferences: vi.fn(async () => ({ recentChatWorkspaceId: workspace.id })),
+      rememberRecentChatWorkspace,
+      readAutoQuantPreferences: vi.fn(async () => ({ defaultWorkspaceId: null })),
+    }).ask({
+      target: { kind: 'harness', harness: 'chat' },
+      prompt: 'Start fresh.',
+    })
+
+    expect(result).toMatchObject({
+      status: 'dispatched',
+      resumeId: 'resume-fresh',
+      resolution: { mode: 'reconstructed', reason: 'harness-default' },
+    })
+    expect(svc.resolveOrCreateChatWorkspace).toHaveBeenCalledWith(workspace.id)
+    expect(rememberRecentChatWorkspace).toHaveBeenCalledWith(workspace.id)
+    expect(dispatchHeadlessTask).toHaveBeenCalledWith(
+      workspace,
+      expect.anything(),
+      'Start fresh.',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      expect.anything(),
+      {
+        kind: 'conversation',
+        caller: { kind: 'human' },
+        reason: 'harness-chat',
+      },
+    )
+  })
+
+  it('creates a fresh Session only in the initialized default AutoQuant Workspace', async () => {
+    const { svc, workspace, dispatchHeadlessTask } = fakeService({ workspaceTemplate: 'auto-quant-v2', defaultAgent: 'codex' })
+    const dependencies = {
+      readQuickChatPreferences: vi.fn(async () => ({ recentChatWorkspaceId: null })),
+      rememberRecentChatWorkspace: vi.fn(async () => undefined),
+      readAutoQuantPreferences: vi.fn(async () => ({ defaultWorkspaceId: workspace.id })),
+    }
+    await expect(createWorkspaceConversationControl(svc, dependencies).ask({
+      target: { kind: 'harness', harness: 'autoquant' },
+      prompt: 'Start a study.',
+      timeoutMs: 300_000,
+    })).resolves.toMatchObject({
+      status: 'dispatched',
+      workspaceId: workspace.id,
+      resolution: { mode: 'reconstructed', reason: 'harness-default' },
+    })
+    expect(svc.resolveHeadlessDefaultAgentId).toHaveBeenCalledWith(workspace)
+    expect(svc.resolveDefaultAgentId).not.toHaveBeenCalled()
+    expect((dispatchHeadlessTask.mock.calls as unknown[][])[0]?.[1]).toMatchObject({ id: 'codex' })
+  })
+
+  it('does not create an AutoQuant Workspace when the Harness is not initialized', async () => {
+    const { svc, dispatchHeadlessTask } = fakeService()
+    await expect(createWorkspaceConversationControl(svc, {
+      readQuickChatPreferences: vi.fn(async () => ({ recentChatWorkspaceId: null })),
+      rememberRecentChatWorkspace: vi.fn(async () => undefined),
+      readAutoQuantPreferences: vi.fn(async () => ({ defaultWorkspaceId: null })),
+    }).ask({
+      target: { kind: 'harness', harness: 'autoquant' },
+      prompt: 'Start a study.',
+      timeoutMs: 300_000,
+    })).resolves.toMatchObject({
+      status: 'unavailable',
+      resolution: { reason: 'autoquant-not-initialized' },
+    })
+    expect(dispatchHeadlessTask).not.toHaveBeenCalled()
+    expect(svc.recordAgentRuntime).toHaveBeenCalledWith('runtime.rejected', expect.objectContaining({
+      reason: 'autoquant-not-initialized',
+    }))
+  })
+
+  it('creates a fresh Session only in the initialized default Auto Prediction Workspace', async () => {
+    const { svc, workspace, dispatchHeadlessTask } = fakeService({ workspaceTemplate: 'auto-prediction' })
+    await expect(createWorkspaceConversationControl(svc, {
+      readQuickChatPreferences: vi.fn(async () => ({ recentChatWorkspaceId: null })),
+      rememberRecentChatWorkspace: vi.fn(async () => undefined),
+      readAutoQuantPreferences: vi.fn(async () => ({ defaultWorkspaceId: null })),
+      readAutoPredictionPreferences: vi.fn(async () => ({ defaultWorkspaceId: workspace.id })),
+    }).ask({
+      target: { kind: 'harness', harness: 'prediction' },
+      prompt: 'Evaluate this prediction market.',
+      timeoutMs: 300_000,
+    })).resolves.toMatchObject({
+      status: 'dispatched',
+      workspaceId: workspace.id,
+      resolution: { mode: 'reconstructed', reason: 'harness-default' },
+    })
+    expect(dispatchHeadlessTask).toHaveBeenCalledWith(
+      workspace,
+      expect.anything(),
+      'Evaluate this prediction market.',
+      300_000,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      expect.anything(),
+      expect.objectContaining({ reason: 'harness-prediction' }),
+    )
+  })
+
+  it('does not create an Auto Prediction Workspace when the Harness is not initialized', async () => {
+    const { svc, dispatchHeadlessTask } = fakeService()
+    await expect(createWorkspaceConversationControl(svc, {
+      readQuickChatPreferences: vi.fn(async () => ({ recentChatWorkspaceId: null })),
+      rememberRecentChatWorkspace: vi.fn(async () => undefined),
+      readAutoQuantPreferences: vi.fn(async () => ({ defaultWorkspaceId: null })),
+      readAutoPredictionPreferences: vi.fn(async () => ({ defaultWorkspaceId: null })),
+    }).ask({
+      target: { kind: 'harness', harness: 'prediction' },
+      prompt: 'Evaluate this prediction market.',
+    })).resolves.toMatchObject({
+      status: 'unavailable',
+      resolution: { reason: 'prediction-not-initialized' },
+    })
+    expect(dispatchHeadlessTask).not.toHaveBeenCalled()
+  })
+
+  it('continues the exact Session behind Issue provenance', async () => {
+    const identity = { ...origin, wsId: origin.workspaceId, agentSessionId: 'native-private' }
+    const { svc, adapter, workspace, dispatchHeadlessTask } = fakeService({
+      identity,
+      provenance: issueProvenance(),
+    })
+    const result = await createWorkspaceConversationControl(svc).ask({
+      target: { kind: 'issue', workspaceId: 'ws-peer', issueId: 'audit' },
+      prompt: 'Why did you create this?',
+      selection: { model: 'custom-model', reasoningEffort: 'high' },
+      timeoutMs: 300_000,
+    })
+
+    expect(result).toMatchObject({
+      status: 'dispatched', taskId: 'task-follow-up', resumeId: 'resume-peer',
+      resolution: { mode: 'exact', origin },
+    })
+    expect(dispatchHeadlessTask).toHaveBeenCalledWith(
+      workspace,
+      adapter,
+      'Why did you create this?',
+      300_000,
+      undefined,
+      'resume-peer',
+      undefined,
+      { model: 'custom-model', reasoningEffort: 'high' },
+      expect.objectContaining({
+        originalPrompt: 'Why did you create this?',
+        deliveredPrompt: 'Why did you create this?',
+        promptMode: 'plain',
+      }),
+      undefined,
+    )
+  })
+
+  it('keeps reconstructed provenance while delivering a plain prompt by default', async () => {
+    const { svc, dispatchHeadlessTask, appendProvenance } = fakeService()
+    const result = await createWorkspaceConversationControl(svc).ask({
+      target: { kind: 'report', workspaceId: 'ws-peer', path: 'research/report.md' },
+      prompt: 'Why did the report reach this conclusion?',
+      timeoutMs: 300_000,
+    })
+
+    expect(result).toMatchObject({
+      status: 'dispatched', resumeId: 'resume-fresh',
+      resolution: { mode: 'reconstructed', reason: 'missing-origin' },
+    })
+    const dispatchedPrompt = (dispatchHeadlessTask.mock.calls as unknown[][])[0]?.[2]
+    expect(dispatchedPrompt).toBe('Why did the report reach this conclusion?')
+    const conversation = (dispatchHeadlessTask.mock.calls as unknown[][])[0]?.[8]
+    expect(conversation).toMatchObject({
+      promptMode: 'plain',
+      originalPrompt: 'Why did the report reach this conclusion?',
+      deliveredPrompt: 'Why did the report reach this conclusion?',
+    })
+    expect((dispatchHeadlessTask.mock.calls as unknown[][])[0]?.[9]).toEqual({
+      kind: 'conversation',
+      caller: { kind: 'human' },
+      reason: 'missing-origin',
+    })
+    expect(appendProvenance).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'reconstructed',
+      origin: expect.objectContaining({ resumeId: 'resume-fresh' }),
+    }))
+  })
+
+  it('adds reconstruction guidance only when explicitly requested', async () => {
+    const { svc, dispatchHeadlessTask } = fakeService()
+    await createWorkspaceConversationControl(svc).ask({
+      target: { kind: 'report', workspaceId: 'ws-peer', path: 'research/report.md' },
+      prompt: 'Why did the report reach this conclusion?',
+      timeoutMs: 300_000,
+      reconstruct: true,
+    })
+
+    const dispatchedPrompt = (dispatchHeadlessTask.mock.calls as unknown[][])[0]?.[2]
+    expect(dispatchedPrompt).toContain('fresh worker reconstructing')
+    expect(dispatchedPrompt).toContain('not the original author')
+    expect(dispatchedPrompt).toContain('research/report.md')
+    const conversation = (dispatchHeadlessTask.mock.calls as unknown[][])[0]?.[8]
+    expect(conversation).toMatchObject({
+      promptMode: 'reconstruction',
+      originalPrompt: 'Why did the report reach this conclusion?',
+      deliveredPrompt: expect.stringContaining('fresh worker reconstructing'),
+    })
+  })
+
+  it('returns unavailable without dispatching when the attributed Session cannot resume', async () => {
+    const identity = { ...origin, wsId: origin.workspaceId }
+    const { svc, dispatchHeadlessTask } = fakeService({ identity, provenance: issueProvenance() })
+    await expect(createWorkspaceConversationControl(svc).ask({
+      target: { kind: 'issue', workspaceId: 'ws-peer', issueId: 'audit' },
+      prompt: 'why?', timeoutMs: 300_000,
+    })).resolves.toMatchObject({
+      status: 'unavailable', resolution: { reason: 'missing-native-session' },
+    })
+    expect(dispatchHeadlessTask).not.toHaveBeenCalled()
+  })
+
+  it('recovers bounded stderr for a historical failure with no recorded error', async () => {
+    const logsDir = await mkdtemp(join(tmpdir(), 'conversation-failure-'))
+    dirs.push(logsDir)
+    const task: HeadlessTaskRecord = {
+      taskId: 'task-failed', resumeId: 'resume-1', wsId: 'ws-peer', agent: 'pi',
+      prompt: 'test', status: 'failed', startedAt: 1, exitCode: 1, processStarted: true,
+    }
+    await writeFile(headlessLogPaths(logsDir, task.taskId).stderr,
+      'x'.repeat(100_000) + '\nNo API key found for the selected model\n')
+    const { svc } = fakeService({ task, logsDir })
+    const result = await createWorkspaceConversationControl(svc).read(task.taskId)
+    expect(result).toMatchObject({ status: 'failed', exitCode: 1, processStarted: true, stderrTruncated: true })
+    expect(result?.error).toContain('No API key found')
+    expect(Buffer.byteLength(result?.stderrTail ?? '')).toBeLessThanOrEqual(16 * 1024)
+    task.status = 'done'
+    const successful = await createWorkspaceConversationControl(svc).read(task.taskId)
+    expect(successful).not.toHaveProperty('error')
+    expect(successful).not.toHaveProperty('stderrTail')
+  })
+
+  it('returns the exit reason when a failed task has no log file', async () => {
+    const logsDir = await mkdtemp(join(tmpdir(), 'conversation-no-log-'))
+    dirs.push(logsDir)
+    const task: HeadlessTaskRecord = {
+      taskId: 'task-failed', resumeId: 'resume-1', wsId: 'ws-peer', agent: 'pi',
+      prompt: 'test', status: 'failed', startedAt: 1, signal: 'SIGKILL', exitCode: null,
+    }
+    const { svc } = fakeService({ task, logsDir })
+    expect(await createWorkspaceConversationControl(svc).read(task.taskId)).toMatchObject({
+      signal: 'SIGKILL', error: 'Agent process terminated by signal SIGKILL.',
+    })
+  })
+
+  it('reads normalized output without exposing the native runtime session id', async () => {
+    const logsDir = await mkdtemp(join(tmpdir(), 'conversation-control-'))
+    dirs.push(logsDir)
+    const task: HeadlessTaskRecord = {
+      taskId: 'task-1', resumeId: 'resume-1', parentTaskId: 'task-0', wsId: 'ws-peer',
+      agent: 'pi', prompt: 'why?', status: 'done', startedAt: 1, finishedAt: 2,
+      durationMs: 1, agentSessionId: 'native-secret',
+    }
+    const structured = {
+      schemaVersion: 1 as const,
+      assistantText: 'Because the breadth rule passed.',
+      blocks: [{ type: 'text' as const, text: 'Because the breadth rule passed.' }],
+      metrics: { textBlocks: 1, toolCalls: 0, toolFailures: 0 },
+      truncated: false,
+    }
+    await writeFile(headlessLogPaths(logsDir, task.taskId).structured, JSON.stringify(structured))
+    const { svc } = fakeService({ task, logsDir })
+
+    const result = await createWorkspaceConversationControl(svc).read(task.taskId)
+    expect(result).toMatchObject({ taskId: 'task-1', resumeId: 'resume-1', structured })
+    expect(result).not.toHaveProperty('agentSessionId')
+  })
+})

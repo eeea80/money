@@ -1,0 +1,10 @@
+{
+  "displayName": "Chat",
+  "groupOrder": 10,
+  "description": "General-purpose Alice workspace — Alice's full tool surface (market/research data + trading) via the alice*/traderhub CLIs on PATH.",
+  "defaultAgents": ["claude", "codex"],
+  "injectTools": true,
+  "injectInstructions": true,
+  "upgradeStrategy": "managed-context",
+  "bundledSkills": ["scan-value-chain", "build-thesis", "sector-rotation", "retrospective", "opencli-reader", "delegate-autoquant"]
+}

@@ -1,0 +1,48 @@
+import { Check, CircleAlert, LoaderCircle } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+import type { SaveStatus } from '../hooks/useAutoSave'
+import { Button } from './ui/button'
+
+export function SaveIndicator({ status, onRetry }: { status: SaveStatus; onRetry?: () => void }) {
+  const { t } = useTranslation()
+  if (status === 'idle') return null
+
+  return (
+    <span
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      className="inline-flex shrink-0 items-center gap-1.5 text-[11px]"
+    >
+      {status === 'saving' && (
+        <>
+          <LoaderCircle className="size-3 animate-spin text-primary motion-reduce:animate-none" aria-hidden />
+          <span className="text-muted-foreground">{t('common.saving')}</span>
+        </>
+      )}
+      {status === 'saved' && (
+        <>
+          <Check className="size-3 text-success" aria-hidden />
+          <span className="text-muted-foreground">{t('common.saved')}</span>
+        </>
+      )}
+      {status === 'error' && (
+        <>
+          <CircleAlert className="size-3 text-destructive" aria-hidden />
+          <span className="text-destructive">{t('common.saveFailed')}</span>
+          {onRetry && (
+            <Button
+              type="button"
+              onClick={onRetry}
+              variant="link"
+              size="xs"
+              className="ml-0.5 h-auto px-0 py-0 text-destructive"
+            >
+              {t('common.retry')}
+            </Button>
+          )}
+        </>
+      )}
+    </span>
+  )
+}

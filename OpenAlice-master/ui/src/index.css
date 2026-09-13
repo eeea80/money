@@ -1,0 +1,1878 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "./theme/palette.css";
+@import "./theme/style-profiles.css";
+
+@font-face {
+  font-family: "Instrument Sans Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400 700;
+  src: url("./assets/fonts/instrument-sans-latin-wght-normal.woff2") format("woff2-variations");
+}
+
+/* Tailwind aliases for the semantic color card. The core names intentionally
+   mirror Orca/shadcn; this does not import or require the shadcn component
+   library. `inline` keeps utilities connected to the active runtime palette. */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  --color-accent-strong: var(--accent-strong);
+  --color-primary-muted: var(--primary-muted);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning-background: var(--warning-background);
+  --color-warning-border: var(--warning-border);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-ai-action: var(--ai-action);
+  --color-ai-action-foreground: var(--ai-action-foreground);
+  --color-backdrop: var(--backdrop);
+  --color-code-background: var(--code-background);
+  --color-report-canvas: var(--report-canvas);
+  --color-office-wall: var(--office-wall);
+  --color-office-wall-grain: var(--office-wall-grain);
+  --color-office-wall-crown: var(--office-wall-crown);
+  --color-office-trim: var(--office-trim);
+  --color-office-trim-shadow: var(--office-trim-shadow);
+  --color-office-floor: var(--office-floor);
+  --color-office-floor-plank: var(--office-floor-plank);
+  --color-office-floor-sheen: var(--office-floor-sheen);
+  --color-office-label: var(--office-label);
+  --color-office-label-foreground: var(--office-label-foreground);
+
+  --font-sans: "Instrument Sans Variable", "PingFang SC",
+    "Microsoft YaHei", "Hiragino Sans GB", "Noto Sans CJK SC", sans-serif;
+  --font-mono: "SF Mono", "Fira Code", "Cascadia Code", Menlo, Consolas,
+    monospace;
+
+  /* OpenAlice is a dense workbench: Tailwind's default 14px `text-sm` makes
+     shared controls and overlays compete with page titles. Keep the familiar
+     20px reading rhythm while aligning the global body/control size to the
+     semantic `.text-body` token below. */
+  --text-sm: 13px;
+  --text-sm--line-height: 20px;
+
+  /* Shared workbench geometry. Composer and drawer silhouettes keep their
+     dedicated larger radii at the component boundary. */
+  --radius-sm: 5px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-3xl: 20px;
+}
+
+/* Base resolution (no attribute / explicit light). */
+:root {
+  --motion-fast: 110ms;
+  --motion-standard: 160ms;
+  --motion-slow: 250ms;
+  --motion-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --motion-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --motion-ease-drawer: var(--motion-ease-out);
+  --oa-control-hover-border: color-mix(in srgb, var(--foreground) 18%, transparent);
+  --oa-control-focus-border: color-mix(in srgb, var(--foreground) 28%, transparent);
+  --oa-focus-ring: color-mix(in srgb, var(--foreground) 46%, transparent);
+  --oa-focus-shadow: 0 0 0 1px var(--oa-focus-ring);
+}
+
+/* Japanese gets a JP-first sans stack so shared Han characters render in
+   Japanese glyph forms, not the Simplified-Chinese forms the default stack
+   would pick (Han unification). Scoped via <html lang="ja">, which the locale
+   store keeps in sync. */
+:root:lang(ja) {
+  --font-sans: "Instrument Sans Variable",
+    "Hiragino Kaku Gothic ProN", "Hiragino Sans", "Yu Gothic", "YuGothic",
+    "Meiryo", "Noto Sans JP", sans-serif;
+}
+
+/* Traditional Chinese (Hant script) gets a Traditional-first sans stack so
+   shared Han characters render in Traditional forms, not the Simplified ones
+   the default stack would pick. Scoped via <html lang="zh-Hant"> — region-
+   neutral (serves both Taiwan and Hong Kong Traditional readers). */
+:root:lang(zh-Hant) {
+  --font-sans: "Instrument Sans Variable",
+    "PingFang TC", "Microsoft JhengHei", "Noto Sans TC",
+    "Noto Sans CJK TC", sans-serif;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--app-background-wash), var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 20px;
+  overflow: hidden;
+  text-rendering: optimizeLegibility;
+  transition:
+    background-color var(--motion-slow) var(--motion-ease-out),
+    color var(--motion-slow) var(--motion-ease-out);
+}
+
+::selection {
+  background: color-mix(in srgb, var(--primary) 28%, transparent);
+  color: var(--foreground);
+}
+
+/* ==================== Interaction + motion foundation ====================
+   Motion explains hierarchy and confirms intent; it should not turn the shell
+   into a moving background. Keep transforms on explicitly marked controls and
+   reserve ambient loops for real live/loading state. Pointer cursors are global
+   because a clickable control should never make the user guess. */
+
+/* Unread is a quiet informational cue, not an alarm or selected state.
+   Shared by the global Inbox count and both Inbox list presentations. */
+.oa-inbox-unread-count {
+  color: color-mix(in srgb, var(--info) 60%, var(--sidebar-foreground));
+  background: color-mix(in srgb, var(--info) 12%, var(--sidebar));
+}
+.oa-inbox-unread-dot {
+  background: color-mix(in srgb, var(--info) 70%, var(--muted-foreground));
+}
+
+/* Expanded desktop navigation has one inset per hierarchy level. Keep these
+   density rules out of the compact rail and touch navigation. */
+@media (pointer: coarse) {
+  .oa-sidebar-child-row { min-height: 40px; }
+}
+@media (min-width: 768px) and (hover: hover) and (pointer: fine) {
+  #activity-bar:not([data-rail-layout="compact"]) .oa-nav-item {
+    min-height: 30px;
+    padding-inline: 8px;
+    gap: 8px;
+  }
+  #activity-bar .oa-harness-nav-header { min-height: 30px; }
+  #activity-bar .oa-harness-nav-actions > button { height: 28px; }
+  #activity-bar .oa-harness-nav-children { margin-left: 8px; padding-bottom: 4px; }
+  #activity-bar .oa-harness-nav-children .oa-sidebar-child-row {
+    margin-inline: 0;
+    min-height: 30px;
+    padding-block: 4px;
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .oa-harness-studio-entry .oa-studio-arrow { opacity: 0; }
+  .oa-harness-studio-entry > button:hover .oa-studio-arrow,
+  .oa-harness-studio-entry > button:focus-visible .oa-studio-arrow { opacity: 1; }
+}
+
+:where(button, [role="button"], summary, a[href], select):not(:disabled):not([aria-disabled="true"]) {
+  cursor: pointer;
+}
+
+:root:not([data-ui-style="win98"]) .oa-field-control {
+  transition:
+    border-color var(--motion-fast) var(--motion-ease-out),
+    background-color var(--motion-fast) var(--motion-ease-out),
+    box-shadow var(--motion-fast) var(--motion-ease-out);
+}
+
+:root:not([data-ui-style="win98"]) .oa-field-control:hover:not(:disabled):not([aria-invalid="true"]) {
+  border-color: var(--oa-control-hover-border);
+}
+
+:root:not([data-ui-style="win98"]) .oa-field-control:focus-visible {
+  border-color: var(--oa-control-focus-border);
+  box-shadow: var(--oa-focus-shadow);
+}
+
+:root:not([data-ui-style="win98"]) .oa-field-control[aria-invalid="true"]:focus-visible {
+  border-color: color-mix(in srgb, var(--destructive) 64%, var(--border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--destructive) 42%, transparent);
+}
+
+:root:not([data-ui-style="win98"]) select.oa-field-control {
+  appearance: none;
+  padding-right: 2rem;
+  background-image:
+    linear-gradient(45deg, transparent 46%, var(--muted-foreground) 46% 54%, transparent 54%),
+    linear-gradient(-45deg, transparent 46%, var(--muted-foreground) 46% 54%, transparent 54%);
+  background-position:
+    calc(100% - 0.8125rem) 50%,
+    calc(100% - 0.5625rem) 50%;
+  background-repeat: no-repeat;
+  background-size: 0.375rem 0.375rem;
+}
+
+@media (forced-colors: active) {
+  :root:not([data-ui-style="win98"]) select.oa-field-control {
+    appearance: auto;
+    background-image: none;
+  }
+}
+
+:where(button:disabled, [role="button"][aria-disabled="true"]) {
+  cursor: default;
+}
+
+[data-slot="resizable-handle"] {
+  cursor: col-resize;
+}
+
+.oa-pressable {
+  transition:
+    transform var(--motion-fast) var(--motion-ease-out),
+    border-color var(--motion-fast) var(--motion-ease-out),
+    background-color var(--motion-fast) var(--motion-ease-out),
+    color var(--motion-fast) var(--motion-ease-out);
+}
+
+.oa-icon-action,
+.oa-icon-action > svg,
+.oa-nav-icon {
+  transition:
+    transform var(--motion-fast) var(--motion-ease-out),
+    color var(--motion-standard) var(--motion-ease-standard),
+    background-color var(--motion-standard) var(--motion-ease-standard),
+    opacity var(--motion-standard) var(--motion-ease-standard);
+}
+
+.oa-nav-item,
+.oa-nav-row {
+  transition:
+    color var(--motion-fast) var(--motion-ease-out),
+    background-color var(--motion-fast) var(--motion-ease-out),
+    box-shadow var(--motion-fast) var(--motion-ease-out);
+}
+
+:where(.oa-pressable, .oa-nav-item, .oa-nav-row):focus-visible {
+  outline: none;
+  box-shadow: var(--oa-focus-shadow);
+}
+
+.oa-data-surface {
+  border-color: color-mix(in srgb, var(--foreground) 9%, transparent);
+  background: color-mix(in srgb, var(--card) 94%, var(--background));
+}
+
+.oa-data-surface-header {
+  border-color: color-mix(in srgb, var(--foreground) 7%, transparent);
+  background: color-mix(in srgb, var(--secondary) 38%, transparent);
+}
+
+.oa-chart {
+  font-variant-numeric: tabular-nums;
+}
+
+.oa-chart .recharts-tooltip-wrapper {
+  outline: none;
+}
+
+.oa-chart .recharts-default-tooltip,
+.oa-chart-tooltip {
+  border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent) !important;
+  border-radius: var(--radius-lg) !important;
+  background: color-mix(in srgb, var(--popover) 96%, transparent) !important;
+  color: var(--popover-foreground) !important;
+  box-shadow:
+    0 1px 2px color-mix(in srgb, var(--shadow-color) 8%, transparent),
+    0 8px 24px color-mix(in srgb, var(--shadow-color) 12%, transparent);
+}
+
+.oa-chart .recharts-default-tooltip {
+  padding: 0.375rem 0.625rem !important;
+  font-size: 0.75rem !important;
+  line-height: 1rem !important;
+}
+
+.oa-chart .recharts-tooltip-cursor {
+  stroke: color-mix(in srgb, var(--foreground) 18%, transparent);
+}
+
+.oa-status-surface {
+  transition:
+    border-color var(--motion-slow) var(--motion-ease-standard),
+    background-color var(--motion-slow) var(--motion-ease-standard),
+    box-shadow var(--motion-slow) var(--motion-ease-standard);
+}
+
+.oa-composer-notice {
+  background: color-mix(in srgb, var(--card) 88%, var(--background));
+  border-color: color-mix(in srgb, var(--foreground) 9%, transparent);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow-color) 5%, transparent);
+}
+
+.oa-composer-notice[data-tone="warning"] .oa-composer-notice-icon {
+  color: var(--warning);
+}
+
+.oa-composer-notice[data-tone="error"] {
+  border-color: color-mix(in srgb, var(--destructive) 24%, transparent);
+}
+
+.oa-composer-notice[data-tone="error"] .oa-composer-notice-icon {
+  color: var(--destructive);
+}
+
+.oa-demo-banner {
+  background: color-mix(in srgb, var(--secondary) 78%, var(--background));
+  border-color: color-mix(in srgb, var(--foreground) 7%, transparent);
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--shadow-color) 4%, transparent);
+}
+
+.oa-demo-install {
+  background: color-mix(in srgb, var(--card) 72%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--foreground) 7%, transparent);
+  transition:
+    background-color var(--motion-fast) var(--motion-ease-out),
+    box-shadow var(--motion-fast) var(--motion-ease-out);
+}
+
+.oa-demo-install:hover {
+  background: color-mix(in srgb, var(--card) 90%, var(--secondary));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--foreground) 11%, transparent);
+}
+
+.oa-harness-context-tray {
+  background: color-mix(in srgb, var(--secondary) 86%, var(--card));
+  box-shadow:
+    inset 1px 0 0 color-mix(in srgb, var(--foreground) 5%, transparent),
+    inset -1px 0 0 color-mix(in srgb, var(--foreground) 5%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--foreground) 4%, transparent);
+  transition:
+    background-color var(--motion-standard) var(--motion-ease-standard),
+    box-shadow var(--motion-standard) var(--motion-ease-standard);
+}
+
+.oa-harness-composer-shell {
+  background: color-mix(in srgb, var(--card) 94%, transparent);
+  backdrop-filter: blur(16px);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--shadow-color) 4%, transparent),
+    0 2px 8px color-mix(in srgb, var(--shadow-color) 4%, transparent),
+    0 14px 52px color-mix(in srgb, var(--shadow-color) 8%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--foreground) 4%, transparent);
+  transition:
+    box-shadow var(--motion-fast) var(--motion-ease-out);
+}
+
+.oa-harness-composer-shell:focus-within {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--shadow-color) 5%, transparent),
+    0 2px 8px color-mix(in srgb, var(--shadow-color) 5%, transparent),
+    0 16px 58px color-mix(in srgb, var(--shadow-color) 10%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--foreground) 6%, transparent);
+}
+
+@supports (corner-shape: superellipse(1.5)) {
+  .oa-harness-context-tray,
+  .oa-harness-composer-shell {
+    corner-shape: superellipse(1.5);
+  }
+}
+
+.oa-chat-new-action {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--foreground) 3.5%, transparent);
+}
+
+.oa-sidebar-child-row:has(.oa-sidebar-child-row-main:focus-visible) {
+  background: var(--accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--foreground) 12%, transparent);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  /* Keep actions keyboard-reachable; focus reveals them before activation. */
+  .oa-application-menu-more {
+    opacity: 0;
+    transition: opacity var(--motion-fast);
+  }
+
+  .oa-application-menu:hover .oa-application-menu-more,
+  .oa-application-menu:focus-visible .oa-application-menu-more,
+  .oa-application-menu[aria-expanded="true"] .oa-application-menu-more {
+    opacity: 1;
+  }
+
+  .oa-harness-nav-actions {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .oa-harness-nav-header:hover .oa-harness-nav-actions,
+  .oa-harness-nav-header:focus-within .oa-harness-nav-actions,
+  .oa-harness-nav-actions:has([aria-expanded="true"]) {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .oa-session-overflow-action {
+    position: absolute;
+    inset-inline-end: 0.5rem;
+    opacity: 0;
+    pointer-events: none;
+    transform: scale(0.96);
+    visibility: hidden;
+    transition:
+      opacity var(--motion-fast) var(--motion-ease-out),
+      transform var(--motion-fast) var(--motion-ease-out),
+      visibility 0s linear var(--motion-fast);
+  }
+
+  .oa-session-row:hover .oa-session-overflow-action,
+  .oa-session-row:focus-within .oa-session-overflow-action {
+    opacity: 1;
+    pointer-events: auto;
+    transform: none;
+    visibility: visible;
+    transition-delay: 0s;
+  }
+
+  .oa-session-state-action {
+    transition:
+      color var(--motion-fast) var(--motion-ease-standard),
+      background-color var(--motion-fast) var(--motion-ease-standard),
+      opacity var(--motion-fast) var(--motion-ease-out),
+      transform var(--motion-fast) var(--motion-ease-out),
+      visibility 0s linear 0s;
+  }
+
+  .oa-session-row:hover .oa-session-state-action,
+  .oa-session-row:focus-within .oa-session-state-action {
+    opacity: 0;
+    pointer-events: none;
+    transform: scale(0.96);
+    visibility: hidden;
+    transition-delay: 0s, 0s, 0s, 0s, var(--motion-fast);
+  }
+}
+
+@media (max-height: 34rem) {
+  .oa-harness-scroll {
+    padding-block: 0.5rem;
+  }
+
+  .oa-harness-hero-mark {
+    display: none;
+  }
+
+  .oa-harness-title {
+    margin-top: 0;
+  }
+
+  .oa-harness-starters {
+    margin-top: 0.5rem;
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .oa-pressable:active:not(:disabled):not([aria-disabled="true"]) {
+    transform: scale(0.98);
+  }
+
+  .oa-icon-action:active:not(:disabled):not([aria-disabled="true"]) {
+    transform: scale(0.96);
+  }
+}
+
+@keyframes oa-view-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes oa-dialog-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes oa-backdrop-enter {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes oa-disclosure-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes oa-popover-enter {
+  from {
+    opacity: 0;
+    transform: translateY(3px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes oa-tracked-graph-node-enter {
+  from {
+    opacity: 0;
+    transform: translate(var(--oa-graph-enter-x), var(--oa-graph-enter-y)) scale(0.72);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes oa-tracked-graph-edge-enter {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes oa-tracked-graph-preview-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+    border-color: color-mix(in srgb, var(--primary) 58%, var(--border));
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    border-color: var(--border);
+  }
+}
+
+.oa-tracked-graph-node {
+  transition: opacity var(--motion-standard) var(--motion-ease-standard);
+}
+
+.oa-tracked-graph-preview-enter {
+  animation: oa-tracked-graph-preview-enter var(--motion-slow) var(--motion-ease-out) backwards;
+  transform-origin: bottom right;
+}
+
+.oa-tracked-graph-node-enter {
+  animation: oa-tracked-graph-node-enter var(--motion-slow) var(--motion-ease-out) backwards;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.oa-tracked-graph-edge {
+  stroke-dasharray: 1;
+  animation: oa-tracked-graph-edge-enter var(--motion-slow) var(--motion-ease-out) backwards;
+  transition:
+    opacity var(--motion-standard) var(--motion-ease-standard),
+    stroke-width var(--motion-fast) var(--motion-ease-standard);
+}
+
+.oa-tracked-graph-node-mark {
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: transform var(--motion-fast) var(--motion-ease-out);
+}
+
+.oa-tracked-graph-node[data-focus-state="active"] .oa-tracked-graph-node-mark {
+  transform: scale(1.14);
+}
+
+.oa-tracked-graph-node[data-focus-state="related"] .oa-tracked-graph-node-mark {
+  transform: scale(1.035);
+}
+
+.oa-tracked-graph-hover-halo,
+.oa-tracked-graph-label {
+  transition: opacity var(--motion-standard) var(--motion-ease-standard);
+}
+
+.oa-tracked-graph-node-enter[data-enter-phase="1"],
+.oa-tracked-graph-edge[data-enter-phase="1"] {
+  animation-delay: calc(var(--motion-fast) / 4);
+}
+
+.oa-tracked-graph-node-enter[data-enter-phase="2"],
+.oa-tracked-graph-edge[data-enter-phase="2"] {
+  animation-delay: calc(var(--motion-fast) / 2);
+}
+
+.oa-tracked-graph-node-enter[data-enter-phase="3"],
+.oa-tracked-graph-edge[data-enter-phase="3"] {
+  animation-delay: calc(var(--motion-fast) - var(--motion-fast) / 4);
+}
+
+.oa-tracked-graph-node-enter[data-enter-phase="4"],
+.oa-tracked-graph-edge[data-enter-phase="4"] {
+  animation-delay: var(--motion-fast);
+}
+
+.oa-view-enter {
+  animation: oa-view-enter var(--motion-standard) var(--motion-ease-out) both;
+}
+
+.oa-dialog-surface {
+  animation: oa-dialog-enter var(--motion-slow) var(--motion-ease-out) both;
+}
+
+.oa-dialog-backdrop {
+  animation: oa-backdrop-enter var(--motion-standard) ease-out both;
+}
+
+/* Page-owned navigators become touch surfaces inside the phone drawer.
+   A 40px height floor removes the old 18–28px rows; icon controls keep 36px
+   of horizontal room so adjacent workspace names remain distinguishable. */
+.oa-page-sidebar-dialog :is(button, [role="button"]) {
+  min-height: 2.5rem;
+}
+
+.oa-page-sidebar-dialog button:has(svg) {
+  min-width: 2.25rem;
+}
+
+/* Workspace tree controls stay compact for a fine pointer, but touch-capable
+   desktop/tablet layouts must not collapse them back into 20px hit targets. */
+@media (hover: none), (pointer: coarse) {
+  .oa-workspace-row-action {
+    min-width: 2.25rem;
+    min-height: 2.25rem;
+  }
+
+  .oa-workspace-context-item {
+    min-height: 2.5rem;
+  }
+
+  .oa-harness-context-tray :is(button, [role="button"]),
+  .oa-harness-composer :is(button, [role="button"]),
+  .oa-harness-starters .oa-icon-action {
+    min-height: 2.25rem;
+  }
+
+  .oa-harness-context-tray .oa-icon-action,
+  .oa-harness-composer .oa-icon-action,
+  .oa-harness-starters .oa-icon-action {
+    min-width: 2.25rem;
+  }
+}
+
+.oa-page-sidebar-dialog :is(
+  input:not([type="checkbox"]):not([type="radio"]),
+  select
+) {
+  min-height: 2.5rem;
+}
+
+.oa-disclosure-enter {
+  transform-origin: top;
+  animation: oa-disclosure-enter var(--motion-standard) var(--motion-ease-out) both;
+}
+
+.oa-popover-enter {
+  transform-origin: top;
+  animation: oa-popover-enter var(--motion-standard) var(--motion-ease-out) both;
+}
+
+.oa-sortable-placeholder {
+  background: color-mix(in srgb, var(--primary) 7%, transparent);
+  border-color: color-mix(in srgb, var(--primary) 32%, var(--border));
+  outline: 1px dashed color-mix(in srgb, var(--primary) 32%, var(--border));
+  outline-offset: -1px;
+  box-shadow: none;
+}
+
+.oa-sortable-placeholder > * {
+  visibility: hidden;
+}
+
+.oa-sortable-overlay {
+  pointer-events: none;
+  z-index: 80;
+  will-change: transform;
+  border: 1px solid color-mix(in srgb, var(--primary) 28%, var(--border));
+  background: var(--secondary);
+  box-shadow: 0 10px 28px color-mix(in srgb, var(--foreground) 12%, transparent);
+}
+
+/* ==================== Typography scale ====================
+   Five semantic sizes covering the entire app. New code should
+   prefer these over arbitrary `text-[Npx]` so size choices stay
+   consistent and a future global tweak is one edit.
+   - .text-display  hero numbers (UTA NLV, Portfolio total)
+   - .text-title    page H2 / dialog title
+   - .text-body     primary body text, table rows, buttons
+   - .text-caption  secondary descriptions, subtitles
+   - .text-micro    badges, timestamps, table metadata */
+
+.text-display {
+  @apply text-[28px] leading-[34px] font-bold tabular-nums md:text-[36px] md:leading-[42px];
+}
+.text-title {
+  @apply text-[16px] leading-[22px] font-semibold;
+}
+.text-body {
+  @apply text-[13px] leading-5;
+}
+.text-caption {
+  @apply text-[12px] leading-[18px];
+}
+.text-micro {
+  @apply text-[11px] leading-[15px];
+}
+
+/* One chrome row for navigator and working view. Body descriptions are not
+   toolbar content. Layout owns the header slot; pages retain their actions. */
+.oa-topbar-host { container-type: inline-size; }
+/* Windows keeps native caption controls. Only header rows intersecting their
+   actual geometry reserve space; nested toolbars keep their normal density. */
+.oa-windows-chrome-fallback {
+  position: fixed;
+  z-index: 101;
+  -webkit-app-region: drag;
+}
+:root[data-window-chrome="windows"] [data-caption-row] {
+  min-height: max(44px, var(--desktop-caption-height, 44px));
+  height: auto;
+  flex-shrink: 0;
+  padding-left: max(12px, calc(var(--caption-left, 0px) + 8px));
+  padding-right: max(12px, calc(var(--caption-right, 0px) + 8px));
+  -webkit-app-region: drag;
+}
+:root[data-window-chrome="windows"] [data-caption-stacked] {
+  padding: calc(var(--desktop-caption-height, 44px) + 4px) 12px 4px;
+}
+:root[data-window-chrome="windows"] [data-caption-row] :is(button, a, input, textarea, select, [role="button"], [role="tab"], [role="tablist"], [role="separator"], [contenteditable="true"]),
+:root[data-window-chrome="windows"] [data-caption-row] :is(.oa-topbar-actions, .oa-topbar-leading) {
+  -webkit-app-region: no-drag;
+}
+/* Portaled edge drawers also stay below the native caption controls. */
+:root[data-window-chrome="windows"] [data-slot="sheet-content"]:is([data-side="left"], [data-side="right"], [data-side="top"]) {
+  padding-top: max(16px, var(--desktop-caption-height, 44px));
+}
+:root[data-window-chrome="windows"] [data-slot="sheet-content"] [data-slot="sheet-close"] {
+  top: calc(var(--desktop-caption-height, 44px) + 8px);
+}
+/* macOS owns the traffic lights; the existing navigation and page headers
+   share their row. Browser windows keep their original geometry. */
+.oa-desktop-mac .oa-topbar,
+.oa-desktop-mac .oa-activity-brand,
+.oa-desktop-mac [data-testid="mobile-context-bar"] {
+  -webkit-app-region: drag;
+}
+.oa-desktop-mac :is(button, a, input, textarea, select, [role="button"], [role="tab"], [role="separator"]),
+.oa-desktop-mac .oa-topbar-actions,
+.oa-desktop-mac .oa-topbar-leading {
+  -webkit-app-region: no-drag;
+}
+.oa-desktop-mac [data-testid="mobile-context-bar"] {
+  height: 44px;
+  flex-shrink: 0;
+  padding-left: 88px;
+  background: var(--sidebar);
+}
+@media (min-width: 768px) {
+  .oa-desktop-mac .oa-topbar { min-height: 44px; }
+  .oa-desktop-mac #activity-bar .oa-activity-brand {
+    height: 44px;
+    min-height: 44px;
+    padding-left: 88px;
+    justify-content: flex-end;
+  }
+  .oa-desktop-mac #activity-bar .oa-activity-brand h1 { display: none; }
+  .oa-desktop-mac #activity-bar[data-rail-layout="compact"] { width: 88px; }
+}
+.oa-topbar {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-height: 40px;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--foreground);
+}
+.oa-topbar-leading { display: flex; flex: 0 0 auto; align-items: center; gap: 4px; }
+.oa-topbar-leading:empty { display: none; }
+.oa-topbar-identity { display: flex; flex: 1 1 6rem; min-width: 0; align-items: center; gap: 8px; }
+.oa-topbar-actions { display: flex; flex: 0 1 auto; max-width: 100%; min-width: 0; flex-wrap: wrap; align-items: center; gap: 4px; }
+.oa-topbar-actions > div { max-width: 100%; flex-wrap: wrap; }
+.oa-topbar [data-slot="button"] { min-height: 28px; }
+@media (max-width: 767px), (pointer: coarse) {
+  .oa-topbar { min-height: 48px; }
+  .oa-topbar [data-slot="button"] { min-height: 40px; }
+}
+
+/* ==================== Live-data pulse ====================
+   Small breathing dot used in PageHeader to communicate "this
+   surface is auto-refreshing". 2.4s cycle so it reads as ambient
+   not anxious. Color is the success/green token to keep the
+   association with "alive + healthy". */
+
+@keyframes live-pulse {
+  0%, 100% {
+    opacity: 0.55;
+    transform: scale(0.92);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+}
+.live-pulse {
+  animation: live-pulse 2.4s ease-in-out infinite;
+}
+.live-pulse::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 9999px;
+  background: var(--success);
+  opacity: 0.3;
+  animation: live-pulse 2.4s ease-in-out infinite;
+  animation-delay: 0.3s;
+}
+
+@keyframes onboarding-slide-forward {
+  from {
+    opacity: 0;
+    transform: translateX(22px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes onboarding-slide-back {
+  from {
+    opacity: 0;
+    transform: translateX(-22px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes onboarding-completion-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.76);
+  }
+  62% {
+    opacity: 1;
+    transform: scale(1.06);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes onboarding-completion-ring {
+  0% {
+    opacity: 0;
+    transform: scale(0.72);
+  }
+  45% {
+    opacity: 0.55;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.42);
+  }
+}
+
+@keyframes onboarding-completion-line {
+  0% {
+    opacity: 0;
+    transform: scaleX(0);
+  }
+  35% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: scaleX(1);
+  }
+}
+
+.oa-onboarding-slide-forward {
+  animation: onboarding-slide-forward 0.42s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.oa-onboarding-slide-back {
+  animation: onboarding-slide-back 0.42s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.oa-onboarding-step-layout {
+  display: grid;
+  min-height: 0;
+  flex: 1 1 0%;
+  gap: 1rem;
+  align-content: start;
+  overflow-y: auto;
+  padding-bottom: 0.75rem;
+  padding-top: 0.75rem;
+}
+
+.oa-onboarding-title {
+  overflow-wrap: normal;
+  text-wrap: balance;
+  word-break: keep-all;
+}
+
+html[lang="ja"] .oa-onboarding-title {
+  line-break: strict;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+.oa-onboarding-completion {
+  position: relative;
+  width: 5rem;
+  height: 5rem;
+  margin-bottom: 1.25rem;
+}
+
+.oa-onboarding-completion-ring {
+  position: relative;
+  display: grid;
+  width: 4.5rem;
+  height: 4.5rem;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--success) 38%, var(--border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--success) 12%, var(--background));
+  box-shadow: inset 0 0 0 0.5rem color-mix(in srgb, var(--success) 7%, transparent);
+  animation: onboarding-completion-pop 0.58s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.oa-onboarding-completion-ring::after {
+  position: absolute;
+  inset: -0.5rem;
+  content: "";
+  border: 1px solid var(--success);
+  border-radius: inherit;
+  animation: onboarding-completion-ring 0.72s 0.12s ease-out both;
+}
+
+.oa-onboarding-completion-line {
+  position: absolute;
+  width: 1.25rem;
+  height: 1px;
+  border-radius: 999px;
+  background: var(--success);
+  opacity: 0;
+  transform-origin: center;
+  animation: onboarding-completion-line 0.62s ease-out both;
+}
+
+.oa-onboarding-completion-line-a {
+  top: 0.55rem;
+  left: 3.85rem;
+  transform: rotate(-22deg) scaleX(0);
+  animation-delay: 0.16s;
+}
+
+.oa-onboarding-completion-line-b {
+  top: 3.55rem;
+  left: 4.2rem;
+  transform: rotate(16deg) scaleX(0);
+  animation-delay: 0.23s;
+}
+
+.oa-onboarding-completion-line-c {
+  top: 1.15rem;
+  left: -0.25rem;
+  transform: rotate(18deg) scaleX(0);
+  animation-delay: 0.2s;
+}
+
+@media (min-width: 768px) {
+  .oa-onboarding-step-layout {
+    grid-template-columns: minmax(0, 360px) minmax(300px, 340px);
+    gap: 1.5rem;
+    align-items: start;
+    justify-content: center;
+    padding-top: clamp(3rem, 10vh, 5rem);
+  }
+}
+
+@media (min-width: 900px) {
+  .oa-onboarding-step-layout {
+    grid-template-columns: minmax(0, 420px) minmax(320px, 350px);
+  }
+}
+
+@media (min-width: 1024px) {
+  .oa-onboarding-step-layout {
+    grid-template-columns: minmax(0, 540px) minmax(340px, 360px);
+  }
+}
+
+/* Skeleton placeholder — theme-aware shimmer for first-load states. The block
+   is the tertiary surface (reads on both the page bg and bg-secondary cards); a
+   soft overlay band sweeps across at an ambient cadence (sibling to live-pulse's
+   2.4s, a touch quicker so it reads as "loading" without feeling anxious). Size
+   + radius come from the element's own utility classes. Honors reduced motion. */
+@keyframes skeleton-sweep {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.skeleton {
+  background-color: var(--muted);
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--accent-strong) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  animation: skeleton-sweep 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .oa-onboarding-slide-forward,
+  .oa-onboarding-slide-back,
+  .oa-onboarding-completion-ring,
+  .oa-onboarding-completion-ring::after,
+  .oa-onboarding-completion-line {
+    animation: none;
+  }
+  .skeleton {
+    animation: none;
+    background-image: none;
+    opacity: 0.7;
+  }
+  .live-pulse,
+  .live-pulse::after,
+  .thinking-dot,
+  .message-enter,
+  .page-fade-in,
+  .oa-view-enter,
+  .oa-dialog-surface,
+  .oa-dialog-backdrop,
+  .oa-disclosure-enter,
+  .oa-popover-enter {
+    animation: none;
+  }
+  .oa-sortable-overlay {
+    box-shadow: none;
+  }
+  .oa-tracked-graph-node-enter,
+  .oa-tracked-graph-edge,
+  .oa-tracked-graph-preview-enter {
+    animation: none;
+  }
+  .oa-pressable,
+  .oa-icon-action,
+  .oa-icon-action > svg,
+  .oa-nav-item,
+  .oa-nav-row,
+  .oa-nav-icon,
+  .oa-status-surface {
+    transition-duration: 0.01ms;
+  }
+  .oa-tracked-graph-node,
+  .oa-tracked-graph-edge,
+  .oa-tracked-graph-node-mark,
+  .oa-tracked-graph-hover-halo,
+  .oa-tracked-graph-label {
+    transition-duration: 0.01ms;
+  }
+  .oa-pressable:hover,
+  .oa-pressable:active,
+  .oa-icon-action:hover,
+  .oa-icon-action:active,
+  .oa-nav-row:hover,
+  .oa-nav-item:hover .oa-nav-icon {
+    transform: none;
+  }
+}
+
+/* ==================== Button utility classes ==================== */
+
+.btn-primary {
+  @apply px-4 py-2 text-[13px] leading-[18px] font-medium rounded-md
+    bg-primary border border-primary text-primary-foreground
+    hover:bg-primary/90 transition-[color,background-color,border-color,box-shadow,transform] duration-[var(--motion-fast)] active:scale-[0.98]
+    disabled:opacity-40 disabled:cursor-default cursor-pointer
+    focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background;
+}
+
+.btn-secondary {
+  @apply px-4 py-2 text-[13px] leading-[18px] font-medium rounded-md border border-border text-muted-foreground
+    hover:bg-muted hover:text-foreground transition-[color,background-color,border-color,box-shadow,transform] duration-[var(--motion-fast)] active:scale-[0.98]
+    disabled:opacity-40 disabled:cursor-default cursor-pointer
+    focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background;
+}
+
+.btn-danger {
+  @apply px-4 py-2 text-[13px] leading-[18px] font-medium rounded-md border border-destructive/30 text-destructive
+    hover:bg-destructive/10 transition-[color,background-color,border-color,box-shadow,transform] duration-[var(--motion-fast)] active:scale-[0.98]
+    disabled:opacity-40 disabled:cursor-default cursor-pointer
+    focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background;
+}
+
+.btn-primary-sm {
+  @apply px-3 py-1.5 text-xs leading-4 font-medium rounded-md
+    bg-primary border border-primary text-primary-foreground
+    hover:bg-primary/90 transition-[color,background-color,border-color,box-shadow,transform] duration-[var(--motion-fast)] active:scale-[0.98]
+    disabled:opacity-40 disabled:cursor-default cursor-pointer
+    focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-1 focus-visible:ring-offset-background;
+}
+
+.btn-secondary-sm {
+  @apply px-3 py-1.5 text-xs leading-4 font-medium rounded-md border border-border text-muted-foreground
+    hover:bg-muted hover:text-foreground transition-[color,background-color,border-color,box-shadow,transform] duration-[var(--motion-fast)] active:scale-[0.98]
+    disabled:opacity-40 disabled:cursor-default cursor-pointer
+    focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-1 focus-visible:ring-offset-background;
+}
+
+/* Native scrollbars stay subtle and gain contrast under the pointer. */
+* {
+  scrollbar-color: color-mix(in srgb, var(--muted-foreground) 22%, transparent) transparent;
+  scrollbar-width: thin;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted-foreground) 22%, transparent);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--muted-foreground) 34%, transparent);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-button {
+  display: none;
+}
+
+/* Hide scrollbar utility — content still scrolls (programmatically or via
+   wheel/trackpad), the bar itself just doesn't render. Used on the tab
+   strip so a long row of tabs doesn't reserve a thick horizontal track. */
+.scrollbar-hide {
+  scrollbar-width: none;       /* Firefox */
+  -ms-overflow-style: none;    /* IE / old Edge */
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;               /* Chromium / WebKit */
+}
+
+/* ==================== Markdown typography ====================
+   Messages and documents share parsing and element semantics, but not density.
+   The default remains compact enough for chat/runtime surfaces; the reading
+   modifier is used by durable Markdown reports and issue documents. */
+.markdown-content {
+  --markdown-font-size: 15px;
+  --markdown-leading: 1.65;
+  color: inherit;
+  font-size: var(--markdown-font-size);
+  line-height: var(--markdown-leading);
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.markdown-content > :first-child {
+  margin-top: 0;
+}
+
+.markdown-content > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown-content p {
+  margin: 0.65em 0;
+  text-wrap: pretty;
+}
+
+.markdown-content strong {
+  color: color-mix(in srgb, var(--foreground) 94%, var(--muted-foreground));
+  font-weight: 650;
+}
+
+.markdown-content del {
+  color: var(--muted-foreground);
+  text-decoration-thickness: 1px;
+}
+
+.markdown-content kbd {
+  display: inline-block;
+  min-width: 1.6em;
+  margin-inline: 0.08em;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--secondary) 76%, var(--card));
+  padding: 0.05em 0.38em;
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: 0.78em;
+  line-height: 1.45;
+  vertical-align: 0.08em;
+}
+
+.markdown-content hr {
+  height: 0;
+  margin: 1.5em 0;
+  border: 0;
+  border-top: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+}
+
+.markdown-content pre {
+  margin: 0.75em 0;
+  overflow-wrap: normal;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--background);
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.6;
+  tab-size: 2;
+}
+
+.markdown-content code {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+}
+
+.markdown-content :not(pre) > code {
+  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  border-radius: 4px;
+  background: var(--code-background);
+  padding: 0.12em 0.38em;
+  overflow-wrap: anywhere;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+.markdown-content ul,
+.markdown-content ol {
+  margin: 0.7em 0;
+  padding-left: 1.4em;
+}
+
+/* Tailwind preflight resets list-style to none — restore markers. */
+.markdown-content ul {
+  list-style: disc;
+}
+.markdown-content ol {
+  list-style: decimal;
+}
+
+.markdown-content li {
+  margin: 0.3em 0;
+  padding-left: 0.12em;
+  text-wrap: pretty;
+}
+
+.markdown-content li > ul,
+.markdown-content li > ol {
+  margin-block: 0.3em;
+}
+
+.markdown-content li::marker {
+  color: color-mix(in srgb, var(--muted-foreground) 82%, transparent);
+}
+
+.markdown-content input[type="checkbox"] {
+  width: 0.95em;
+  height: 0.95em;
+  margin: 0 0.45em 0 0;
+  accent-color: var(--primary);
+  vertical-align: -0.08em;
+}
+
+/* Obsidian-style [[name]] wikilinks → clickable entity references. */
+.markdown-content a.wikilink {
+  display: inline-block;
+  max-width: 100%;
+  color: var(--primary);
+  cursor: pointer;
+  text-decoration: none;
+  vertical-align: baseline;
+  overflow-wrap: anywhere;
+  border-bottom: 1px dashed color-mix(in srgb, var(--primary) 45%, transparent);
+}
+.markdown-content a.wikilink:hover {
+  border-bottom-style: solid;
+}
+
+.markdown-content a.session-signature {
+  color: var(--primary);
+  cursor: pointer;
+  font-weight: 600;
+  text-decoration: none;
+  border-radius: 4px;
+  padding: 0 2px;
+}
+
+.markdown-content a.session-signature:hover {
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  text-decoration: underline;
+}
+
+.markdown-content blockquote {
+  margin: 0.9em 0;
+  border-left: 2px solid color-mix(in srgb, var(--primary) 72%, var(--border));
+  border-radius: 0 6px 6px 0;
+  background: color-mix(in srgb, var(--primary) 5%, transparent);
+  padding: 0.65em 0.9em;
+  color: color-mix(in srgb, var(--foreground) 72%, var(--muted-foreground));
+}
+
+.markdown-content blockquote > :first-child {
+  margin-top: 0;
+}
+
+.markdown-content blockquote > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown-table-shell {
+  max-width: 100%;
+  margin: 0.9em 0;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--card) 52%, transparent);
+  overscroll-behavior-inline: contain;
+}
+
+.markdown-content table {
+  width: 100%;
+  min-width: 34rem;
+  border-collapse: separate;
+  border-spacing: 0;
+  margin: 0;
+  font-size: 0.9em;
+  line-height: 1.5;
+}
+
+.markdown-content th,
+.markdown-content td {
+  border: 0;
+  border-right: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  padding: 0.65em 0.8em;
+  text-align: left;
+  vertical-align: top;
+}
+
+.markdown-content tr > :last-child {
+  border-right: 0;
+}
+
+.markdown-content tbody tr:last-child > * {
+  border-bottom: 0;
+}
+
+.markdown-content th {
+  background: color-mix(in srgb, var(--muted) 58%, var(--card));
+  color: var(--foreground);
+  font-size: 0.9em;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.markdown-content tbody tr:nth-child(even) td {
+  background: color-mix(in srgb, var(--muted) 14%, transparent);
+}
+
+.markdown-content img {
+  max-width: 100%;
+  height: auto;
+  margin: 1em auto;
+  border: 1px solid color-mix(in srgb, var(--border) 74%, transparent);
+  border-radius: 8px;
+}
+
+.markdown-content a {
+  color: var(--primary);
+  text-decoration-line: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 36%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.16em;
+  overflow-wrap: anywhere;
+}
+
+.markdown-content a:hover {
+  text-decoration-color: currentColor;
+}
+
+.markdown-content h1 {
+  margin: 1.2em 0 0.55em;
+  color: var(--foreground);
+  font-size: 1.45em;
+  font-weight: 680;
+  line-height: 1.28;
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+
+.markdown-content h2 {
+  margin: 1.25em 0 0.5em;
+  color: var(--foreground);
+  font-size: 1.22em;
+  font-weight: 670;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+
+.markdown-content h3 {
+  margin: 1em 0 0.4em;
+  color: var(--foreground);
+  font-size: 1.05em;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.markdown-content h4 {
+  margin: 0.95em 0 0.35em;
+  color: var(--foreground);
+  font-size: 1em;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.markdown-content h1:first-child,
+.markdown-content h2:first-child,
+.markdown-content h3:first-child,
+.markdown-content h4:first-child {
+  margin-top: 0;
+}
+
+/* Durable reports use a narrower measure, clearer section rhythm, and slightly
+   larger text. This is deliberately not a card: the document remains the one
+   dominant surface inside the existing application shell. */
+.markdown-content--reading {
+  --markdown-font-size: 15px;
+  --markdown-leading: 1.72;
+  color: color-mix(in srgb, var(--foreground) 84%, var(--muted-foreground));
+  font-kerning: normal;
+  text-rendering: optimizeLegibility;
+}
+
+.markdown-content--reading p {
+  margin-block: 0.82em;
+}
+
+.markdown-content--reading strong {
+  font-weight: 620;
+}
+
+/* Long CJK italics are difficult to scan and commonly appear as report decks.
+   Treat a first-paragraph, all-emphasis block as editorial standfirst text. */
+.markdown-content--reading > p:first-of-type:has(> em:only-child) {
+  max-width: 44rem;
+  margin: 0 0 2.2rem;
+  border-left: 2px solid color-mix(in srgb, var(--primary) 58%, var(--border));
+  padding-left: 1rem;
+  color: color-mix(in srgb, var(--foreground) 70%, var(--muted-foreground));
+  font-size: 0.98em;
+  line-height: 1.78;
+}
+
+.markdown-content--reading > p:first-of-type:has(> em:only-child) em {
+  font-style: normal;
+}
+
+.markdown-content--reading h1 {
+  max-width: 100%;
+  margin-bottom: 1.35rem;
+  font-size: clamp(1.45rem, 2.3vw, 1.75rem);
+  font-weight: 660;
+  line-height: 1.24;
+  letter-spacing: -0.02em;
+  text-wrap: pretty;
+}
+
+/* Inbox supplies a stable document title above provenance. When the stored
+ * report opens with that exact Markdown heading, keep the source untouched but
+ * avoid rendering the same title twice. The outer h1 preserves the document
+ * outline for assistive technology. */
+.inbox-report-body--repeats-heading .markdown-content--reading > h1:first-child {
+  display: none;
+}
+
+.markdown-content--reading h2 {
+  margin-top: 2.6em;
+  margin-bottom: 0.75em;
+  border-top: 1px solid color-mix(in srgb, var(--border) 64%, transparent);
+  padding-top: 0.85em;
+  font-size: 1.24em;
+  font-weight: 660;
+  line-height: 1.35;
+  letter-spacing: -0.012em;
+}
+
+.markdown-content--reading h3 {
+  margin-top: 1.75em;
+  margin-bottom: 0.5em;
+  font-size: 1.04em;
+  font-weight: 650;
+}
+
+.markdown-content--reading h4 {
+  margin-top: 1.35em;
+}
+
+.markdown-content--reading hr {
+  width: min(100%, 10rem);
+  margin: 2.25em 0;
+  border-top-color: color-mix(in srgb, var(--border) 78%, transparent);
+}
+
+.markdown-content--reading blockquote {
+  margin-block: 1.35em;
+  padding: 0.8em 1em;
+  font-size: 0.94em;
+  line-height: 1.65;
+}
+
+.markdown-content--reading ul,
+.markdown-content--reading ol {
+  margin-block: 0.8em;
+  padding-left: 1.35em;
+}
+
+.markdown-content--reading li {
+  margin-block: 0.34em;
+  padding-left: 0.12em;
+}
+
+.markdown-content--reading .markdown-table-shell {
+  margin-block: 1.25em 1.8em;
+  border-color: color-mix(in srgb, var(--border) 72%, transparent);
+  background: transparent;
+}
+
+.markdown-content--reading table {
+  font-size: 0.84em;
+  line-height: 1.42;
+}
+
+.markdown-content--reading th,
+.markdown-content--reading td {
+  padding: 0.58em 0.72em;
+}
+
+.markdown-content--reading th {
+  background: color-mix(in srgb, var(--muted) 38%, var(--card));
+  font-size: 0.88em;
+  font-weight: 620;
+}
+
+.markdown-content--reading .code-block-wrapper {
+  margin-block: 1.35em;
+}
+
+@media (max-width: 639px) {
+  .markdown-content--reading {
+    --markdown-font-size: 14.5px;
+    --markdown-leading: 1.7;
+  }
+
+  .markdown-content--reading h1 {
+    font-size: 1.45rem;
+  }
+
+  .markdown-content--reading h2 {
+    font-size: 1.2em;
+  }
+
+  .markdown-content table {
+    min-width: 30rem;
+  }
+}
+
+/* Issue What visual editor. Tiptap owns the editable DOM, while these rules
+   deliberately reuse read-mode typography so the always-editable body still
+   feels like part of the Issue rather than a separate source application. */
+.what-editor-content .ProseMirror {
+  min-height: 12rem;
+  padding: 0.75rem 1rem;
+  outline: none;
+  cursor: text;
+}
+.what-editor-content .ProseMirror > *:first-child {
+  margin-top: 0;
+}
+.what-editor-content .ProseMirror > *:last-child {
+  margin-bottom: 0;
+}
+.what-editor-content .ProseMirror-focused {
+  background: transparent;
+}
+.what-editor-content .ProseMirror-selectednode {
+  outline: 2px solid color-mix(in srgb, var(--primary) 45%, transparent);
+  border-radius: 4px;
+}
+.what-editor-content .ProseMirror p.is-editor-empty:first-child::before {
+  color: var(--muted-foreground);
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+/* Thinking animation */
+@keyframes blink {
+  0%,
+  20% {
+    opacity: 0.2;
+  }
+  50% {
+    opacity: 1;
+  }
+  80%,
+  100% {
+    opacity: 0.2;
+  }
+}
+.thinking-dot {
+  animation: blink 0.9s infinite;
+  font-size: 20px;
+  line-height: 1;
+}
+.thinking-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.thinking-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+/* Message entrance animation */
+@keyframes fadeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.message-enter {
+  animation: fadeSlideIn 0.3s ease-out;
+}
+
+/* Page transition animation */
+@keyframes pageFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.page-fade-in {
+  animation: pageFadeIn 150ms ease-out;
+}
+
+/* Code block wrapper for copy button */
+.code-block-wrapper {
+  position: relative;
+}
+.code-block-wrapper .code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  padding: 4px 8px 4px 12px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+}
+.code-block-wrapper .code-copy-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+  font-family: var(--font-sans);
+}
+.code-block-wrapper .code-copy-btn:hover {
+  color: var(--foreground);
+  /* Theme-aware wash — navy in Daybreak, white in Midnight. The old
+     hardcoded rgba(255,255,255,…) was invisible in light mode. */
+  background: var(--accent-strong);
+}
+.code-block-wrapper .code-copy-btn.copied {
+  color: var(--success);
+}
+.code-block-wrapper pre {
+  margin-top: 0 !important;
+  border-top-left-radius: 0 !important;
+  border-top-right-radius: 0 !important;
+}
+
+/* Workspace Manager lives beside both the activity rail and the Ask Alice
+   sidebar, so viewport breakpoints overestimate the width it can actually use.
+   Size the layout against the page container and keep every grid track
+   shrinkable so long conversation titles cannot force horizontal overflow. */
+.workspace-manager-layout {
+  container: workspace-manager-layout / inline-size;
+}
+
+.workspace-manager-suggestions {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.workspace-manager-suggestions-section {
+  container: workspace-manager-suggestions / inline-size;
+}
+
+@container workspace-manager-layout (min-width: 34rem) {
+  .workspace-manager-composer-actions {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+}
+
+@container workspace-manager-layout (min-width: 48rem) {
+  .workspace-manager-hero {
+    flex-direction: row;
+    align-items: flex-end;
+    justify-content: space-between;
+  }
+
+  .workspace-manager-stats {
+    width: 18rem;
+  }
+}
+
+@container workspace-manager-suggestions (min-width: 34rem) {
+  .workspace-manager-suggestions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Final cascade-level safety net. Several domain animations are declared
+   below the first reduced-motion block, so this lives at EOF on purpose. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Base UI owns measurement and mount lifetime; hidden panels leave the tab order. */
+.oa-collapsible-panel {
+  height: var(--collapsible-panel-height);
+  overflow: hidden;
+  opacity: 1;
+  transition: height 180ms var(--motion-ease-out), opacity 180ms var(--motion-ease-out);
+}
+.oa-collapsible-panel[data-starting-style],
+.oa-collapsible-panel[data-ending-style] {
+  height: 0;
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .oa-collapsible-panel { transition: none; }
+}
+
+/* Resolved Workspace files retain their position in the Markdown body. */
+.markdown-content a.markdown-file-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: fit-content;
+  max-width: 100%;
+  margin: 12px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--muted);
+  color: var(--foreground);
+  text-decoration: none;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.markdown-file-type {
+  flex: none;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  font-weight: 600;
+}
+.markdown-file-label { display: grid; min-width: 0; }
+.markdown-file-label > span { color: var(--muted-foreground); font-size: 12px; }
+.markdown-content a.markdown-file-image { display: block; width: fit-content; max-width: 100%; }
+.markdown-content a.markdown-file-image img {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: min(256px, 100%);
+  max-height: 512px;
+  object-fit: contain;
+  margin: 12px 0;
+}
+.markdown-content a.markdown-file-card:hover { border-color: var(--muted-foreground); }
+.markdown-content a[data-file-path]:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
+
+.markdown-content a.markdown-file-image.is-sticker img { border: 0; border-radius: 0; background: transparent; }

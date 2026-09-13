@@ -1,0 +1,211 @@
+/**
+ * Golden / characterization test for launcher-owned context injection. The
+ * Template instructions are asserted to land byte-identically in both native
+ * agent filenames. Skills are asserted to land in both discovery paths.
+ */
+
+import { existsSync } from 'node:fs';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import { defaultPath } from '@/core/paths.js';
+
+import { injectWorkspaceContext } from './context-injector.js';
+import type { TemplateMeta } from './template-registry.js';
+
+// src/workspaces/ — this spec's directory.
+const HERE = fileURLToPath(new URL('.', import.meta.url));
+const CHAT_FILES = join(HERE, 'templates', 'chat', 'files');
+
+function makeTemplate(over: Partial<TemplateMeta>): TemplateMeta {
+  return {
+    name: 'test',
+    bootstrapScript: '',
+    filesDir: '',
+    templateDir: '',
+    version: '0.0.0',
+    defaultAgents: ['claude'],
+    injectTools: false,
+    injectInstructions: false,
+    bundledSkills: [],
+    ...over,
+  };
+}
+
+let dir: string;
+beforeEach(async () => {
+  dir = await mkdtemp(join(tmpdir(), 'inject-'));
+});
+afterEach(async () => {
+  await rm(dir, { recursive: true, force: true });
+});
+
+const read = (rel: string): Promise<string> => readFile(join(dir, rel), 'utf8');
+
+describe('injectWorkspaceContext — no MCP injection (CLI-only)', () => {
+  it('never writes .mcp.json, even for a tool-bearing template', async () => {
+    await injectWorkspaceContext({ template: makeTemplate({ injectTools: true }), wsId: 'ws-abc', dir });
+    expect(existsSync(join(dir, '.mcp.json'))).toBe(false);
+  });
+
+  it('never writes the Pi MCP bridge extension', async () => {
+    await injectWorkspaceContext({ template: makeTemplate({ injectTools: true }), wsId: 'ws-abc', dir });
+    expect(existsSync(join(dir, '.pi/extensions/openalice-bridge.ts'))).toBe(false);
+  });
+});
+
+describe('injectWorkspaceContext — instructions', () => {
+  it('copies template instructions into CLAUDE.md and AGENTS.md', async () => {
+    const instruction = await readFile(join(CHAT_FILES, 'instruction.md'), 'utf8');
+
+    await injectWorkspaceContext({
+      template: makeTemplate({ injectInstructions: true, filesDir: CHAT_FILES }),
+      wsId: 'ws-abc',
+      dir,
+    });
+
+    expect(await read('CLAUDE.md')).toBe(instruction);
+    expect(await read('AGENTS.md')).toBe(instruction);
+    expect(instruction).toContain('You are Alice, an autonomous agent from the OpenAlice project.');
+  });
+
+  it('does not touch CLAUDE.md / AGENTS.md when injectInstructions is false', async () => {
+    await injectWorkspaceContext({ template: makeTemplate({ injectInstructions: false }), wsId: 'ws-abc', dir });
+    expect(existsSync(join(dir, 'CLAUDE.md'))).toBe(false);
+    expect(existsSync(join(dir, 'AGENTS.md'))).toBe(false);
+  });
+
+  it('keeps the always-loaded Chat contract compact and routes manuals to skills', async () => {
+    const instruction = await readFile(join(CHAT_FILES, 'instruction.md'), 'utf8');
+    expect(instruction.split('\n').length).toBeLessThan(120);
+    expect(instruction).toContain('Every price, return, date, ratio');
+    expect(instruction).toContain('A comment is a board');
+    expect(instruction).toContain('OpenAlice does not wrap');
+    expect(instruction).toContain('The `alice` skill contains the exact commands');
+    expect(instruction).not.toContain('alice issue comment --text');
+    expect(instruction).not.toContain('alice inbox push --doc');
+    expect(instruction).not.toContain('--when');
+  });
+});
+
+describe('injectWorkspaceContext — skills', () => {
+  it('copies a bundled skill into the canonical shared discovery paths', async () => {
+    await injectWorkspaceContext({
+      template: makeTemplate({ bundledSkills: ['scan-value-chain'] }),
+      wsId: 'ws-abc',
+      dir,
+    });
+    const expected = await readFile(defaultPath('skills', 'scan-value-chain', 'SKILL.md'), 'utf8');
+    expect(await read('.claude/skills/scan-value-chain/SKILL.md')).toBe(expected);  // Claude Code
+    expect(await read('.agents/skills/scan-value-chain/SKILL.md')).toBe(expected);  // Codex + Pi
+    expect(existsSync(join(dir, '.pi/skills'))).toBe(false);                        // no Pi collision copy
+  });
+
+  it('copies the Chat AutoQuant delegation contract into both discovery paths', async () => {
+    await injectWorkspaceContext({
+      template: makeTemplate({ bundledSkills: ['delegate-autoquant'] }),
+      wsId: 'ws-chat',
+      dir,
+    });
+    for (const root of ['.claude/skills', '.agents/skills']) {
+      const skill = await read(`${root}/delegate-autoquant/SKILL.md`);
+      expect(skill).toContain('alice conversation create --harness autoquant');
+      expect(skill).toContain('The universal result is the Agent\'s ordinary `assistantText` handoff');
+      expect(skill).toContain('does not automatically publish either artifact to the');
+      expect(skill).toContain('Primary deliverable directory: <absolute path>');
+      expect(skill).toContain('Do not rerun the research.');
+    }
+  });
+
+  it('injects the per-CLI playbooks (alice* + traderhub) for a tool-bearing template', async () => {
+    await injectWorkspaceContext({
+      template: makeTemplate({ injectTools: true, bundledSkills: ['scan-value-chain'] }),
+      wsId: 'ws-abc',
+      dir,
+    });
+    for (const name of ['alice', 'alice-analysis', 'alice-uta', 'traderhub', 'file-delivery', 'scan-value-chain']) {
+      expect(existsSync(join(dir, '.claude/skills', name, 'SKILL.md')), name).toBe(true);
+      expect(existsSync(join(dir, '.agents/skills', name, 'SKILL.md')), name).toBe(true);
+    }
+    expect(existsSync(join(dir, '.pi/skills'))).toBe(false);
+  });
+
+  it('keeps peer file access on native Coding Agent capabilities', async () => {
+    await injectWorkspaceContext({
+      template: makeTemplate({ injectTools: true }),
+      wsId: 'ws-abc',
+      dir,
+    });
+    const skill = await read('.agents/skills/alice/references/collaboration.md');
+    expect(skill).toContain('There is deliberately no Workspace-level file-read command');
+    expect(skill).toContain('alice peer path --id <workspaceId>');
+    expect(skill).toContain("Coding Agent's native Read/Search/Glob/Git capabilities");
+    expect(skill).toContain('alice conversation ask --inbox-id <entryId>');
+    expect(skill).toContain('alice conversation create --harness autoquant');
+    expect(skill).not.toContain('peer file-read');
+  });
+
+  it('gives every runtime copyable UTA read recipes', async () => {
+    await injectWorkspaceContext({
+      template: makeTemplate({ injectTools: true }),
+      wsId: 'ws-abc',
+      dir,
+    });
+    for (const root of ['.claude/skills', '.agents/skills']) {
+      const skill = await read(`${root}/alice-uta/SKILL.md`);
+      expect(skill).toContain('alice-uta account portfolio --source <account-id>');
+      expect(skill).toContain('alice-uta contract search --source <account-id> --pattern AAPL');
+      expect(skill).toContain("alice-uta contract quote --alice-id '<alice-id-from-search>'");
+      expect(skill).toContain('`--symbols` flag');
+    }
+  });
+
+  it('does not inject CLI playbooks when the template is not tool-bearing', async () => {
+    await injectWorkspaceContext({
+      template: makeTemplate({ injectTools: false, bundledSkills: ['scan-value-chain'] }),
+      wsId: 'ws-abc',
+      dir,
+    });
+    expect(existsSync(join(dir, '.claude/skills/alice-uta/SKILL.md'))).toBe(false);
+    expect(existsSync(join(dir, '.claude/skills/scan-value-chain/SKILL.md'))).toBe(true);
+  });
+
+  it('injects the self-scheduling skill into every workspace, even an untooled one', async () => {
+    await injectWorkspaceContext({
+      template: makeTemplate({ injectTools: false }),
+      wsId: 'ws-abc',
+      dir,
+    });
+    expect(existsSync(join(dir, '.claude/skills/self-scheduling/SKILL.md'))).toBe(true);
+    expect(existsSync(join(dir, '.agents/skills/self-scheduling/SKILL.md'))).toBe(true);
+    expect(existsSync(join(dir, '.pi/skills/self-scheduling/SKILL.md'))).toBe(false);
+  });
+
+  it('leaves a legacy .pi/skills directory untouched', async () => {
+    const legacy = join(dir, '.pi/skills/custom/SKILL.md');
+    await mkdir(join(dir, '.pi/skills/custom'), { recursive: true });
+    await writeFile(legacy, 'legacy user skill\n');
+
+    await injectWorkspaceContext({
+      template: makeTemplate({ bundledSkills: ['scan-value-chain'] }),
+      wsId: 'ws-abc',
+      dir,
+    });
+
+    expect(await read('.pi/skills/custom/SKILL.md')).toBe('legacy user skill\n');
+    expect(existsSync(join(dir, '.pi/skills/scan-value-chain/SKILL.md'))).toBe(false);
+  });
+});
+
+it('installs the optional sticker Skill only for a new full Chat projection', async () => {
+  const template = makeTemplate({ name: 'chat' })
+  await injectWorkspaceContext({ template, wsId: 'chat', dir, templateOnly: true })
+  expect(existsSync(join(dir, '.agents/skills/alice-stickers/SKILL.md'))).toBe(false)
+  await injectWorkspaceContext({ template, wsId: 'chat', dir })
+  expect(await readFile(join(dir, '.agents/skills/alice-stickers/SKILL.md'), 'utf8')).toContain('[[sticker/wave.png]]')
+  expect(existsSync(join(dir, 'sticker/wave.png'))).toBe(true)
+})

@@ -1,0 +1,24 @@
+{
+  "name": "@traderalice/desktop",
+  "version": "0.1.0",
+  "description": "Electron shell — packages OpenAlice as a desktop installer.",
+  "private": true,
+  "type": "module",
+  "main": "../../dist/electron/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "dev": "electron ../../dist/electron/main.js",
+    "pack": "electron-builder --dir --projectDir ../.."
+  },
+  "dependencies": {
+    "@traderalice/guardian-runtime": "workspace:*",
+    "electron": "^39.8.5",
+    "electron-builder": "^26.0.0",
+    "electron-builder-squirrel-windows": "^26.0.0",
+    "electron-updater": "^6.8.9"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

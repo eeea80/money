@@ -1,0 +1,510 @@
+/**
+ * Issue board snapshot — the read-only shape GET /api/issues returns, built by
+ * SCANNING every workspace's `.alice/issues/` directory (never a central store).
+ *
+ * This is the board PROJECTION of the issue data model in `./declaration.ts`,
+ * sibling to the scheduling projection in `../schedule/declaration.ts`. The board
+ * shows ALL issues (scheduled or not); a scheduled issue additionally carries its
+ * firing markers (`lastFiredAtMs` / `nextDueAtMs`) so the row matches real firing.
+ *
+ * Phase 1 is read-only and the list view does NOT include markdown What — the
+ * Phase 2 detail view loads it. Keeping the body out keeps the poll payload small.
+ */
+
+import type { InboxEntry } from '../../core/inbox-store.js'
+import type { ModelReasoningEffort } from '../../ai-providers/model-semantics.js'
+import {
+  ACTIVITY_UPDATE_COALESCE_MS,
+  artifactOriginsMatch,
+  type ProvenanceMutation,
+  type ArtifactOrigin,
+  type ProvenanceAction,
+  type ProvenanceRecord,
+} from '../../core/provenance-store.js'
+import type { Schedule } from '../../core/schedule-expr.js'
+import type {
+  HeadlessTaskOutputSummary,
+  HeadlessTaskRecord,
+  HeadlessTaskStatus,
+} from '../headless-task-registry.js'
+import type { IssuePriority, IssueRecord, IssueStatus, IssueTimeout } from './declaration.js'
+import type { IssueComment } from './comments.js'
+import type { IssueAutomationHealth } from './automation-health.js'
+import { issueRunFailure, type IssueRunFailure } from './run-failure.js'
+import type { PublicSessionRuntime } from '../public-session.js'
+
+/** One board row: the issue's display fields, plus — iff it self-schedules — its
+ *  `when` and the scanner's firing markers. No markdown What (Phase 2 loads it). */
+export interface IssuesSnapshotIssue {
+  id: string
+  title: string
+  status: IssueStatus
+  priority: IssuePriority
+  assignee: string
+  /** Adapter id for the scheduled fire (frontmatter `agent`), if set. */
+  agent?: string
+  /** Secret-free OpenAlice vault slug selected for a fresh Session. */
+  credential?: string
+  /** Explicit native Agent login selected for a fresh Session. */
+  credentialSource?: 'native'
+  model?: string
+  effort?: ModelReasoningEffort
+  /** Optional scheduled-run watchdog; omit for no limit. */
+  timeout?: IssueTimeout
+  /** Present iff the issue self-schedules. */
+  when?: Schedule
+  /** When the scanner last fired this issue (epoch ms); only for scheduled issues. */
+  lastFiredAtMs?: number | null
+  /** When it is next due (epoch ms); only for scheduled issues. */
+  nextDueAtMs?: number | null
+  /** Live scheduler/worker health; present iff the Issue has a schedule. */
+  automationHealth?: IssueAutomationHealth
+  /** Adapter id when this row is that connector's phone-desk Issue. */
+  connectorDesk?: string
+  /** @deprecated Dual-read of the 0.89.4 Telegram-only flag. */
+  telegramConnector?: true
+  /** True iff this issue's NAME (title, case-insensitive) is also used by an
+   *  issue in a DIFFERENT workspace. A name is a global team object, so a clash
+   *  across workspaces is ambiguous and the UI warns on it. DETECTION ONLY — we
+   *  never lint/reject duplicate names at write time; access stays wsId-precise.
+   *  Computed by {@link annotateNameCollisions}; absent ⇒ unique. */
+  nameCollision?: boolean
+}
+
+export interface IssuesSnapshotWorkspace {
+  wsId: string
+  tag: string
+  /** 'invalid' = the issues dir was unreadable (e.g. a retired `.alice/issue.json`).
+   *  A workspace with no issues dir is 'ok' with an empty list — absence is not an
+   *  error on the board (it simply contributes no rows). */
+  status: 'ok' | 'invalid'
+  error?: string
+  issues: IssuesSnapshotIssue[]
+}
+
+export interface IssuesSnapshot {
+  workspaces: IssuesSnapshotWorkspace[]
+  /** Display titles (first-seen casing) that occur in MORE THAN ONE workspace —
+   *  the cross-workspace name clashes the board warns about. Empty when every
+   *  name is globally unique. See {@link annotateNameCollisions}. */
+  duplicateNames: string[]
+}
+
+/**
+ * Detect issue NAMES (title, case-insensitive) that occur across MORE THAN ONE
+ * workspace, mark each colliding board row `nameCollision: true` in place, and
+ * return the list of colliding display titles (first-seen casing). Two issues
+ * sharing a name WITHIN a single workspace are NOT a collision — the model is "a
+ * name is a global team object; a clash is two workspaces both claiming it". The
+ * scan already loaded every issue, so this is cheap.
+ *
+ * DETECTION ONLY: nothing here (or anywhere) rejects a duplicate name at write
+ * time. The user resolves clashes manually; meanwhile access stays wsId-precise
+ * (board rows + the detail route both carry wsId).
+ */
+export function annotateNameCollisions(workspaces: IssuesSnapshotWorkspace[]): string[] {
+  const nameKey = (title: string): string => title.trim().toLowerCase()
+  const seen = new Map<string, { wsIds: Set<string>; display: string }>()
+  for (const ws of workspaces) {
+    for (const issue of ws.issues) {
+      const key = nameKey(issue.title)
+      if (!key) continue
+      const entry = seen.get(key)
+      if (entry) entry.wsIds.add(ws.wsId)
+      else seen.set(key, { wsIds: new Set([ws.wsId]), display: issue.title.trim() })
+    }
+  }
+  const colliding = new Set<string>()
+  const duplicateNames: string[] = []
+  for (const [key, entry] of seen) {
+    if (entry.wsIds.size > 1) {
+      colliding.add(key)
+      duplicateNames.push(entry.display)
+    }
+  }
+  if (colliding.size > 0) {
+    for (const ws of workspaces) {
+      for (const issue of ws.issues) {
+        if (colliding.has(nameKey(issue.title))) issue.nameCollision = true
+      }
+    }
+  }
+  return duplicateNames
+}
+
+// ==================== Flattened board rows (CLI / agent surface) ====================
+// The `alice issue list` (issue_list) agent surface wants the board as
+// ONE flat list of title rows tagged with their owning workspace — not the
+// per-workspace tree GET /api/issues returns. Each row keeps the snapshot's
+// display fields, replaces `when` with a plain `scheduled` boolean, and carries
+// the workspace handle so the agent can scan titles globally then drill into one
+// with issue_show. Pure projection — easy to unit-test without a service.
+
+/** One flattened global-board row: an issue's display fields + the owning
+ *  workspace handle (wsId precise, tag human). `scheduled` collapses the
+ *  snapshot's `when`; `nameCollision` rides through iff the title clashes
+ *  across workspaces. */
+export interface BoardRow {
+  id: string
+  title: string
+  status: IssueStatus
+  priority: IssuePriority
+  assignee: string
+  /** Adapter id for the scheduled fire override, if set. */
+  agent?: string
+  credential?: string
+  credentialSource?: 'native'
+  model?: string
+  effort?: ModelReasoningEffort
+  timeout?: IssueTimeout
+  /** True iff the issue self-schedules (snapshot `when` present). */
+  scheduled: boolean
+  /** Live scheduler/worker health for scheduled rows. */
+  automationHealth?: IssueAutomationHealth
+  workspace: { wsId: string; tag: string }
+  /** Present (true) iff this title clashes across workspaces — carried from
+   *  the snapshot's `annotateNameCollisions`. Absent ⇒ unique. */
+  nameCollision?: boolean
+}
+
+/** A workspace whose `.alice/issues/` dir was unreadable — surfaced rather than
+ *  silently dropped, so a broken peer is visible on the agent's board. */
+export interface BoardInvalidWorkspace {
+  wsId: string
+  tag: string
+  error?: string
+}
+
+/** Flatten an {@link IssuesSnapshot} into the global board the issue_list tool
+ *  returns: every workspace's issues as one tagged row list, plus the workspaces
+ *  whose issues dir failed to read. Pure — no I/O, no service. */
+export function flattenBoardRows(snapshot: IssuesSnapshot): {
+  rows: BoardRow[]
+  invalid: BoardInvalidWorkspace[]
+} {
+  const rows: BoardRow[] = []
+  const invalid: BoardInvalidWorkspace[] = []
+  for (const ws of snapshot.workspaces) {
+    if (ws.status === 'invalid') {
+      invalid.push({ wsId: ws.wsId, tag: ws.tag, ...(ws.error ? { error: ws.error } : {}) })
+      continue
+    }
+    for (const issue of ws.issues) {
+      rows.push({
+        id: issue.id,
+        title: issue.title,
+        status: issue.status,
+        priority: issue.priority,
+        assignee: issue.assignee,
+        ...(issue.agent ? { agent: issue.agent } : {}),
+        ...(issue.credential ? { credential: issue.credential } : {}),
+        ...(issue.credentialSource ? { credentialSource: issue.credentialSource } : {}),
+        ...(issue.model ? { model: issue.model } : {}),
+        ...(issue.effort ? { effort: issue.effort } : {}),
+        ...(issue.timeout ? { timeout: issue.timeout } : {}),
+        scheduled: issue.when !== undefined,
+        ...(issue.automationHealth ? { automationHealth: issue.automationHealth } : {}),
+        workspace: { wsId: ws.wsId, tag: ws.tag },
+        ...(issue.nameCollision ? { nameCollision: true } : {}),
+      })
+    }
+  }
+  return { rows, invalid }
+}
+
+/** One issue reference returned by the `[[name]]` resolver — enough to render a
+ *  disambiguation candidate and navigate to its wsId-precise detail route
+ *  (`/issues/:wsId/:id`). `wsTag` is the human label; `wsId` is the precise key. */
+export interface WikilinkIssueRef {
+  wsId: string
+  wsTag: string
+  id: string
+  title: string
+}
+
+/** The firing markers a scheduled issue carries on the board. Computed by the
+ *  caller (from the scanner's marker store + `snapshotScheduledIssue`) so the
+ *  board's last/next match the schedule dashboard exactly. */
+export interface IssueFiringMarkers {
+  lastFiredAtMs: number | null
+  nextDueAtMs: number | null
+  automationHealth: IssueAutomationHealth
+}
+
+// ==================== Detail (Phase 2a) ====================
+// The read-only shape GET /api/issues/:wsId/:id returns: one issue's full
+// fields INCLUDING markdown What and (iff scheduled) its firing markers +
+// scheduling frontmatter, its collaboration Activity, and its independent
+// headless run history. Unlike the board list, the detail loads all three.
+
+/** One issue's full detail fields: the board row's fields + the canonical
+ * markdown What. Markers are present iff scheduled. */
+export interface IssueDetailIssue {
+  id: string
+  title: string
+  /** Canonical markdown work definition and exact scheduled prompt. */
+  what: string
+  status: IssueStatus
+  priority: IssuePriority
+  assignee: string
+  /** Present iff the issue self-schedules. */
+  when?: Schedule
+  /** Adapter id for the scheduled fire (frontmatter `agent`), if set. */
+  agent?: string
+  credential?: string
+  credentialSource?: 'native'
+  model?: string
+  effort?: ModelReasoningEffort
+  timeout?: IssueTimeout
+  /** Optional comment-reply Input Prompt template. Omission keeps the default wrapper. */
+  commentPrompt?: string
+  /** When the scanner last fired this issue (epoch ms); only for scheduled issues. */
+  lastFiredAtMs?: number | null
+  /** When it is next due (epoch ms); only for scheduled issues. */
+  nextDueAtMs?: number | null
+  /** Live scheduler/worker health; present iff the Issue has a schedule. */
+  automationHealth?: IssueAutomationHealth
+  connectorDesk?: string
+  telegramConnector?: true
+}
+
+/** Authoritative resolution of an Issue's exact @resume owner. Unlike a
+ * Workspace directory page, this lookup is global, uncapped, and tied to the
+ * detail read, so it cannot become stale while the Issue assignee advances. */
+export interface IssueAssigneeSession {
+  resumeId: string
+  state: 'ready' | 'missing' | 'retired' | 'deleted' | 'unbound' | 'workspace_missing'
+  workspace?: { id: string; tag: string }
+  agent?: string
+  displayName?: string
+  createdAt?: number
+  updatedAt?: number
+  active: boolean
+  runtime?: PublicSessionRuntime
+}
+
+/** GET /api/issues/:wsId/:id — one issue + its human-facing Activity timeline,
+ *  operational run history, and the inbox reports it produced. */
+export interface IssueDetail {
+  issue: IssueDetailIssue
+  /** Present when assignee is an exact @resume identity. */
+  assigneeSession?: IssueAssigneeSession
+  /** Structured markdown comments loaded from the adjacent JSON sidecar. */
+  comments: IssueComment[]
+  /** This issue's headless runs (wsId + issueId match), newest first.
+   *  Runtime-native session ids are deliberately not part of this projection. */
+  runs: IssueRunRecord[]
+  /** Inbox reports this issue produced — entries whose server-stamped
+   *  `origin.issueId` is this issue, newest-first. The issue→inbox direction of
+   *  the cross-link (`runs` is the run→issue one). */
+  inboxReports: InboxEntry[]
+  /** Human-readable attribution activity for this Issue, newest first. Nearby
+   *  updates from one origin are one editing activity rather than autosave spam.
+   *  `resumeId` is the only conversation handle exposed for Session origins. */
+  provenance: IssueProvenanceRecord[]
+  /** Human-facing timeline: changes and comments, oldest first. Operational
+   * executions stay in `runs` so they do not swallow the collaboration log. */
+  activity: IssueActivityRecord[]
+}
+
+export interface IssueProvenanceRecord {
+  id: string
+  action: ProvenanceAction
+  origin: ArtifactOrigin
+  at: number
+  mutation?: ProvenanceMutation
+}
+
+export type IssueActivityRecord =
+  | ({ kind: 'change' } & IssueProvenanceRecord)
+  | { kind: 'comment'; id: string; at: number; comment: IssueComment }
+
+/** Strip persistence-only artifact/fingerprint fields from Issue detail. */
+export function issueProvenanceRecords(
+  records: readonly ProvenanceRecord[],
+): IssueProvenanceRecord[] {
+  const sorted = [...records].sort((a, b) => b.at - a.at)
+  const compacted: ProvenanceRecord[] = []
+  for (const record of sorted) {
+    const newer = compacted.at(-1)
+    const elapsed = newer ? newer.at - record.at : -1
+    if (
+      newer &&
+      newer.action === 'updated' && record.action === 'updated' &&
+      artifactOriginsMatch(newer.origin, record.origin) &&
+      elapsed >= 0 && elapsed <= ACTIVITY_UPDATE_COALESCE_MS
+    ) continue
+    compacted.push(record)
+  }
+  return compacted.map(({ id, action, origin, at, mutation }) => ({
+    id,
+    action,
+    origin,
+    at,
+    ...(mutation ? { mutation } : {}),
+  }))
+}
+
+/** Agent/UI-safe projection of one execution. `resumeId` is the only public
+ * conversation handle; adapter-native session ids stay in ResumeRegistry. */
+export interface IssueRunRecord {
+  taskId: string
+  resumeId: string
+  parentTaskId?: string
+  retryOfTaskId?: string
+  wsId: string
+  issueId?: string
+  agent: string
+  model?: string
+  effort?: ModelReasoningEffort
+  prompt: string
+  status: HeadlessTaskStatus
+  startedAt: number
+  finishedAt?: number
+  durationMs?: number
+  processStarted?: boolean
+  launchErrorCode?: HeadlessTaskRecord['launchErrorCode']
+  exitCode?: number | null
+  signal?: string | null
+  killed?: boolean
+  error?: string
+  /** Positive watchdog budget, `null` for an explicitly unlimited new run,
+   * absent only on historical records. */
+  timeoutMs?: number | null
+  output?: HeadlessTaskOutputSummary
+  /** Read-side explanation for non-successful scheduled execution. Derived
+   * from durable fields so old registry entries need no migration. */
+  failure?: IssueRunFailure
+  /** Whether OpenAlice currently has a native runtime mapping for resumeId. */
+  resumable: boolean
+}
+
+/** Explicit whitelist: do not spread HeadlessTaskRecord here. Old registry
+ * records may contain adapter-specific compatibility fields. */
+export function issueRunRecord(task: HeadlessTaskRecord, resumable: boolean): IssueRunRecord {
+  const failure = issueRunFailure(task)
+  return {
+    taskId: task.taskId,
+    resumeId: task.resumeId,
+    ...(task.parentTaskId ? { parentTaskId: task.parentTaskId } : {}),
+    ...(task.trigger?.retryOfTaskId ? { retryOfTaskId: task.trigger.retryOfTaskId } : {}),
+    wsId: task.wsId,
+    ...(task.trigger?.kind === 'issue' ? { issueId: task.trigger.issueId } : {}),
+    agent: task.agent,
+    ...(task.model ? { model: task.model } : {}),
+    ...(task.effort ? { effort: task.effort } : {}),
+    prompt: task.prompt,
+    status: task.status,
+    startedAt: task.startedAt,
+    ...(task.finishedAt !== undefined ? { finishedAt: task.finishedAt } : {}),
+    ...(task.durationMs !== undefined ? { durationMs: task.durationMs } : {}),
+    ...(task.processStarted !== undefined ? { processStarted: task.processStarted } : {}),
+    ...(task.launchErrorCode !== undefined ? { launchErrorCode: task.launchErrorCode } : {}),
+    ...(task.exitCode !== undefined ? { exitCode: task.exitCode } : {}),
+    ...(task.signal !== undefined ? { signal: task.signal } : {}),
+    ...(task.killed !== undefined ? { killed: task.killed } : {}),
+    ...(task.error !== undefined ? { error: task.error } : {}),
+    ...(task.timeoutMs !== undefined ? { timeoutMs: task.timeoutMs } : {}),
+    ...(task.output !== undefined ? { output: task.output } : {}),
+    ...(failure ? { failure } : {}),
+    resumable,
+  }
+}
+
+/** One human-facing Issue timeline assembled from durable attribution edges
+ * and structured comments. `commented` provenance is intentionally omitted:
+ * the comment record itself is the richer event and rendering both would
+ * duplicate one action. Headless executions remain in the independent Runs
+ * section because they are operational history, not collaboration activity. */
+export function issueActivityRecords(
+  changes: readonly IssueProvenanceRecord[],
+  comments: readonly IssueComment[],
+): IssueActivityRecord[] {
+  return [
+    ...changes
+      .filter((change) => change.action !== 'commented')
+      .map((change) => ({ ...change, kind: 'change' as const })),
+    ...comments
+      .map((comment) => ({
+        kind: 'comment' as const,
+        id: comment.id,
+        at: Date.parse(comment.at),
+        comment,
+      }))
+      .filter((record) => Number.isFinite(record.at)),
+  ].sort((a, b) => a.at - b.at)
+}
+
+/** Filter a workspace's inbox entries to the ones a given issue produced
+ *  (`origin.issueId` match). Pure + order-preserving, so the caller's
+ *  newest-first read order carries through. The issue→inbox join, kept in the
+ *  domain (not the HTTP route) so every surface — CLI, MCP — gets it. */
+export function inboxReportsForIssue(
+  entries: readonly InboxEntry[],
+  workspaceId: string,
+  issueId: string,
+): InboxEntry[] {
+  return entries.filter((entry) =>
+    entry.origin?.issueId === issueId &&
+    (entry.origin.issueWorkspaceId ?? entry.workspaceId) === workspaceId,
+  )
+}
+
+/** Map a validated issue (+ its firing markers, iff scheduled) to the detail
+ *  issue shape. Keeps What and scheduling frontmatter the board drops. */
+export function detailIssue(
+  issue: IssueRecord,
+  markers: IssueFiringMarkers | null,
+): IssueDetailIssue {
+  return {
+    id: issue.id,
+    title: issue.title,
+    what: issue.what,
+    status: issue.status,
+    priority: issue.priority,
+    assignee: issue.assignee,
+    ...(issue.when ? { when: issue.when } : {}),
+    ...(issue.agent ? { agent: issue.agent } : {}),
+    ...(issue.credential ? { credential: issue.credential } : {}),
+    ...(issue.credentialSource ? { credentialSource: issue.credentialSource } : {}),
+    ...(issue.model ? { model: issue.model } : {}),
+    ...(issue.effort ? { effort: issue.effort } : {}),
+    ...(issue.timeout ? { timeout: issue.timeout } : {}),
+    ...(issue.commentPrompt ? { commentPrompt: issue.commentPrompt } : {}),
+    ...(issue.connectorDesk ? { connectorDesk: issue.connectorDesk, telegramConnector: issue.connectorDesk === 'telegram' ? true as const : undefined } : {}),
+    ...(markers ? {
+      lastFiredAtMs: markers.lastFiredAtMs,
+      nextDueAtMs: markers.nextDueAtMs,
+      automationHealth: markers.automationHealth,
+    } : {}),
+  }
+}
+
+/** Map one validated issue (+ its firing markers, iff scheduled) to a board row.
+ *  Pure: the caller resolves `markers` for scheduled issues and passes `null` for
+ *  pure board work items. Markdown What is intentionally dropped. */
+export function snapshotBoardIssue(
+  issue: IssueRecord,
+  markers: IssueFiringMarkers | null,
+): IssuesSnapshotIssue {
+  return {
+    id: issue.id,
+    title: issue.title,
+    status: issue.status,
+    priority: issue.priority,
+    assignee: issue.assignee,
+    ...(issue.agent ? { agent: issue.agent } : {}),
+    ...(issue.credential ? { credential: issue.credential } : {}),
+    ...(issue.credentialSource ? { credentialSource: issue.credentialSource } : {}),
+    ...(issue.model ? { model: issue.model } : {}),
+    ...(issue.effort ? { effort: issue.effort } : {}),
+    ...(issue.timeout ? { timeout: issue.timeout } : {}),
+    ...(issue.connectorDesk ? { connectorDesk: issue.connectorDesk, telegramConnector: issue.connectorDesk === 'telegram' ? true as const : undefined } : {}),
+    ...(issue.when ? { when: issue.when } : {}),
+    ...(markers ? {
+      lastFiredAtMs: markers.lastFiredAtMs,
+      nextDueAtMs: markers.nextDueAtMs,
+      automationHealth: markers.automationHealth,
+    } : {}),
+  }
+}

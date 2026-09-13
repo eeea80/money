@@ -1,0 +1,214 @@
+import { formatRelativeTime } from '../../lib/intl'
+import { ArrowUpCircle, Bot, ChevronRight, Code, Cpu, GitBranch, ScrollText, Sparkles, Terminal, type LucideIcon } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+import type { GitLogEntry, Workspace } from './api'
+import { sessionCoworkerLabel, workspaceDisplayName, workspaceDisplayTitle } from './display'
+import { workspaceActivityMs } from './sidebar-order'
+
+/**
+ * Single-workspace summary for the Workspaces Overview dashboard. The header,
+ * recent Session drill-ins, and available provenance form one compact reading
+ * path. The complete Session inventory remains available through Workspace.
+ *
+ * A full-card button opens the workspace tab. It is a sibling of the
+ * interactive session, upgrade, and provider controls so the whole card stays
+ * mouse-friendly without nesting buttons or excluding keyboard users.
+ */
+
+const AGENT_ICONS: Record<string, LucideIcon> = {
+  claude: Sparkles,
+  codex: Cpu,
+  opencode: Code,
+  pi: Bot,
+  shell: Terminal,
+}
+
+const SESSION_PREVIEW_LIMIT = 3
+const MOBILE_SESSION_PREVIEW_LIMIT = 2
+
+function AgentGlyph({ agent }: { agent: string }) {
+  const Icon = AGENT_ICONS[agent] ?? Bot
+  return <Icon size={12} strokeWidth={2.25} aria-hidden="true" />
+}
+
+
+interface Props {
+  workspace: Workspace
+  lastCommit: GitLogEntry | null
+  onOpen: () => void
+  onOpenSession: (sessionId: string) => void
+  /** Open the reviewed Template Upgrade preview. */
+  onUpgrade?: () => void
+}
+
+export function OverviewCard({
+  workspace,
+  lastCommit,
+  onOpen,
+  onOpenSession,
+  onUpgrade,
+}: Props) {
+  const { t } = useTranslation()
+  const w = workspace
+  const upgradeVersion = w.upgradeAvailable?.to.replace(/^v(?=\d)/, '') ?? ''
+  const label = workspaceDisplayName(w)
+  const hasRunning = w.sessions.some((s) => s.state === 'running')
+  const previewSessions = w.sessions.slice(0, SESSION_PREVIEW_LIMIT)
+  const hiddenSessionCount = w.sessions.length - previewSessions.length
+  const mobileHiddenSessionCount = Math.max(0, w.sessions.length - MOBILE_SESSION_PREVIEW_LIMIT)
+
+  const lastActivityMs = workspaceActivityMs(w)
+
+  const dotClass = hasRunning
+    ? 'bg-success'
+    : w.sessions.length > 0
+      ? 'bg-muted-foreground/40'
+      : 'border border-border'
+
+  return (
+    <article
+      className="group relative rounded-lg border border-border/70 bg-card p-3 transition-[border-color,background-color] hover:border-border hover:bg-secondary/35"
+    >
+      <button
+        type="button"
+        aria-label={label}
+        onClick={onOpen}
+        className="absolute inset-0 z-0 rounded-lg focus-visible:outline-none focus-visible:[box-shadow:var(--oa-focus-shadow)]"
+      />
+
+      <div className="pointer-events-none relative z-10 flex flex-col gap-3">
+        {/* Header */}
+        <div className="flex items-start gap-2.5">
+          <span
+            className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${dotClass}`}
+            aria-hidden="true"
+          />
+          <div className="flex-1 min-w-0">
+            <h3 className="text-[14px] leading-[19px] font-semibold text-foreground truncate" title={workspaceDisplayTitle(w)}>
+              {label}
+            </h3>
+            <p className="text-[11px] leading-[15px] text-muted-foreground truncate" title={w.description}>
+              {w.description?.trim() || t('workspace.activeAgo', { time: formatRelativeTime(lastActivityMs) })}
+            </p>
+          </div>
+          {w.upgradeAvailable && w.template && (
+            <button
+              type="button"
+              onClick={() => onUpgrade?.()}
+              disabled={!onUpgrade}
+              title={t('workspace.templateUpgrade', {
+                from: w.upgradeAvailable.from,
+                to: upgradeVersion,
+              })}
+              className={`oa-pressable pointer-events-auto flex min-h-10 shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10px] leading-[14px] font-medium transition-colors sm:min-h-0 ${w.upgradeAvailable.verified === false ? 'border border-warning/50 text-warning hover:bg-warning/10' : 'border border-primary/40 text-primary hover:border-primary/80 hover:bg-primary/10'}`}
+            >
+              <ArrowUpCircle size={10} strokeWidth={2.25} />
+              <span>v{upgradeVersion}</span>
+            </button>
+          )}
+        </div>
+
+        {/* Sessions */}
+        <div className="border-t border-border/60 pt-2.5">
+          <div className="mb-1 flex items-center gap-1.5 text-[11px] leading-[15px] font-medium text-muted-foreground">
+            <span>{t('workspace.sessions')}</span>
+            <span className="tabular-nums text-muted-foreground/45">{w.sessions.length}</span>
+          </div>
+          {w.sessions.length === 0 ? (
+            <p className="text-[12px] leading-[18px] text-muted-foreground/80 italic">{t('workspace.noSessions')}</p>
+          ) : (
+            <ul className="space-y-0.5 -mx-2">
+              {previewSessions.map((s, index) => (
+                <li
+                  key={s.id}
+                  className={index >= MOBILE_SESSION_PREVIEW_LIMIT ? 'hidden sm:list-item' : undefined}
+                >
+                  <button
+                    type="button"
+                    aria-label={`${sessionCoworkerLabel(s)} ${t(s.state === 'running' ? 'workspace.running' : 'workspace.paused')}`}
+                    onClick={() => onOpenSession(s.id)}
+                    className="oa-nav-row pointer-events-auto flex min-h-10 w-full items-center gap-2 rounded px-2 py-1 text-left text-[12px] leading-[18px] text-foreground hover:bg-muted/40 focus-visible:outline-none sm:min-h-0"
+                  >
+                    <span className="w-3 flex justify-center text-muted-foreground">
+                      <AgentGlyph agent={s.agent} />
+                    </span>
+                    <span className="truncate text-[12px] leading-[18px]">{sessionCoworkerLabel(s)}</span>
+                    <span
+                      className={`text-[11px] leading-[15px] ${
+                        s.state === 'running' ? 'text-success' : 'text-muted-foreground'
+                      }`}
+                    >
+                      {t(s.state === 'running' ? 'workspace.running' : 'workspace.paused')}
+                    </span>
+                    <ChevronRight
+                      size={10}
+                      className="ml-auto text-muted-foreground opacity-60 transition-opacity sm:opacity-0 sm:group-hover:opacity-60"
+                    />
+                  </button>
+                </li>
+              ))}
+              {mobileHiddenSessionCount > 0 && (
+                <li className={`mt-1 border-t border-border/60 pt-1 ${hiddenSessionCount === 0 ? 'sm:hidden' : ''}`}>
+                  <button
+                    type="button"
+                    onClick={onOpen}
+                    aria-label={t('workspace.viewAllSessions', { count: w.sessions.length })}
+                    className="oa-nav-row pointer-events-auto flex min-h-10 w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[11px] leading-[15px] font-medium text-primary hover:bg-primary/8 focus-visible:outline-none sm:min-h-0"
+                  >
+                    <span>{t('workspace.viewAllSessions', { count: w.sessions.length })}</span>
+                    <span className="ml-auto tabular-nums text-muted-foreground/55 sm:hidden">
+                      +{mobileHiddenSessionCount}
+                    </span>
+                    <span className="ml-auto hidden tabular-nums text-muted-foreground/55 sm:inline">
+                      +{hiddenSessionCount}
+                    </span>
+                    <ChevronRight size={11} className="text-primary/65" aria-hidden />
+                  </button>
+                </li>
+              )}
+            </ul>
+          )}
+        </div>
+
+        {/* Footer — only rendered when there's something to show */}
+        {(lastCommit || w.harnessSource || (w.template && w.spawnedFromVersion)) && (
+          <div className="flex flex-wrap gap-x-4 gap-y-1.5 border-t border-border/60 pt-2.5">
+            {w.harnessSource && (
+              <div className="flex items-center gap-2 text-[11px] leading-[15px] text-muted-foreground">
+                <GitBranch size={11} strokeWidth={2.25} className="shrink-0" />
+                <span
+                  className="truncate"
+                  title={`${w.harnessSource.version} · ${w.harnessSource.commit}`}
+                >
+                  {t('workspace.fromHarnessSource', {
+                    version: w.harnessSource.version,
+                    commit: w.harnessSource.commit.slice(0, 12),
+                  })}
+                </span>
+              </div>
+            )}
+            {w.template && w.spawnedFromVersion && (
+              <div className="flex items-center gap-2 text-[11px] leading-[15px] text-muted-foreground">
+                <GitBranch size={11} strokeWidth={2.25} className="shrink-0" />
+                <span className="truncate">
+                  {t('workspace.fromTemplate', {
+                    template: w.template,
+                    version: w.spawnedFromVersion,
+                  })}
+                </span>
+              </div>
+            )}
+            {lastCommit && (
+              <div className="flex items-center gap-2 text-[11px] leading-[15px] text-muted-foreground">
+                <ScrollText size={11} strokeWidth={2.25} className="shrink-0" />
+                <span className="truncate" title={lastCommit.subject}>
+                  {lastCommit.subject}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </article>
+  )
+}

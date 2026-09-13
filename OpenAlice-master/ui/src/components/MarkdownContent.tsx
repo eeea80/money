@@ -1,0 +1,311 @@
+import { isFileReference, parseMarketReference } from '@traderalice/connector-protocol'
+/**
+ * Reusable markdown renderer with syntax-highlighted code blocks and copy buttons.
+ *
+ * Extracted from ChatMessage so other surfaces can render assistant text with
+ * the same typography without inheriting chat chrome.
+ */
+
+import { memo, useCallback, useEffect, useMemo, useRef } from 'react'
+import { Marked, type TokenizerAndRendererExtension } from 'marked'
+import { markedHighlight } from 'marked-highlight'
+import hljs from 'highlight.js'
+import DOMPurify from 'dompurify'
+import 'highlight.js/styles/github-dark.min.css'
+
+import { useWikilinkHandler } from '../live/wikilink'
+import { useWorkspaceActions } from '../contexts/workspace-actions-context'
+import { resolveSessionSignature } from './workspace/api'
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+/**
+ * Obsidian-style `[[name]]` wikilinks → clickable entity references.
+ *
+ * Inline marked extension (not a regex preprocess) so it never fires
+ * inside code spans / fenced blocks — marked only offers the token stream
+ * to extensions in inline contexts. Mirrors the backend matcher in
+ * `src/core/entity-backlinks.ts` (`/\[\[([^[\]\n]+)\]\]/`). The rendered
+ * anchor carries the lowercased entity key in `data-entity` (entity keys
+ * are case-insensitive); MarkdownContent delegates the actual navigation
+ * on click so this module stays a pure string renderer.
+ */
+function createWikilinkExtension(opts: { codeSpanWikilinks: boolean; fileHrefs?: Record<string, string> }): TokenizerAndRendererExtension {
+  return {
+    name: 'wikilink',
+    level: 'inline',
+    start(src: string) {
+      const plain = src.indexOf('[[')
+      if (!opts.codeSpanWikilinks) return plain
+      const quoted = src.indexOf('`[[')
+      if (plain < 0) return quoted
+      if (quoted < 0) return plain
+      return Math.min(plain, quoted)
+    },
+    tokenizer(src: string) {
+      const quoted = opts.codeSpanWikilinks ? /^`\[\[([^[\]\n]+)\]\]`/.exec(src) : null
+      if (quoted) return { type: 'wikilink', raw: quoted[0], text: quoted[1]!.trim() }
+      const plain = /^\[\[([^[\]\n]+)\]\]/.exec(src)
+      if (!plain) return undefined
+      return { type: 'wikilink', raw: plain[0], text: plain[1]!.trim() }
+    },
+    renderer(token) {
+      const name = token.text as string
+      if (name.startsWith('market/')) {
+        const market = parseMarketReference(name)
+        const href = opts.fileHrefs?.[name]
+        if (!market || !href) return escapeHtml(token.raw)
+        return `<a class="markdown-file-card" href="${escapeHtml(href)}" data-file-path="${escapeHtml(name)}"><span class="markdown-file-type">K</span><span class="markdown-file-label"><strong>${escapeHtml(market.barId.split('|').slice(1).join('|'))} · ${market.interval}</strong><span>${escapeHtml(market.barId)} · K-line</span></span><span aria-hidden="true">↗</span></a>`
+      }
+      if (opts.fileHrefs && isFileReference(name)) {
+        const href = opts.fileHrefs[name]
+        if (!href) return escapeHtml(token.raw)
+        const attributes = `href="${escapeHtml(href)}" data-file-path="${escapeHtml(name)}"`
+        if (/\.(png|jpe?g|webp|gif)$/i.test(name)) {
+          return `<a class="markdown-file-image${name.startsWith('sticker/') ? ' is-sticker' : ''}" ${attributes}><img src="${escapeHtml(href)}" alt="${escapeHtml(name)}" loading="lazy" /></a>`
+        }
+        const filename = name.split('/').pop() ?? name
+        const extension = filename.split('.').pop()?.toUpperCase() ?? 'FILE'
+        return `<a class="markdown-file-card" ${attributes}><span class="markdown-file-type">${escapeHtml(extension)}</span><span class="markdown-file-label"><strong>${escapeHtml(filename)}</strong><span>${escapeHtml(name)}</span></span><span aria-hidden="true">↗</span></a>`
+      }
+      const key = name.toLowerCase()
+      return `<a class="wikilink" data-entity="${escapeHtml(key)}">${escapeHtml(name)}</a>`
+    },
+  }
+}
+
+/** `@resumeId` is the visible signature of an accountable product Session.
+ * Like wikilinks this is an inline tokenizer, so examples in code remain text. */
+const sessionSignatureExtension: TokenizerAndRendererExtension = {
+  name: 'sessionSignature',
+  level: 'inline',
+  start: (src) => src.indexOf('@resume-'),
+  tokenizer(src) {
+    const match = /^@(resume-[A-Za-z0-9_-]+)/.exec(src)
+    return match ? { type: 'sessionSignature', raw: match[0], text: match[1] } : undefined
+  },
+  renderer(token) {
+    const resumeId = token.text as string
+    return `<a class="session-signature" data-resume-id="${escapeHtml(resumeId)}">@${escapeHtml(resumeId)}</a>`
+  },
+}
+
+function createMarked(opts: { strikethrough: boolean; codeSpanWikilinks: boolean; fileHrefs?: Record<string, string> }): Marked {
+  const instance = new Marked(
+    markedHighlight({
+      langPrefix: 'hljs language-',
+      highlight(code, lang) {
+        if (lang && hljs.getLanguage(lang)) {
+          return hljs.highlight(code, { language: lang }).value
+        }
+        return hljs.highlightAuto(code).value
+      },
+    }),
+    { breaks: true },
+  )
+  instance.use({ extensions: [
+    createWikilinkExtension(opts),
+    sessionSignatureExtension,
+  ] })
+  if (!opts.strikethrough) {
+    instance.use({
+      tokenizer: {
+        del() {
+          return undefined
+        },
+      },
+    })
+  }
+  return instance
+}
+
+// Shared Marked instances (parser config is stateless — safe to reuse).
+const markedWithStrikethrough = createMarked({ strikethrough: true, codeSpanWikilinks: false })
+const markedWithoutStrikethrough = createMarked({ strikethrough: false, codeSpanWikilinks: false })
+const markedWithCodeSpanWikilinks = createMarked({ strikethrough: true, codeSpanWikilinks: true })
+const markedComment = createMarked({ strikethrough: false, codeSpanWikilinks: true })
+
+const COPY_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`
+const CHECK_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`
+
+function addCodeBlockWrappers(html: string): string {
+  return html.replace(
+    /<pre><code class="hljs language-(\w+)">([\s\S]*?)<\/code><\/pre>/g,
+    (_, lang, code) =>
+      `<div class="code-block-wrapper"><div class="code-header"><span>${lang}</span><button type="button" class="code-copy-btn" data-code>${COPY_ICON} Copy</button></div><pre><code class="hljs language-${lang}">${code}</code></pre></div>`,
+  ).replace(
+    /<pre><code class="hljs">([\s\S]*?)<\/code><\/pre>/g,
+    (_, code) =>
+      `<div class="code-block-wrapper"><div class="code-header"><span>code</span><button type="button" class="code-copy-btn" data-code>${COPY_ICON} Copy</button></div><pre><code class="hljs">${code}</code></pre></div>`,
+  )
+}
+
+interface MarkdownContentProps {
+  text: string
+  fileHrefs?: Record<string, string>
+  onFileReference?: (path: string) => void
+  className?: string
+  /**
+   * Long-form documents need a calmer measure and stronger hierarchy than
+   * chat messages, comments, and runtime output. Reading mode changes only
+   * presentation; parsing and interaction stay shared.
+   */
+  variant?: 'default' | 'reading'
+  /**
+   * GitHub-flavoured `~~delete~~` rendering. Disable on terse agent comments
+   * because financial prose often uses `~$123` for approximate prices.
+   */
+  strikethrough?: boolean
+  /**
+   * Treat an exact code span like `` `[[name]]` `` as a wikilink. Inbox
+   * comments often quote entity refs this way, but they should still navigate.
+   */
+  codeSpanWikilinks?: boolean
+  /**
+   * Click handler for `[[name]]` wikilinks, receiving the lowercased entity
+   * key. Defaults to jumping to the Tracked activity (see useWikilinkHandler).
+   * Pass an explicit handler to override (e.g. tests, alternate surfaces).
+   */
+  onWikilink?: (entityKey: string) => void
+  /** Optional owner-provided route for relative document links. */
+  resolveRelativeHref?: (href: string) => string
+}
+
+export function renderMarkdownHtml(
+  text: string,
+  opts: { fileHrefs?: Record<string, string>; strikethrough?: boolean; codeSpanWikilinks?: boolean; resolveRelativeHref?: (href: string) => string } = {},
+): string {
+  const parser = opts.fileHrefs ? createMarked({ strikethrough: opts.strikethrough !== false, codeSpanWikilinks: false, fileHrefs: opts.fileHrefs }) : opts.codeSpanWikilinks
+    ? opts.strikethrough === false
+      ? markedComment
+      : markedWithCodeSpanWikilinks
+    : opts.strikethrough === false
+      ? markedWithoutStrikethrough
+      : markedWithStrikethrough
+  let raw = DOMPurify.sanitize(parser.parse(text) as string)
+  if (opts.resolveRelativeHref) {
+    // Parse inert, sanitized markup. Re-sanitize resolved URLs as well; an
+    // owner callback must not bypass the renderer's URL safety contract.
+    const fragment = document.createElement('template')
+    fragment.innerHTML = raw
+    for (const link of fragment.content.querySelectorAll('a[href]')) {
+      const href = link.getAttribute('href') ?? ''
+      if (href && !/^(?:[a-z][a-z\d+.-]*:|\/|#)/i.test(href)) {
+        link.setAttribute('href', opts.resolveRelativeHref(href))
+      }
+    }
+    raw = DOMPurify.sanitize(fragment.innerHTML)
+  }
+  return addMarkdownStructure(addCodeBlockWrappers(raw))
+}
+
+/** Give wide tables their own scroll owner instead of letting a document
+ * stretch the complete application shell. The wrapper is generated after
+ * sanitization and contains no user-controlled attributes. */
+function addMarkdownStructure(html: string): string {
+  return html
+    .replace(/<table>/g, '<div class="markdown-table-shell"><table>')
+    .replace(/<\/table>/g, '</table></div>')
+}
+
+export function MarkdownContent({
+  text,
+  className,
+  variant = 'default',
+  strikethrough = true,
+  codeSpanWikilinks = false,
+  onWikilink,
+  resolveRelativeHref,
+  fileHrefs,
+  onFileReference,
+}: MarkdownContentProps) {
+  const contentRef = useRef<HTMLDivElement>(null)
+  const defaultWikilink = useWikilinkHandler()
+  const { openHeadlessRun } = useWorkspaceActions()
+  const wikilink = onWikilink ?? defaultWikilink
+
+  const html = useMemo(() => {
+    return renderMarkdownHtml(text, { strikethrough, codeSpanWikilinks, resolveRelativeHref, fileHrefs })
+  }, [text, strikethrough, codeSpanWikilinks, resolveRelativeHref, fileHrefs])
+
+  const handleClick = useCallback(
+    (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      const file = target.closest('a[data-file-path]')
+      if (file && onFileReference) { e.preventDefault(); onFileReference(file.getAttribute('data-file-path')!); return }
+      const link = target.closest('a.wikilink') as HTMLElement | null
+      if (link) {
+        e.preventDefault()
+        const key = link.getAttribute('data-entity')
+        if (key) wikilink(key)
+        return
+      }
+      const signature = target.closest('a.session-signature') as HTMLElement | null
+      if (signature) {
+        e.preventDefault()
+        const resumeId = signature.getAttribute('data-resume-id')
+        if (resumeId) {
+          void resolveSessionSignature(resumeId)
+            .then((identity) => {
+              if (!identity.resumable) throw new Error('This Session has not captured a resumable runtime conversation yet.')
+              return openHeadlessRun(identity.workspaceId, identity.resumeId)
+            })
+            .catch((err) => console.error('session_signature.open_failed', { resumeId, err }))
+        }
+        return
+      }
+      const btn = target.closest('.code-copy-btn') as HTMLButtonElement | null
+      if (!btn) return
+      const wrapper = btn.closest('.code-block-wrapper')
+      const code = wrapper?.querySelector('code')?.textContent ?? ''
+      navigator.clipboard.writeText(code).then(() => {
+        btn.innerHTML = `${CHECK_ICON} Copied!`
+        btn.classList.add('copied')
+        setTimeout(() => {
+          btn.innerHTML = `${COPY_ICON} Copy`
+          btn.classList.remove('copied')
+        }, 2000)
+      })
+    },
+    [wikilink, openHeadlessRun, onFileReference],
+  )
+
+  useEffect(() => {
+    const el = contentRef.current
+    if (!el) return
+    el.addEventListener('click', handleClick)
+    return () => el.removeEventListener('click', handleClick)
+  }, [handleClick])
+
+  return (
+    <div ref={contentRef} className={className} data-markdown-variant={variant}>
+      <StaticMarkdownBody html={html} variant={variant} />
+    </div>
+  )
+}
+
+/**
+ * Keep browser-owned state inside an unchanged report intact. Selection,
+ * translation overlays, find-in-page markers, and extension annotations all
+ * live in this subtree; unrelated parent/context updates must not replace it.
+ */
+const StaticMarkdownBody = memo(function StaticMarkdownBody({
+  html,
+  variant,
+}: {
+  html: string
+  variant: NonNullable<MarkdownContentProps['variant']>
+}) {
+  return (
+    <div
+      className={`markdown-content${variant === 'reading' ? ' markdown-content--reading' : ''}`}
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  )
+})

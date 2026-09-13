@@ -1,0 +1,531 @@
+/**
+ * Capability-described handle on a coding-agent CLI (claude, codex, shell, …).
+ *
+ * The pool, watcher, and discovery layers consult an adapter to:
+ *   1. Translate a spawn intent (`resume`?) into the CLI's native command flags.
+ *   2. Decide whether/how to discover on-disk transcripts for this CLI.
+ *   3. Provide CLI-specific env strips/sets and idempotent lifecycle hooks
+ *      (writing config files, recording trust, etc.).
+ *
+ * In v2.M1 only `claude` is registered; the interface exists so v2.M2+ can
+ * land codex/shell without touching the core PTY/protocol/UI plumbing.
+ */
+
+import type { WireShape } from '../ai-providers/preset-catalog.js';
+import type { ModelReasoningEffort } from '../ai-providers/model-semantics.js';
+import type { HeadlessOutputEvent } from './headless-output.js';
+
+export interface OnDiskSession {
+  readonly sessionId: string;
+  readonly file: string;
+  readonly mtime: string;
+  readonly sizeBytes: number;
+}
+
+export interface SpawnContext {
+  readonly resume?: 'last' | { readonly sessionId: string };
+  /** Workspace cwd; lets adapters read e.g. `<cwd>/.mcp.json`. */
+  readonly cwd: string;
+  /**
+   * Final env the PTY will be spawned with (after `spawn-env.ts`). Adapters
+   * use this for `${VAR}` placeholder expansion when translating a
+   * cross-CLI MCP definition into their own native command flags.
+   */
+  readonly env: Readonly<Record<string, string>>;
+  /**
+   * Seed a freshly-spawned INTERACTIVE TUI with a first user message — the
+   * "quick chat" launch ("type a message → you're in, agent already working").
+   * Unlike `composeHeadlessCommand`'s prompt (one-shot, exits at the turn
+   * boundary), this rides the interactive `composeCommand`: each agent CLI
+   * accepts a first prompt that opens the TUI and auto-submits it (claude/codex
+   * positional after `--`; opencode `--prompt`; pi trailing positional).
+   *
+   * ONLY honored on a FRESH spawn (`resume` undefined) — seeding a prompt while
+   * also resuming is ambiguous on codex's `resume <id>` subcommand and pi's
+   * `--session-id`, so adapters MUST ignore it when resuming. `shell` ignores
+   * it entirely (no agent to receive a prompt).
+   */
+  readonly initialPrompt?: string;
+  /**
+   * Structured interactive surfaces may append launcher-owned role guidance
+   * without exposing it as the user's first message. Pi maps this to its
+   * documented `--append-system-prompt` option.
+   */
+  readonly appendSystemPrompt?: string;
+  /** Explicit skill paths for a launcher-owned role surface. */
+  readonly skills?: readonly string[];
+  /**
+   * Structured surfaces cannot answer an interactive project-trust prompt.
+   * Set only after an explicit user action enters a launcher-owned surface.
+   */
+  readonly approveProject?: boolean;
+  /**
+   * Adapter-owned projection of the product Session's durable runtime binding.
+   * The service resolves vault references immediately before launch, then asks
+   * the same adapter to project that selection for every surface. Secrets may
+   * exist in `env`, but never in the argv arrays.
+   */
+  readonly sessionRuntime?: AgentSessionRuntimeProjection;
+}
+
+export interface AgentRuntimeWorkspaceContext {
+  readonly wsId: string;
+  readonly cwd: string;
+  /** Absolute path to the launcher repo, so adapters can compose tool paths. */
+  readonly launcherRepoRoot: string;
+}
+
+export interface AgentProviderVendorPolicy {
+  /** Vendor-specific narrowing of the runtime's normal wire preference. */
+  readonly wirePreference: readonly WireShape[];
+  /**
+   * Narrow compatibility repair for a previously valid saved selection.
+   * The target still has to be present (or provider-inferable) on the credential.
+   */
+  readonly legacyRequestedWireFallbacks?: Readonly<Partial<Record<WireShape, WireShape>>>;
+}
+
+/** Alice-side transport that projects a runtime's live protocol onto the Web surface. */
+export type WebSessionWire = 'pi-rpc' | 'acp' | 'claude-stream-json' | 'codex-app-server';
+
+export interface WebSurfaceCapability {
+  readonly wire: WebSessionWire;
+  /**
+   * The runtime asks before running tools and the transport routes those
+   * prompts to the browser. Runtimes without a per-tool prompt in their
+   * structured mode launch with their own approve-all flag instead.
+   */
+  readonly permissionPrompts: boolean;
+  /** A Session with no native id yet may still open in the Web surface. */
+  readonly freshSession: boolean;
+}
+
+export interface AgentProviderCapabilities {
+  /**
+   * Whether the runtime can start from its own native/global login, or needs a
+   * concrete Workspace provider binding before OpenAlice launches it.
+   */
+  readonly credentialSource: 'runtime-or-workspace' | 'workspace-required';
+  /** Wire protocols this runtime can consume, in native preference order. */
+  readonly wirePreference: readonly WireShape[];
+  /**
+   * Provider credentials this runtime consumes directly instead of through a
+   * model API wire. The credential remains in the one shared vault shape;
+   * its adapter owns the native env/argv projection.
+   */
+  readonly directVendors?: readonly string[];
+  /** Protocol preselected for a blank manual binding form. */
+  readonly defaultWire?: WireShape;
+  /** Provider-specific compatibility constraints and legacy repairs. */
+  readonly vendorPolicies?: Readonly<Record<string, AgentProviderVendorPolicy>>;
+  /**
+   * Custom-model facts this runtime registers in provider metadata. Runtimes
+   * that only select a model id leave this absent and preserve native fallback.
+   */
+  readonly modelRegistration?: {
+    readonly contextWindow?: boolean;
+    readonly reasoning?: boolean;
+    readonly effortVariants?: boolean;
+  };
+}
+
+/**
+ * Shared lifecycle surface for native agent runtimes. Hooks are invoked by the
+ * launcher rather than by individual HTTP/headless/Web adapters, so every
+ * runtime gets the same preparation boundary. Implementations must be
+ * idempotent: workspace creation and every real process launch can both call
+ * `prepareWorkspace`.
+ */
+export interface AgentRuntimeLifecycle {
+  /**
+   * Reconcile launcher-managed runtime configuration before the Workspace is
+   * used. Native/user-owned config must be merged narrowly; never replace a
+   * runtime's global settings directory.
+   */
+  prepareWorkspace?(ctx: AgentRuntimeWorkspaceContext): Promise<void>;
+}
+
+/**
+ * Per-workspace AI-provider override (endpoint / key / model). The launcher
+ * owns the *contract* — one shape, dispatched uniformly across CLIs — while
+ * each adapter owns the *format* (claude → `.claude/settings.local.json`,
+ * codex native login → `.codex/config.toml`, custom provider → an isolated
+ * `.codex/openalice-home/`). Superset shape: `authMode`
+ * is claude-only (which header carries the key), `wireApi` is codex-only
+ * (Responses vs Chat Completions). Fields are optional/nullable so the same
+ * shape serves both the write-input (absent ⇒ unset) and the read-output
+ * (null ⇒ not present in the file).
+ */
+export interface WorkspaceAiCred {
+  baseUrl?: string | null;
+  apiKey?: string | null;
+  model?: string | null;
+  /**
+   * The wire protocol the endpoint speaks — Anthropic Messages / Google
+   * Generative AI / OpenAI Chat Completions / OpenAI Responses. The cross-CLI generalization of the
+   * codex-only `wireApi`: each adapter renders it into its native config
+   * (opencode → which @ai-sdk package, pi → `api` field, codex → `wire_api`).
+   * Carried on the central credential and threaded through here so a runtime
+   * actually uses the shape the credential was created + tested with.
+   */
+  wireShape?: WireShape | null;
+  /**
+   * Model context window for runtimes that need an explicit custom-model limit
+   * (currently opencode/Pi). Optional so old workspace configs keep loading;
+   * injectors may choose a modern default for newly-written configs.
+   */
+  contextWindow?: number | null;
+  /** Pi/opencode custom-model capability; enables native thinking controls. */
+  reasoning?: boolean | null;
+  /** Workspace-local reasoning effort projected into each runtime's native field. */
+  reasoningEffort?: ModelReasoningEffort | null;
+  /** Codex only — legacy/explicit wire_api; superseded by wireShape when set. */
+  wireApi?: 'chat' | 'responses' | null;
+  /** Header mode for an Anthropic wire, regardless of the consuming runtime. */
+  authMode?: 'x-api-key' | 'bearer';
+}
+
+/** Secret-free credential ownership persisted with one product Session. */
+export type SessionCredentialBinding =
+  | { readonly source: 'native' }
+  | {
+      readonly source: 'vault'
+      readonly credentialSlug: string
+      /** Present for wire-backed providers; absent for direct runtime providers. */
+      readonly wireShape?: WireShape
+    }
+  | {
+      readonly source: 'workspace'
+      /** Detects replacement without persisting the key or provider payload. */
+      readonly fingerprint: string
+    }
+
+/**
+ * Immutable launch selection owned by a product `resumeId`. Omitted model
+ * delegates model selection to the credential/runtime. Omitted effort means
+ * exactly "not specified": it remains absent from adapter argv/config even
+ * when the selected model publishes a provider default. An adapter still must
+ * implement Session projection for this valid empty dimension.
+ */
+export interface SessionRuntimeBinding {
+  readonly version: 1
+  readonly credential: SessionCredentialBinding
+  readonly model?: string
+  readonly reasoningEffort?: ModelReasoningEffort
+}
+
+/** Just-in-time secret-bearing resolution. Never persist or expose this shape. */
+export interface ResolvedSessionRuntimeBinding {
+  readonly binding: SessionRuntimeBinding
+  readonly ai: WorkspaceAiCred | null
+}
+
+/**
+ * Native projection produced by an Agent adapter for one Session launch.
+ * Argument groups are separated because several CLIs place run-only flags
+ * after a subcommand. Credential material belongs exclusively in `env`.
+ */
+export interface AgentSessionRuntimeProjection {
+  readonly env: Readonly<Record<string, string>>
+  readonly interactiveArgs: readonly string[]
+  readonly headlessArgs: readonly string[]
+  readonly webArgs?: readonly string[]
+}
+
+export interface AgentSessionRuntimeAdapter {
+  project(
+    ctx: Pick<SpawnContext, 'cwd' | 'env'>,
+    runtime: ResolvedSessionRuntimeBinding,
+  ): AgentSessionRuntimeProjection
+}
+
+/** Test/utility implementation for synthetic Agent adapters with no AI knobs. */
+export const emptyAgentSessionRuntime: AgentSessionRuntimeAdapter = {
+  project: () => ({ env: {}, interactiveArgs: [], headlessArgs: [], webArgs: [] }),
+}
+
+export interface EnvOverrides {
+  /**
+   * Substrings that, when found anywhere in an env var name, cause the var to
+   * be stripped from the spawn env. Layered on top of `spawn-env.ts`'s
+   * baseline list. The substring match is the same `STRIP_TOKENS` semantics
+   * used by `buildSpawnEnv`.
+   */
+  readonly strip?: readonly string[];
+  readonly set?: Readonly<Record<string, string>>;
+}
+
+/**
+ * Best-effort status for native interactive gates that run before a queued
+ * prompt. This is advisory only: adapters must never satisfy a runtime's
+ * onboarding or project-trust prompt by mutating private global state.
+ */
+export type AgentInteractiveSetupStatus =
+  | 'ready'
+  | 'runtime-onboarding-required'
+  | 'workspace-trust-required'
+  | 'unknown';
+
+export interface CliAdapter {
+  readonly id: string;                          // 'claude' | 'codex' | 'shell'
+  readonly displayName: string;
+  /**
+   * Launch surface category. Agent runtimes run a coding-agent TUI and can be
+   * used as the default workload. Utility adapters are explicit tools such as a
+   * bare shell and must never be selected by an omitted `agent`.
+   */
+  readonly kind?: 'agent' | 'utility';
+  /**
+   * Canonical PATH binary name this adapter spawns (`claude`, `codex`,
+   * `opencode`, `pi`). Consumed by `agent-detect.ts` to tell the frontend
+   * whether the runtime is actually installed on the host. Omit for adapters
+   * that always resolve (e.g. `shell` runs `$SHELL`, present on any box) —
+   * those are reported as installed unconditionally.
+   */
+  readonly binary?: string;
+  /**
+   * Short prefix used to name sessions (e.g. `c1`, `x1`, `sh1`). Helps scan a
+   * mixed sidebar tree. Defaults to `id[0]` if omitted, but adapters whose
+   * first character collides with another adapter (claude / codex both 'c')
+   * MUST set this explicitly.
+   */
+  readonly namePrefix?: string;
+  readonly capabilities: {
+    readonly parallelPerCwd: boolean;
+    readonly resumeLast: boolean;
+    readonly resumeById: boolean;
+    readonly transcriptDiscovery: 'fs-watch' | 'subprocess' | 'none';
+    /**
+     * The adapter mints its OWN session id at spawn. On a FRESH spawn the
+     * launcher generates a uuid, threads it through `composeCommand`'s resume
+     * `{sessionId}` intent (the CLI creates-or-reopens that id), and persists
+     * it as `resumeHint` immediately — so a later reattach resumes BY ID, not
+     * via fragile `--continue`/last. Requires the CLI's session-id flag to
+     * create-if-missing (e.g. pi `--session-id`). Adapters that instead harvest
+     * the id post-spawn (fs-watch / subprocess discovery) leave this falsy.
+     */
+    readonly assignsSessionId?: boolean;
+    /**
+     * The adapter exposes a one-shot HEADLESS mode (consumes a positional
+     * prompt, exits at the turn boundary) via `composeHeadlessCommand`. The
+     * launcher dispatches automation tasks through it — spawn → run → the agent
+     * reports via `inbox_push` → exit, no human attached. The agent CLIs
+     * set this; `shell` does not (no agent-turn concept).
+     */
+    readonly headless?: boolean;
+    /**
+     * The adapter can serve the browser Web conversation surface through a
+     * long-lived structured process (`composeWebCommand`). `wire` selects the
+     * Alice transport that speaks the runtime's protocol; the UI reads this to
+     * decide whether a Session may open in the Web surface. Omit for runtimes
+     * whose only interactive mode is the TUI.
+     */
+    readonly web?: WebSurfaceCapability;
+    /**
+     * Native AI-provider projection contract. Shared credential/model logic
+     * consumes this declaration instead of branching on adapter ids. Omit for
+     * utility adapters that cannot accept a Workspace AI binding.
+     */
+    readonly aiProvider?: AgentProviderCapabilities;
+  };
+
+  /** Required for Agent runtimes; utility adapters explicitly set `null`. */
+  readonly sessionRuntime: AgentSessionRuntimeAdapter | null;
+
+  /** Runtime-specific hooks executed through the shared launcher lifecycle. */
+  readonly lifecycle?: AgentRuntimeLifecycle;
+
+  /**
+   * Inspect native first-use state without changing it. Omit when the runtime
+   * has no known pre-prompt interactive gate or exposes no safe read seam.
+   */
+  readInteractiveSetupStatus?(cwd: string): Promise<AgentInteractiveSetupStatus>;
+
+  /**
+   * Translate the base command (from `WEB_TERMINAL_COMMAND` / template) +
+   * resume intent into the final argv. For claude:
+   *   base + 'last'    → [...base, '--continue']
+   *   base + { id }    → [...base, '--resume', id]
+   * For codex (M2):
+   *   base + 'last'    → [...base, 'resume', '--last']
+   *   base + { id }    → [...base, 'resume', id]
+   *
+   * On a FRESH spawn (`resume` undefined) with `ctx.initialPrompt` set, the
+   * adapter ALSO appends the prompt at the CLI's interactive-seed position so
+   * the TUI opens already working on it (claude/codex positional after `--`;
+   * opencode `--prompt`; pi trailing positional). Ignored when resuming; `shell`
+   * ignores it always.
+   */
+  composeCommand(base: readonly string[], ctx: SpawnContext): readonly string[];
+
+  /**
+   * Optional long-lived structured interactive surface. Unlike headless mode,
+   * this process remains alive and accepts multiple prompts over stdin/stdout.
+   * It opens the SAME native session the ordinary terminal would resume, so
+   * switching surfaces never forks a conversation. `ctx.resume` is `undefined`
+   * when the Session has no native id yet; runtimes that create sessions
+   * in-band (ACP `session/new`, Codex `thread/start`) accept that, runtimes
+   * that need an id at launch must throw. Present iff `capabilities.web`.
+   */
+  composeWebCommand?(base: readonly string[], ctx: SpawnContext): readonly string[];
+
+  /**
+   * One-shot HEADLESS argv for an automation task — like `composeCommand`, but
+   * the process consumes `prompt` and EXITS at the turn boundary (vs the
+   * interactive TUI that waits for input). The adapter places `prompt` at the
+   * CLI-correct position (claude right after `-p`; codex/opencode/pi trailing).
+   * MUST keep the same tool-access strategy as `composeCommand`: modern
+   * OpenAlice workspaces prefer the injected `alice*` / `traderhub` CLI shims,
+   * while adapter-native MCP is optional and adapter-specific. Present iff
+   * `capabilities.headless` is true.
+   *   claude:   [...base, -p, <prompt>, --output-format, json]   // never --bare
+   *   codex:    [codex, exec, --json, <prompt>]                  // MCP optional
+   *   grok:     [grok, --no-leader, --always-approve, --output-format, streaming-json, --single=<prompt>]
+   *   omp:      [omp, -p, --mode, json, --auto-approve, --, <prompt>]
+   *   opencode: [opencode, run, --format, json, <prompt>]
+   *   pi:       [pi, -p, --mode, json, <prompt>]
+   */
+  composeHeadlessCommand?(
+    base: readonly string[],
+    ctx: SpawnContext,
+    prompt: string,
+  ): readonly string[];
+
+  /**
+   * Extract the agent's OWN session id from one line of headless stdout.
+   * Agent CLIs announce their session id in the first line(s) of
+   * their structured headless output (verified 2026-06-11):
+   *   claude:   every stream-json event carries `session_id`
+   *   codex:    `{"type":"thread.started","thread_id":…}` — equals the rollout
+   *             `session_meta.id`, resumable via `codex resume <id>`
+   *   opencode: every event carries top-level `sessionID` (`ses_…`)
+   *   omp:      line 1 is `{"type":"session","id":…}` (17.3.4 print JSON)
+   *   pi:       line 1 is `{"type":"session","id":…}` (echoes --session-id)
+   * The runner calls this per complete line until it returns non-null; the id
+   * is recorded on the task so a finished headless run can be REOPENED as a
+   * normal interactive session (resume-by-id). Present iff
+   * `capabilities.headless` (shell excluded).
+   */
+  extractHeadlessSessionId?(line: string): string | null;
+
+  /**
+   * Extract a completed assistant reply from one structured headless stdout
+   * line. This is intentionally adapter-owned: all four CLIs emit different
+   * JSONL event shapes, and raw stdout being non-empty only proves that the CLI
+   * logged something (startup/error events also produce output).
+   *
+   * Return a non-empty string only for an assistant-authored response. The
+   * runner keeps the latest extracted reply and exposes it on
+   * `HeadlessTaskResult`, allowing readiness checks to prove a real model turn
+   * without coupling the generic runner to vendor event schemas.
+   */
+  extractHeadlessAssistantText?(line: string): string | null;
+
+  /** Translate one native JSONL line into vendor-neutral response/tool events. */
+  extractHeadlessOutputEvents?(line: string): readonly HeadlessOutputEvent[];
+
+  /**
+   * Decide whether one complete stdout line belongs in the bounded diagnostic
+   * log/tail. Structured parsers still see every line. Use this for documented
+   * high-frequency transient events (Pi's cumulative `message_update` and
+   * `tool_execution_update`) that are useful to a live TUI but pathological in
+   * a persisted one-shot run log. Omit to preserve stdout byte-for-byte.
+   */
+  keepHeadlessDiagnosticLine?(line: string): boolean;
+
+  /** Optional per-CLI env adjustments on top of `spawn-env.ts`'s baseline. */
+  envOverrides?(parent: NodeJS.ProcessEnv): EnvOverrides;
+
+  /**
+   * Optional per-spawn env contribution. Unlike `envOverrides` (static, no
+   * spawn context), this receives the full `SpawnContext` so adapters can
+   * compute env values that depend on the workspace cwd — e.g. `CODEX_HOME`
+   * pointing at `<cwd>/.codex`. Merged into the spawn env AFTER
+   * `envOverrides` so this takes precedence for overlapping keys.
+   *
+   * Intentionally narrow: this is launcher plumbing. Managed credential,
+   * model, and effort projection belongs to `sessionRuntime`; native project
+   * files are only a deprecated compatibility export.
+   */
+  composeEnv?(ctx: SpawnContext): Record<string, string>;
+
+  /**
+   * Read/write a deprecated compatibility export in the CLI's native project
+   * config. Managed OpenAlice Sessions use the persisted Session binding and
+   * per-spawn `sessionRuntime` projection instead. Retained so users may export
+   * configuration for launching the CLI outside OpenAlice and so legacy
+   * Session bindings can still be resumed.
+   *
+   * @deprecated Compatibility export only; do not use as a managed launch
+   * default or readiness gate.
+   */
+  writeAiConfig?(cwd: string, cred: WorkspaceAiCred): Promise<void>;
+  /** @deprecated Compatibility inspection for legacy Session bindings only. */
+  readAiConfig?(cwd: string): Promise<WorkspaceAiCred | null>;
+
+  // ── Transcript detection (used only when capabilities.transcriptDiscovery === 'fs-watch')
+  transcriptDir?(cwd: string): string;
+  transcriptFileRe?: RegExp;
+  extractSessionId?(filename: string): string | null;
+
+  /** Subprocess discovery (capabilities.transcriptDiscovery === 'subprocess'). */
+  listOnDisk?(cwd: string): Promise<readonly OnDiskSession[]>;
+
+  /**
+   * Read the runtime's current human-facing title for one native Session.
+   * This is best-effort presentation metadata: callers keep the launch prompt
+   * as a fallback when the runtime has not named the Session yet.
+   */
+  readSessionTitle?(cwd: string, sessionId: string): Promise<string | null>;
+}
+
+/** Execute the common pre-use lifecycle without coupling callers to an
+ * adapter's hook layout. This is the only launcher entry point for runtime
+ * workspace preparation. */
+export async function prepareAgentRuntimeWorkspace(
+  adapter: CliAdapter,
+  ctx: AgentRuntimeWorkspaceContext,
+): Promise<void> {
+  await adapter.lifecycle?.prepareWorkspace?.(ctx);
+}
+
+export function isAgentRuntime(adapter: CliAdapter): boolean {
+  return adapter.kind !== 'utility' && adapter.id !== 'shell';
+}
+
+export class AdapterRegistry {
+  private readonly adapters = new Map<string, CliAdapter>();
+  private defaultId: string | null = null;
+
+  register(adapter: CliAdapter, opts: { default?: boolean } = {}): void {
+    if (this.adapters.has(adapter.id)) {
+      throw new Error(`adapter already registered: ${adapter.id}`);
+    }
+    if (isAgentRuntime(adapter) && adapter.sessionRuntime === null) {
+      throw new Error(`agent adapter must implement Session runtime projection: ${adapter.id}`);
+    }
+    this.adapters.set(adapter.id, adapter);
+    if (opts.default || this.defaultId === null) this.defaultId = adapter.id;
+  }
+
+  get(id: string): CliAdapter | undefined {
+    return this.adapters.get(id);
+  }
+
+  /** Returns the registered adapter for `id`, falling back to the default. */
+  resolve(id: string | null | undefined): CliAdapter {
+    if (id) {
+      const a = this.adapters.get(id);
+      if (a) return a;
+    }
+    const fallback = this.defaultId ? this.adapters.get(this.defaultId) : undefined;
+    if (!fallback) {
+      throw new Error('AdapterRegistry has no adapters registered');
+    }
+    return fallback;
+  }
+
+  list(): readonly CliAdapter[] {
+    return Array.from(this.adapters.values());
+  }
+}

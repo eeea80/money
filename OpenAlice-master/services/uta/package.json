@@ -1,0 +1,35 @@
+{
+  "name": "@traderalice/uta-service",
+  "version": "0.1.0",
+  "description": "UTA service — broker connections + trading state + git-like approval. v1 co-located with Alice.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/uta.js",
+    "typecheck": "tsc --noEmit",
+    "test": "node ../../scripts/run-tests.mjs --package @traderalice/uta-service"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.0.12",
+    "@traderalice/ibkr": "workspace:*",
+    "@traderalice/guardian-runtime": "workspace:*",
+    "@traderalice/uta-protocol": "workspace:*",
+    "decimal.js": "^10.6.0",
+    "hono": "^4.12.32",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@alpacahq/alpaca-trade-api": "^3.1.3",
+    "@types/node": "^22.13.4",
+    "ccxt": "^4.5.78",
+    "longbridge": "^4.0.5",
+    "tsup": "^8.4.0",
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

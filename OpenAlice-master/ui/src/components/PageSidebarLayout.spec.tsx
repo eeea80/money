@@ -1,0 +1,291 @@
+// @vitest-environment jsdom
+
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { useMobilePageNavigation, MobilePageNavigationProvider } from '../contexts/MobilePageNavigationContext'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { i18n } from '../i18n'
+import { PrimaryNavigationContext } from '../contexts/PrimaryNavigationContext'
+import { PageHeader } from './PageHeader'
+import {
+  calculatePageSidebarConstraints,
+  PageSidebarLayout,
+} from './PageSidebarLayout'
+
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
+beforeEach(async () => {
+  window.localStorage.clear()
+  await i18n.changeLanguage('en')
+  vi.stubGlobal('ResizeObserver', ResizeObserverStub)
+  vi.stubGlobal('matchMedia', vi.fn().mockImplementation((query: string) => ({
+    matches: query === '(min-width: 768px)',
+    media: query,
+    onchange: null,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  })))
+})
+
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
+
+describe('PageSidebarLayout', () => {
+
+  it('places the only global navigation control in the first toolbar, not both panes', () => {
+    const view = render(
+      <PrimaryNavigationContext.Provider value={<button>Toggle primary navigation</button>}>
+        <PageSidebarLayout storageKey="portfolio" title="Trading" sidebar={<div>Accounts</div>}>
+          <PageHeader title="Portfolio" right={<button>Refresh</button>} />
+        </PageSidebarLayout>
+      </PrimaryNavigationContext.Provider>,
+    )
+    const toggle = screen.getByRole('button', { name: 'Toggle primary navigation' })
+    expect(screen.getByTestId('page-sidebar-expanded').contains(toggle)).toBe(true)
+    expect(view.container.querySelectorAll('[data-slot="page-topbar"]')).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: 'Toggle primary navigation' })).toHaveLength(1)
+    expect(screen.getByRole('button', { name: 'Refresh' })).toBeTruthy()
+  })
+
+  it('keeps responsive panel minimums feasible while preserving the former content reserve', () => {
+    expect(calculatePageSidebarConstraints(0)).toEqual({
+      navigatorMaxWidth: 420,
+      contentMinWidth: 0,
+    })
+
+    expect(calculatePageSidebarConstraints(616)).toEqual({
+      navigatorMaxWidth: 200,
+      contentMinWidth: 415,
+    })
+    expect(calculatePageSidebarConstraints(700)).toEqual({
+      navigatorMaxWidth: 200,
+      contentMinWidth: 499,
+    })
+    expect(calculatePageSidebarConstraints(701)).toEqual({
+      navigatorMaxWidth: 200,
+      contentMinWidth: 500,
+    })
+    expect(calculatePageSidebarConstraints(941)).toEqual({
+      navigatorMaxWidth: 319,
+      contentMinWidth: 500,
+    })
+    expect(calculatePageSidebarConstraints(1_200)).toEqual({
+      navigatorMaxWidth: 420,
+      contentMinWidth: 500,
+    })
+
+    for (let containerWidth = 201; containerWidth <= 1_600; containerWidth += 7) {
+      const { navigatorMaxWidth, contentMinWidth } = calculatePageSidebarConstraints(containerWidth)
+      const panelBudget = containerWidth - 1
+
+      expect(navigatorMaxWidth).toBeGreaterThanOrEqual(200)
+      expect(navigatorMaxWidth).toBeLessThanOrEqual(420)
+      expect(contentMinWidth).toBeGreaterThanOrEqual(0)
+      expect(contentMinWidth).toBeLessThanOrEqual(500)
+      expect(200 + contentMinWidth).toBeLessThanOrEqual(panelBudget)
+    }
+  })
+
+  it('registers its phone navigator into the app context bar without rendering a second bar', async () => {
+    const user = userEvent.setup()
+    vi.stubGlobal('matchMedia', vi.fn().mockImplementation(() => ({
+      matches: false,
+      media: '',
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })))
+
+    function ContextTrigger() {
+      const navigation = useMobilePageNavigation()
+      if (!navigation) return null
+      return (
+        <button
+          ref={navigation.triggerRef}
+          type="button"
+          onClick={navigation.open}
+          aria-controls={navigation.controlsId}
+        >
+          Context {navigation.title}
+        </button>
+      )
+    }
+
+    render(
+      <MobilePageNavigationProvider>
+        <ContextTrigger />
+        <PageSidebarLayout storageKey="inbox" title="Inbox" sidebar={<div>Inbox navigation</div>}>
+          <div>Inbox message</div>
+        </PageSidebarLayout>
+      </MobilePageNavigationProvider>,
+    )
+
+    expect(screen.queryByRole('button', { name: 'Open Inbox' })).toBeNull()
+    const contextTrigger = screen.getByRole('button', { name: 'Context Inbox' })
+    expect(contextTrigger.getAttribute('aria-controls')).toBeTruthy()
+    expect(screen.queryByTestId('page-sidebar-drawer')).toBeNull()
+
+    await user.click(contextTrigger)
+    const drawer = screen.getByTestId('page-sidebar-drawer')
+    expect(contextTrigger.getAttribute('aria-controls')).toBe(drawer.id)
+    expect(drawer.hasAttribute('data-open')).toBe(true)
+    await user.keyboard('{Escape}')
+    expect(screen.queryByTestId('page-sidebar-drawer')).toBeNull()
+    expect(document.activeElement).toBe(contextTrigger)
+  })
+
+  it('keeps the desktop navigator visible even when an old collapsed preference exists', () => {
+    window.localStorage.setItem('openalice.page-sidebar-width.market.v1', '312')
+    window.localStorage.setItem('openalice.page-sidebar-collapsed.market.v1', '1')
+    render(
+      <PageSidebarLayout storageKey="market" title="Market" sidebar={<button>Market navigation</button>}>
+        <div>Market content</div>
+      </PageSidebarLayout>,
+    )
+    expect(screen.getByRole('button', { name: 'Market navigation' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Collapse Market' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Open Market' })).toBeNull()
+    expect(screen.getByTestId('page-sidebar-expanded').hasAttribute('inert')).toBe(false)
+    expect(screen.getAllByRole('separator')).toHaveLength(1)
+    expect(screen.getByRole('separator').getAttribute('aria-label')).toBe('Resize Market')
+    expect(screen.getByRole('separator').tabIndex).toBe(0)
+    expect(window.localStorage.getItem('openalice.page-sidebar-width.market.v1')).toBe('312')
+  })
+
+  it('lets a phone sidebar selection close the navigation drawer', async () => {
+    const user = userEvent.setup()
+    vi.stubGlobal('matchMedia', vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })))
+
+    render(
+      <PageSidebarLayout
+        storageKey="inbox"
+        title="Inbox"
+        sidebar={({ closeMobileDrawer }) => (
+          <button type="button" onClick={closeMobileDrawer}>Select message</button>
+        )}
+      >
+        <div>Inbox message</div>
+      </PageSidebarLayout>,
+    )
+
+    const opener = screen.getByRole('button', { name: 'Open Inbox' })
+    expect(screen.queryByTestId('page-sidebar-drawer')).toBeNull()
+    expect(opener.getAttribute('aria-expanded')).toBe('false')
+    expect(opener.getAttribute('aria-controls')).toBeTruthy()
+    expect(opener.getAttribute('aria-haspopup')).toBe('dialog')
+
+    await user.click(opener)
+    const drawer = screen.getByTestId('page-sidebar-drawer')
+    expect(drawer.hasAttribute('data-open')).toBe(true)
+    expect(opener.getAttribute('aria-controls')).toBe(drawer.id)
+    expect(drawer.getAttribute('role')).toBe('dialog')
+    expect(drawer.getAttribute('aria-modal')).toBe('true')
+    expect(opener.getAttribute('aria-expanded')).toBe('true')
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Close Inbox' })))
+    expect(screen.getByText('Inbox message').closest('[inert]')).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: 'Select message' }))
+    expect(screen.queryByTestId('page-sidebar-drawer')).toBeNull()
+    expect(opener.getAttribute('aria-expanded')).toBe('false')
+    expect(document.activeElement).toBe(opener)
+    expect(screen.getByText('Inbox message').closest('[inert]')).toBeNull()
+  })
+
+  it('contains phone drawer focus and closes on Escape', async () => {
+    const user = userEvent.setup()
+    vi.stubGlobal('matchMedia', vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })))
+
+    render(
+      <PageSidebarLayout
+        storageKey="tracked"
+        title="Tracked"
+        sidebar={(
+          <>
+            <button type="button">First item</button>
+            <button type="button" aria-current="page">Current item</button>
+            <button type="button">Last item</button>
+          </>
+        )}
+      >
+        <button type="button">Background action</button>
+      </PageSidebarLayout>,
+    )
+
+    const opener = screen.getByRole('button', { name: 'Open Tracked' })
+    await user.click(opener)
+
+    const close = screen.getByRole('button', { name: 'Close Tracked' })
+    const current = screen.getByRole('button', { name: 'Current item' })
+    const last = screen.getByRole('button', { name: 'Last item' })
+    await waitFor(() => expect(document.activeElement).toBe(current))
+
+    last.focus()
+    await user.tab()
+    await waitFor(() => expect(document.activeElement).toBe(close))
+
+    close.focus()
+    await user.tab({ shift: true })
+    await waitFor(() => expect(document.activeElement).toBe(last))
+
+    await user.keyboard('{Escape}')
+    expect(screen.queryByTestId('page-sidebar-drawer')).toBeNull()
+    expect(document.activeElement).toBe(opener)
+  })
+
+  it('keeps a page navigator in the drawer below its custom desktop breakpoint', async () => {
+    const user = userEvent.setup()
+    render(
+      <PageSidebarLayout
+        storageKey="settings"
+        title="Settings"
+        desktopMinWidth={960}
+        sidebar={({ closeMobileDrawer }) => (
+          <button type="button" onClick={closeMobileDrawer}>Select General</button>
+        )}
+      >
+        <div>Settings content</div>
+      </PageSidebarLayout>,
+    )
+
+    expect(window.matchMedia).toHaveBeenCalledWith('(min-width: 960px)')
+    expect(screen.queryByTestId('page-sidebar-drawer')).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: 'Open Settings' }))
+    const drawer = screen.getByTestId('page-sidebar-drawer')
+    expect(drawer.hasAttribute('data-open')).toBe(true)
+
+    await user.click(screen.getByRole('button', { name: 'Select General' }))
+    expect(screen.queryByTestId('page-sidebar-drawer')).toBeNull()
+  })
+})

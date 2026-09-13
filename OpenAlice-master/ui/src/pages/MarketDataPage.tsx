@@ -1,0 +1,640 @@
+import { useEffect, useRef, useState } from 'react'
+import { CheckCircle2, ChevronRight, CircleAlert, LoaderCircle, MinusCircle } from 'lucide-react'
+import { api, type AppConfig } from '../api'
+import { SaveIndicator } from '../components/SaveIndicator'
+import { ConfigSection, SettingsScrollArea, inputClass } from '../components/form'
+import { Toggle } from '../components/Toggle'
+import { useConfigPage } from '../hooks/useConfigPage'
+import { PageHeader } from '../components/PageHeader'
+import { CenteredLoading } from '../components/StateViews'
+import { Button } from '@/components/ui/button'
+
+type MarketDataConfig = Record<string, unknown>
+
+// ==================== Constants ====================
+
+// Chart vendors — live K-line / quote sources. These are the high-frequency,
+// can't-be-mediated data the Data Hub deliberately doesn't carry, so each is a
+// direct vendor you switch on. There is NO per-asset-class configuration: a
+// vendor that's on joins the searchBars candidate pool, and what it can serve
+// is discovered by searching (heuristic), never declared here. yfinance is the
+// always-on global default; the rest are user-opted regional vendors
+// (marketData.extraVendors). TWSE / Vietnam slot in here as new rows.
+interface ChartVendor {
+  id: string
+  name: string
+  desc: string
+  alwaysOn?: boolean
+}
+
+const CHART_VENDORS: ChartVendor[] = [
+  {
+    id: 'yfinance',
+    name: 'yfinance',
+    desc: 'Global charts and quotes across Yahoo-listed markets. Free and keyless.',
+    alwaysOn: true,
+  },
+  {
+    id: 'eastmoney',
+    name: 'Eastmoney 东方财富',
+    desc: 'Chinese search and adjusted A-share K-lines from public keyless endpoints.',
+  },
+  {
+    id: 'twse',
+    name: 'TWSE + TPEx 臺灣證交所',
+    desc: 'Official Taiwan company roster, valuation ratios, and profiles. Yahoo serves K-lines for .TW and .TWO symbols.',
+  },
+]
+
+// Data-provider keys — LOW-frequency data (boards, economy, fundamentals). The
+// Data Hub already mediates all of this, so a key here is just a compatibility
+// shim: go direct, or unlock the slice the hub doesn't serve (FMP fundamentals).
+// Advanced, edge — not the main event.
+interface ProviderEntry {
+  key: string
+  name: string
+  desc: string
+  hint: string
+}
+
+const KEY_GROUPS: { label: string | null; providers: ProviderEntry[] }[] = [
+  {
+    label: null,
+    providers: [
+      { key: 'fmp', name: 'FMP', desc: 'Unlocks per-symbol equity fundamentals, discovery, ETF detail — the one key that adds data the hub does not serve.', hint: 'financialmodelingprep.com' },
+    ],
+  },
+  {
+    label: 'Covered by the Data Hub — add a key only if you want direct access.',
+    providers: [
+      { key: 'fred', name: 'FRED', desc: 'Federal Reserve Economic Data — CPI, GDP, interest rates, macro indicators.', hint: 'Free — fred.stlouisfed.org → My Account → API Keys' },
+      { key: 'bls', name: 'BLS', desc: 'Bureau of Labor Statistics — employment, payrolls, wages, CPI.', hint: 'Free — data.bls.gov/registrationEngine/' },
+      { key: 'eia', name: 'EIA', desc: 'Energy Information Administration — petroleum status, energy reports.', hint: 'Free — eia.gov/opendata/register.php' },
+    ],
+  },
+  {
+    label: 'Long tail',
+    providers: [
+      { key: 'econdb', name: 'EconDB', desc: 'Global macro indicators, country profiles, shipping data.', hint: 'econdb.com' },
+      { key: 'intrinio', name: 'Intrinio', desc: 'Equities, ETFs, fundamentals, news, options snapshots.', hint: 'intrinio.com' },
+    ],
+  },
+]
+
+const ALL_PROVIDERS: ProviderEntry[] = KEY_GROUPS.flatMap((g) => g.providers)
+
+type HubPing = 'checking' | 'ok' | 'down'
+
+// ==================== Source coverage derivation ====================
+
+interface SourceRow {
+  name: string
+  detail?: string
+  source: string
+  state: 'ok' | 'off'
+  cta?: boolean
+}
+
+/** Effective source per data family, derived statically from config +
+ *  the hub ping — mirrors the backend's hub-first → local-keys fallback
+ *  so what the user reads here matches what the engine actually does. */
+function deriveSourceRows(
+  hubOn: boolean,
+  ping: HubPing,
+  keys: Record<string, string>,
+  extraVendors: string[],
+): SourceRow[] {
+  const hubLive = hubOn && ping !== 'down' // optimistic while checking
+  const hub = { source: 'Hub', state: 'ok' as const }
+  const chartVendors = ['yfinance', ...extraVendors].join(', ')
+
+  return [
+    {
+      name: 'Market boards',
+      detail: 'Valuation, macro, futures, risk, rotation',
+      ...(hubLive
+        ? hub
+        : keys.fmp || keys.fred
+          ? { source: 'Your keys', state: 'ok' as const }
+          : { source: 'Limited — hub off, no keys', state: 'off' as const }),
+    },
+    {
+      name: 'Economy series',
+      detail: 'FRED, EIA, BLS',
+      ...(hubLive
+        ? hub
+        : keys.fred || keys.eia || keys.bls
+          ? { source: 'Your keys', state: 'ok' as const }
+          : { source: 'Needs keys', state: 'off' as const }),
+    },
+    {
+      name: 'Calendars',
+      detail: 'Earnings, IPOs, dividends',
+      ...(hubLive
+        ? hub
+        : keys.fmp
+          ? { source: 'FMP', state: 'ok' as const }
+          : { source: 'Needs FMP key', state: 'off' as const }),
+    },
+    {
+      name: 'FX rates',
+      ...(hubLive ? hub : { source: 'yfinance', state: 'ok' as const }),
+    },
+    {
+      name: 'Charts & quotes',
+      detail: 'K-lines and realtime — vendor / broker, never the hub',
+      source: chartVendors,
+      state: 'ok',
+    },
+    {
+      name: 'Equity fundamentals',
+      detail: 'Profile, financials, ratios, discovery',
+      ...(keys.fmp
+        ? { source: 'FMP', state: 'ok' as const }
+        : { source: 'Needs FMP key', state: 'off' as const, cta: true }),
+    },
+  ]
+}
+
+// ==================== Page ====================
+
+export function MarketDataPage() {
+  const { config, status, loadError, updateConfig, updateConfigImmediate, retry } = useConfigPage<MarketDataConfig>({
+    section: 'marketData',
+    extract: (full: AppConfig) => (full as Record<string, unknown>).marketData as MarketDataConfig,
+  })
+
+  const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [highlightFmp, setHighlightFmp] = useState(false)
+  const [ping, setPing] = useState<HubPing>('checking')
+  const fmpRef = useRef<HTMLDivElement>(null)
+  const highlightTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+  const enabled = !config || (config as Record<string, unknown>).enabled !== false
+  const hub = (config?.hub ?? { enabled: true, baseUrl: 'https://traderhub.openalice.ai' }) as { enabled: boolean; baseUrl: string }
+
+  // Ping the hub via the backend (server-side fetch — the dot reports
+  // Alice's connectivity, which is what the fallback chain actually uses).
+  // Debounced so URL edits don't fire a probe per keystroke.
+  useEffect(() => {
+    if (!hub.enabled) return
+    let cancelled = false
+    setPing('checking')
+    const t = setTimeout(async () => {
+      try {
+        const s = await api.marketData.hubStatus(hub.baseUrl)
+        if (!cancelled) setPing(s.reachable ? 'ok' : 'down')
+      } catch {
+        if (!cancelled) setPing('down')
+      }
+    }, 600)
+    return () => {
+      cancelled = true
+      clearTimeout(t)
+    }
+  }, [hub.enabled, hub.baseUrl])
+
+  useEffect(() => () => clearTimeout(highlightTimer.current), [])
+
+  if (!config) {
+    return (
+      <div className="flex flex-col flex-1 min-h-0">
+        <PageHeader title="Market Data" description="Structured financial data — prices, fundamentals, macro indicators." />
+        <div className="flex-1 flex items-center justify-center">
+          <CenteredLoading />
+        </div>
+      </div>
+    )
+  }
+
+  const providerKeys = (config.providerKeys ?? {}) as Record<string, string>
+  const extraVendors = (config.extraVendors ?? []) as string[]
+  const sourceRows = deriveSourceRows(hub.enabled, ping, providerKeys, extraVendors)
+
+  const handleExtraVendorToggle = (id: string, on: boolean) => {
+    const next = on ? [...new Set([...extraVendors, id])] : extraVendors.filter((v) => v !== id)
+    updateConfigImmediate({ extraVendors: next })
+  }
+
+  const handleKeyChange = (keyName: string, value: string) => {
+    const all = (config.providerKeys ?? {}) as Record<string, string>
+    const updated = { ...all, [keyName]: value }
+    const cleaned: Record<string, string> = {}
+    for (const [k, v] of Object.entries(updated)) {
+      if (v) cleaned[k] = v
+    }
+    updateConfig({ providerKeys: cleaned })
+  }
+
+  const jumpToFmp = () => {
+    setAdvancedOpen(true)
+    setHighlightFmp(true)
+    // Defer until the advanced section is in the DOM.
+    requestAnimationFrame(() => {
+      fmpRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    })
+    clearTimeout(highlightTimer.current)
+    highlightTimer.current = setTimeout(() => setHighlightFmp(false), 2400)
+  }
+
+  return (
+    <div className="flex flex-col flex-1 min-h-0">
+      <PageHeader
+        title="Market Data"
+        description="Structured financial data — prices, fundamentals, macro indicators."
+        right={
+          <div className="flex items-center gap-3">
+            <SaveIndicator status={status} onRetry={retry} />
+            <Toggle
+              ariaLabel="Market data"
+              size="sm"
+              checked={enabled}
+              onChange={(v) => updateConfigImmediate({ enabled: v })}
+            />
+          </div>
+        }
+      />
+
+      <SettingsScrollArea className="px-4 py-5 md:px-8">
+        <div className={`max-w-[880px] mx-auto ${!enabled ? 'opacity-40 pointer-events-none' : ''}`}>
+          <HubCard
+            hub={hub}
+            ping={ping}
+            onToggle={(v) => updateConfigImmediate({ hub: { ...hub, enabled: v } })}
+          />
+
+          <SourcesCard rows={sourceRows} onAddFmp={jumpToFmp} />
+
+          <ChartVendorsSection extraVendors={extraVendors} onToggle={handleExtraVendorToggle} />
+
+          <AdvancedSection
+            open={advancedOpen}
+            onToggle={() => setAdvancedOpen((o) => !o)}
+            providerKeys={providerKeys}
+            onKeyChange={handleKeyChange}
+            hub={hub}
+            onHubChange={(next) => updateConfigImmediate({ hub: next })}
+            fmpRef={fmpRef}
+            highlightFmp={highlightFmp}
+          />
+        </div>
+        {loadError && <p className="text-[13px] text-destructive mt-4 max-w-[880px] mx-auto">Failed to load configuration.</p>}
+      </SettingsScrollArea>
+    </div>
+  )
+}
+
+// ==================== Data Hub card ====================
+
+function HubCard({
+  hub,
+  ping,
+  onToggle,
+}: {
+  hub: { enabled: boolean; baseUrl: string }
+  ping: HubPing
+  onToggle: (v: boolean) => void
+}) {
+  const host = hub.baseUrl.replace(/^https?:\/\//, '').replace(/\/+$/, '')
+
+  return (
+    <section className="mb-6 rounded-lg border border-border/70 bg-card p-4">
+      <div className="flex items-center justify-between mb-1.5">
+        <h2 className="text-[14px] leading-[19px] font-semibold">Data Hub</h2>
+        <Toggle ariaLabel="Data Hub" size="sm" checked={hub.enabled} onChange={onToggle} />
+      </div>
+      {hub.enabled ? (
+        <div className="flex items-center gap-2 mb-1.5">
+          {ping === 'checking' && <LoaderCircle aria-hidden className="size-3.5 shrink-0 animate-spin text-muted-foreground motion-reduce:animate-none" />}
+          {ping === 'ok' && <CheckCircle2 aria-hidden className="size-3.5 shrink-0 text-success" />}
+          {ping === 'down' && <CircleAlert aria-hidden className="size-3.5 shrink-0 text-destructive" />}
+          <span className="text-[13px] text-foreground">
+            {ping === 'checking' && 'Checking…'}
+            {ping === 'ok' && <>Connected <span className="ml-1 font-mono text-[12px] leading-[18px] text-muted-foreground">{host}</span></>}
+            {ping === 'down' && 'Unreachable — using local sources'}
+          </span>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 mb-1.5">
+          <MinusCircle aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className="text-[13px] text-muted-foreground">Off — boards and series use your own keys and vendors.</span>
+        </div>
+      )}
+      <p className="text-[12px] text-muted-foreground">
+        Low-frequency data is served from the hosted hub — no API keys needed.
+        Anonymous reads of public data; your own keys always take precedence.
+      </p>
+    </section>
+  )
+}
+
+// ==================== Source coverage card ====================
+
+function SourcesCard({ rows, onAddFmp }: { rows: SourceRow[]; onAddFmp: () => void }) {
+  return (
+    <section className="mb-6">
+      <h2 className="mb-2 text-[13px] leading-[18px] font-semibold text-foreground">Data sources</h2>
+      <div className="divide-y divide-border/40 overflow-hidden rounded-lg border border-border/70 bg-card">
+        {rows.map((row) => (
+          <div key={row.name} className="flex items-center gap-3 px-4 py-3">
+            {row.state === 'ok'
+              ? <CheckCircle2 aria-hidden className="size-3.5 shrink-0 text-success" />
+              : <MinusCircle aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />}
+            <div className="flex-1 min-w-0">
+              <span className="text-[13px] text-foreground font-medium">{row.name}</span>
+              {row.detail && <span className="text-[12px] text-muted-foreground/60 ml-2">{row.detail}</span>}
+            </div>
+            <span className={`text-[12px] ${row.state === 'ok' ? 'text-muted-foreground' : 'text-muted-foreground/60'}`}>
+              {row.source}
+            </span>
+            {row.cta && (
+              <Button
+                type="button"
+                onClick={onAddFmp}
+                className="shrink-0 text-[12px]"
+                size="sm"
+                variant="outline"
+              >
+                Add key
+              </Button>
+            )}
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+// ==================== Chart Vendors (live K-line sources) ====================
+
+function ChartVendorsSection({
+  extraVendors,
+  onToggle,
+}: {
+  extraVendors: string[]
+  onToggle: (id: string, on: boolean) => void
+}) {
+  return (
+    <section className="mb-6">
+      <h2 className="mb-2 text-[13px] leading-[18px] font-semibold text-foreground">Chart vendors</h2>
+      <p className="text-[12px] text-muted-foreground/70 mb-2.5 max-w-[640px]">
+        Live K-line &amp; quote sources — queried per symbol, never via the hub. Switch one on and it
+        joins the search pool; what it covers is found by searching, not configured here. yfinance is
+        the always-on global default.
+      </p>
+      <div className="space-y-2.5">
+        {CHART_VENDORS.map((v) => {
+          const on = v.alwaysOn || extraVendors.includes(v.id)
+          return (
+            <div key={v.id} className="rounded-lg border border-border/70 bg-card px-4 py-3.5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 min-w-0">
+                  {on
+                    ? <CheckCircle2 aria-hidden className="size-3.5 shrink-0 text-success" />
+                    : <MinusCircle aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />}
+                  <span className="text-[13px] leading-[18px] font-semibold text-foreground truncate">{v.name}</span>
+                </div>
+                {v.alwaysOn ? (
+                  <span className="shrink-0 text-[11px] font-medium text-muted-foreground">Always on</span>
+                ) : (
+                  <Toggle ariaLabel={v.name} size="sm" checked={on} onChange={(val) => onToggle(v.id, val)} />
+                )}
+              </div>
+              <p className="mt-1.5 max-w-2xl text-[12px] leading-5 text-muted-foreground/70">{v.desc}</p>
+            </div>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
+// ==================== Advanced ====================
+
+function AdvancedSection({
+  open,
+  onToggle,
+  providerKeys,
+  onKeyChange,
+  hub,
+  onHubChange,
+  fmpRef,
+  highlightFmp,
+}: {
+  open: boolean
+  onToggle: () => void
+  providerKeys: Record<string, string>
+  onKeyChange: (keyName: string, value: string) => void
+  hub: { enabled: boolean; baseUrl: string }
+  onHubChange: (next: { enabled: boolean; baseUrl: string }) => void
+  fmpRef: React.RefObject<HTMLDivElement | null>
+  highlightFmp: boolean
+}) {
+  return (
+    <section className="mb-8">
+      <Button
+        type="button"
+        onClick={onToggle}
+        className="px-1 text-[13px]"
+        variant="ghost"
+        size="sm"
+        aria-expanded={open}
+      >
+        <ChevronRight aria-hidden className={`size-3.5 ${open ? 'rotate-90' : ''}`} />
+        Advanced
+      </Button>
+
+      {open && (
+        <div className="mt-2 rounded-lg border border-border/70 bg-card px-5">
+          <KeyProvidersSection
+            providerKeys={providerKeys}
+            onKeyChange={onKeyChange}
+            fmpRef={fmpRef}
+            highlightFmp={highlightFmp}
+          />
+
+          <ConfigSection
+            title="Data Hub Endpoint"
+            description="Self-hosters point this at their own TraderHub instance."
+          >
+            <input
+              type="text"
+              value={hub.baseUrl}
+              onChange={(e) => onHubChange({ ...hub, baseUrl: e.target.value })}
+              placeholder="https://traderhub.openalice.ai"
+              className={`${inputClass} max-w-[420px] font-mono text-[12px]`}
+            />
+          </ConfigSection>
+        </div>
+      )}
+    </section>
+  )
+}
+
+// ==================== Test Button ====================
+
+type ProviderTestStatus = 'idle' | 'testing' | 'ok' | 'error'
+
+function providerTestStatusLabel(providerName: string, status: ProviderTestStatus): string {
+  switch (status) {
+    case 'testing':
+      return `Testing ${providerName} key`
+    case 'ok':
+      return `${providerName} key test passed`
+    case 'error':
+      return `${providerName} key test failed`
+    default:
+      return `Test ${providerName} key`
+  }
+}
+
+function TestButton({
+  providerName,
+  status,
+  disabled,
+  onClick,
+}: {
+  providerName: string
+  status: ProviderTestStatus
+  disabled: boolean
+  onClick: () => void
+}) {
+  return (
+    <Button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={providerTestStatusLabel(providerName, status)}
+      variant="outline"
+      size="default"
+      className={`shrink-0 text-[13px] ${
+        status === 'ok'
+          ? 'border-success/50 text-success'
+          : status === 'error'
+            ? 'border-destructive/50 text-destructive'
+            : 'text-muted-foreground'
+      }`}
+    >
+      {status === 'testing' && <LoaderCircle aria-hidden className="size-3.5 animate-spin motion-reduce:animate-none" />}
+      {status === 'ok' && <CheckCircle2 aria-hidden className="size-3.5" />}
+      {status === 'error' && <CircleAlert aria-hidden className="size-3.5" />}
+      {status === 'testing' ? 'Testing' : status === 'ok' ? 'Passed' : status === 'error' ? 'Failed' : 'Test'}
+    </Button>
+  )
+}
+
+// ==================== Data Provider Keys (low-frequency) ====================
+
+function KeyProvidersSection({
+  providerKeys,
+  onKeyChange,
+  fmpRef,
+  highlightFmp,
+}: {
+  providerKeys: Record<string, string>
+  onKeyChange: (keyName: string, value: string) => void
+  fmpRef: React.RefObject<HTMLDivElement | null>
+  highlightFmp: boolean
+}) {
+  const [localKeys, setLocalKeys] = useState<Record<string, string>>(() => {
+    const init: Record<string, string> = {}
+    for (const p of ALL_PROVIDERS) init[p.key] = providerKeys[p.key] || ''
+    return init
+  })
+  const [testStatus, setTestStatus] = useState<Record<string, ProviderTestStatus>>({})
+
+  const handleKeyChange = (keyName: string, value: string) => {
+    setLocalKeys((prev) => ({ ...prev, [keyName]: value }))
+    setTestStatus((prev) => ({ ...prev, [keyName]: 'idle' }))
+    onKeyChange(keyName, value)
+  }
+
+  const testProvider = async (keyName: string) => {
+    const key = localKeys[keyName]
+    if (!key) return
+    setTestStatus((prev) => ({ ...prev, [keyName]: 'testing' }))
+    try {
+      const result = await api.marketData.testProvider(keyName, key)
+      setTestStatus((prev) => ({ ...prev, [keyName]: result.ok ? 'ok' : 'error' }))
+    } catch {
+      setTestStatus((prev) => ({ ...prev, [keyName]: 'error' }))
+    }
+  }
+
+  return (
+    <ConfigSection
+      title="Data Provider Keys"
+      description="Low-frequency data — boards, economy, fundamentals — is served by the Data Hub. Add a key only to go direct, or to unlock the slice the hub doesn't serve (FMP fundamentals)."
+    >
+      <div className="space-y-4">
+        {KEY_GROUPS.map((group, gi) => (
+          <div key={gi}>
+            {group.label && (
+              <p className="mb-3 border-t border-border/40 pt-3 text-[11px] font-medium text-muted-foreground">
+                {group.label}
+              </p>
+            )}
+            <div className="space-y-4">
+              {group.providers.map(({ key, name, desc, hint }) => {
+                const status = testStatus[key] || 'idle'
+                const isFmp = key === 'fmp'
+                const inputId = `market-data-provider-${key}-key`
+                const descriptionId = `${inputId}-description`
+                const hintId = `${inputId}-hint`
+                const statusId = `${inputId}-test-status`
+                return (
+                  <div
+                    key={key}
+                    ref={isFmp ? fmpRef : undefined}
+                    className={`rounded-lg transition-shadow ${isFmp && highlightFmp ? 'ring-2 ring-primary/60' : ''}`}
+                  >
+                    <div className="mb-3.5 last:mb-0">
+                      <label
+                        htmlFor={inputId}
+                        className="block text-[13px] text-foreground mb-1.5 font-medium"
+                      >
+                        {name}
+                      </label>
+                      <p id={descriptionId} className="text-[12px] text-muted-foreground/70 mb-2">
+                        {desc}
+                      </p>
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                        <input
+                          id={inputId}
+                          className={inputClass}
+                          type="password"
+                          value={localKeys[key]}
+                          onChange={(e) => handleKeyChange(key, e.target.value)}
+                          aria-label={`${name} API key`}
+                          aria-describedby={`${descriptionId} ${hintId} ${statusId}`}
+                          placeholder="Not configured"
+                        />
+                        <TestButton
+                          providerName={name}
+                          status={status}
+                          disabled={!localKeys[key] || status === 'testing'}
+                          onClick={() => testProvider(key)}
+                        />
+                      </div>
+                      <p id={hintId} className="text-[12px] text-muted-foreground/60 mt-1">
+                        {hint}
+                      </p>
+                      <span
+                        id={statusId}
+                        className="sr-only"
+                        role="status"
+                        aria-live="polite"
+                      >
+                        {status === 'idle' ? '' : providerTestStatusLabel(name, status)}
+                      </span>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </ConfigSection>
+  )
+}

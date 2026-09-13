@@ -1,0 +1,1406 @@
+/**
+ * CcxtBroker — IBroker adapter for CCXT exchanges
+ *
+ * Direct implementation against ccxt unified API.
+ * Takes IBKR Order objects, reads relevant fields, ignores the rest.
+ * aliceId format: "{exchange}-{encodedSymbol}" (e.g. "bybit-BTC_USDT.USDT").
+ */
+
+import { z } from 'zod'
+import ccxt from 'ccxt'
+import Decimal from 'decimal.js'
+import type { Exchange, Order as CcxtOrder, Position as CcxtRawPosition } from 'ccxt'
+import { Contract, ContractDescription, ContractDetails, Order, OrderState, UNSET_DECIMAL } from '@traderalice/ibkr'
+import {
+  BrokerError,
+  type IBroker,
+  type AccountCapabilities,
+  type AccountInfo,
+  type Position,
+  type PositionRisk,
+  type PlaceOrderResult,
+  type OpenOrder,
+  type Quote,
+  type MarketClock,
+  type BrokerConfigField,
+  type TpSlParams,
+  type Bar,
+  type BarParams,
+  type SubAccountRef,
+} from '../types.js'
+import '../../contract-ext.js'
+import { buildPosition } from '../contract-builder.js'
+import { CCXT_CREDENTIAL_FIELDS, type CcxtBrokerConfig, type CcxtMarket, type FundingRate, type OrderBook, type OrderBookLevel } from './ccxt-types.js'
+import { MAX_INIT_RETRIES, INIT_RETRY_BASE_MS } from './ccxt-types.js'
+import {
+  ccxtTypeToSecType,
+  mapOrderStatus,
+  makeOrderState,
+  marketToContract,
+  contractToCcxt,
+  CCXT_TIMEFRAME,
+} from './ccxt-contracts.js'
+import { fuzzyRankContracts } from '../fuzzy-rank.js'
+import {
+  type CcxtExchangeOverrides,
+  type CcxtSubAccountDef,
+  exchangeOverrides,
+  defaultFetchBalance,
+  defaultFetchOrderById,
+  defaultCancelOrderById,
+  defaultPlaceOrder,
+  defaultFetchPositions,
+  defaultFetchAllOpenOrders,
+} from './overrides.js'
+
+/** The implicit single wallet a unified-account venue (okx / bybit UTA) exposes
+ *  — one plain fetchBalance() covers everything, so no selector is ever needed. */
+const UNIFIED_SUBACCOUNT: CcxtSubAccountDef = { id: 'default', label: 'Account', kind: 'unified', walletTypes: [] }
+
+const BAR_INTERVAL_MS: Record<BarParams['interval'], number> = {
+  '1m': 60_000,
+  '5m': 5 * 60_000,
+  '15m': 15 * 60_000,
+  '30m': 30 * 60_000,
+  '1h': 60 * 60_000,
+  '4h': 4 * 60 * 60_000,
+  '1d': 24 * 60 * 60_000,
+  '1w': 7 * 24 * 60 * 60_000,
+}
+
+/**
+ * Pull leveraged-derivative risk metadata (leverage / liquidation price /
+ * margin mode) off a raw CCXT position. Returns `undefined` when the venue
+ * reported none — so the built Position carries no `risk` key at all rather
+ * than a bag of undefineds (spot holdings, or exchanges that omit these).
+ *
+ * Zeroes are treated as absent: a real leveraged position never has
+ * `leverage === 0` or `liquidationPrice === 0` (CCXT reports 0 when the field
+ * isn't computed), and surfacing a 0 liquidation price would read as
+ * "liquidates at $0", which is worse than absent. Numeric fields are
+ * stringified for the same float-safety reason as Position's monetary fields.
+ */
+function ccxtPositionRisk(p: CcxtRawPosition): PositionRisk | undefined {
+  const risk: PositionRisk = {}
+  if (p.leverage != null && p.leverage > 0) risk.leverage = String(p.leverage)
+  if (p.liquidationPrice != null && p.liquidationPrice > 0) risk.liquidationPrice = String(p.liquidationPrice)
+  if (p.marginMode === 'cross' || p.marginMode === 'isolated') risk.marginMode = p.marginMode
+  return Object.keys(risk).length > 0 ? risk : undefined
+}
+
+/**
+ * Bridge the process's outbound-proxy env vars onto a CCXT exchange instance.
+ *
+ * CCXT's Node fetch path does NOT honor the shell's HTTP_PROXY/HTTPS_PROXY on
+ * its own — the proxy must be set explicitly on the instance
+ * (`exchange.httpsProxy` / `.httpProxy` / `.socksProxy`); Node's native fetch
+ * likewise ignores those env vars unless a global undici dispatcher is
+ * installed. So a user in a geo-restricted region whose shell already routes
+ * everything through a local proxy (the common Binance/Bitget case) would see
+ * the browser reach the exchange while UTA's connection silently fails. We
+ * mirror the standard env vars onto the instance here. No-op when none are
+ * set. See issue #384 (bakabird's repro confirmed the per-instance fix).
+ */
+function applyEnvProxy(exchange: Exchange): void {
+  // CCXT forbids setting more than ONE of httpProxy / httpsProxy / socksProxy
+  // on an instance — checkProxySettings() throws InvalidProxySettings on the
+  // first request if two are set. The common clash/v2ray setup exports BOTH
+  // HTTP_PROXY and HTTPS_PROXY pointing at the same local proxy, so we must
+  // collapse to a single property rather than set each from its own env var.
+  // Exchange REST is HTTPS, so the chosen proxy carries all traffic via
+  // httpsProxy (or socksProxy for a socks:// URL). Precedence:
+  // HTTPS_PROXY > HTTP_PROXY > ALL_PROXY.
+  const proxy = process.env.HTTPS_PROXY || process.env.https_proxy
+    || process.env.HTTP_PROXY || process.env.http_proxy
+    || process.env.ALL_PROXY || process.env.all_proxy
+  if (!proxy) return
+  if (/^socks/i.test(proxy)) exchange.socksProxy = proxy
+  else exchange.httpsProxy = proxy
+}
+
+/** A CCXT `urls.api` value that can actually build a request URL: a non-empty
+ *  string or a non-empty { public, private, … } map. */
+function hasUsableApiUrl(api: unknown): boolean {
+  if (typeof api === 'string') return api.length > 0
+  return typeof api === 'object' && api !== null && Object.keys(api).length > 0
+}
+
+// Treated as cash (1:1 to USD) when computing balances and as ineligible
+// for spot-position synthesis. Compared against `coin.toUpperCase()` so
+// CCXT's mixed-case codes like 'USDe' normalize correctly.
+const STABLECOIN_TO_USD = new Set([
+  'USDT', 'USDC', 'BUSD', 'DAI', 'TUSD',
+  'FDUSD',  // First Digital USD — Binance's primary post-BUSD stablecoin
+  'PYUSD',  // PayPal USD
+  'USDE',   // Ethena synthetic USD
+  'USDP',   // Paxos USD
+])
+
+// Top-level keys CCXT returns alongside per-currency entries in fetchBalance.
+// Skipping these prevents us from treating 'free'/'used'/'total' aggregates
+// as if they were a coin called "free".
+const BALANCE_RESERVED_KEYS = new Set(['free', 'used', 'total', 'info', 'timestamp', 'datetime'])
+
+// Quote currencies tried, in order, when looking for a market to price a
+// spot holding. USDT first because it has the densest coverage across
+// CCXT exchanges; USDC/USD as fallbacks.
+const SPOT_QUOTE_PREFERENCE = ['USDT', 'USDC', 'USD'] as const
+
+/** Normalize stablecoin quote currencies to 'USD' so they don't trigger FX conversion. */
+function normalizeQuoteCurrency(quote: string): string {
+  return STABLECOIN_TO_USD.has(quote.toUpperCase()) ? 'USD' : quote
+}
+
+/** Map IBKR orderType codes to CCXT order type strings. */
+function ibkrOrderTypeToCcxt(orderType: string): string {
+  switch (orderType) {
+    case 'MKT': return 'market'
+    case 'LMT': return 'limit'
+    default: return orderType.toLowerCase()
+  }
+}
+
+export interface CcxtBrokerMeta {
+  exchange: string  // "bybit", "binance", "okx", etc.
+}
+
+export class CcxtBroker implements IBroker<CcxtBrokerMeta> {
+  // ---- Self-registration ----
+
+  static configSchema = z.object({
+    exchange: z.string(),
+    sandbox: z.boolean().default(false),
+    demoTrading: z.boolean().default(false),
+    options: z.record(z.string(), z.unknown()).optional(),
+    // All 10 CCXT standard credential fields, all optional.
+    // Each exchange requires its own subset (read via Exchange.requiredCredentials).
+    apiKey: z.string().optional(),
+    secret: z.string().optional(),
+    apiSecret: z.string().optional(), // legacy alias for `secret`
+    uid: z.string().optional(),
+    accountId: z.string().optional(),
+    login: z.string().optional(),
+    password: z.string().optional(),
+    twofa: z.string().optional(),
+    privateKey: z.string().optional(),
+    walletAddress: z.string().optional(),
+    token: z.string().optional(),
+  })
+
+  // Static base fields for the legacy dynamic-config form. There is NO dynamic
+  // exchange-enumeration route today — `options: []` ships empty and the wizard
+  // drives CCXT accounts through BROKER_PRESET_CATALOG (the CCXT Custom preset),
+  // not this field list. A populated exchange dropdown would be net-new work.
+  static configFields: BrokerConfigField[] = [
+    { name: 'exchange', type: 'select', label: 'Exchange', required: true, options: [] },
+    { name: 'sandbox', type: 'boolean', label: 'Sandbox Mode', default: false },
+    { name: 'demoTrading', type: 'boolean', label: 'Demo Trading', default: false },
+  ]
+
+  static fromConfig(config: { id: string; label?: string; brokerConfig: Record<string, unknown> }): CcxtBroker {
+    const bc = CcxtBroker.configSchema.parse(config.brokerConfig)
+    return new CcxtBroker({
+      id: config.id,
+      label: config.label,
+      // configSchema strips unknown keys, so read keyless off the raw dict.
+      keyless: config.brokerConfig.keyless === true,
+      exchange: bc.exchange,
+      sandbox: bc.sandbox,
+      demoTrading: bc.demoTrading,
+      options: bc.options,
+      apiKey: bc.apiKey,
+      // Accept both `secret` (CCXT-native) and legacy `apiSecret`
+      secret: bc.secret ?? bc.apiSecret,
+      uid: bc.uid,
+      accountId: bc.accountId,
+      login: bc.login,
+      password: bc.password,
+      twofa: bc.twofa,
+      privateKey: bc.privateKey,
+      walletAddress: bc.walletAddress,
+      token: bc.token,
+    })
+  }
+
+  // ---- Instance ----
+
+  readonly brokerEngine = 'ccxt'
+  readonly id: string
+  readonly label: string
+  readonly meta: CcxtBrokerMeta
+
+  private exchange: Exchange
+  private exchangeName: string
+  /** Public-data-only mode — skip credential validation in init(). */
+  private keyless: boolean
+  private initialized = false
+  private overrides: CcxtExchangeOverrides
+  // orderId → ccxtSymbol cache (CCXT needs symbol to cancel)
+  private orderSymbolCache = new Map<string, string>()
+  private warnedOpenOrdersUnsupported = false
+
+  constructor(config: CcxtBrokerConfig) {
+    this.exchangeName = config.exchange
+    this.keyless = config.keyless ?? false
+    this.meta = { exchange: config.exchange }
+    this.overrides = exchangeOverrides[config.exchange] ?? {}
+    this.id = config.id ?? `${config.exchange}-main`
+    this.label = config.label ?? `${config.exchange.charAt(0).toUpperCase() + config.exchange.slice(1)} ${config.sandbox ? 'Testnet' : 'Live'}`
+
+    const exchanges = ccxt as unknown as Record<string, new (opts: Record<string, unknown>) => Exchange>
+    const ExchangeClass = exchanges[config.exchange]
+    if (!ExchangeClass) {
+      throw new BrokerError('CONFIG', `Unknown CCXT exchange: ${config.exchange}`)
+    }
+
+    // Pass through all CCXT standard credential fields. CCXT ignores undefined.
+    // Do NOT override the exchange's default fetchMarkets.types — each exchange
+    // has its own (e.g. bybit: spot/linear/inverse/option, hyperliquid: spot/swap/hip3).
+    // The init() wrapper below handles option-skipping uniformly via type filtering.
+    const cfgRecord = config as unknown as Record<string, unknown>
+    const credentials: Record<string, unknown> = {}
+    if (config.options !== undefined) credentials.options = config.options
+    for (const field of CCXT_CREDENTIAL_FIELDS) {
+      const v = cfgRecord[field]
+      if (v !== undefined) credentials[field] = v
+    }
+    this.exchange = new ExchangeClass(credentials)
+
+    // Route through the process's outbound proxy (if any) BEFORE the first
+    // request — loadMarkets() in init() is the first network call. CCXT won't
+    // pick up HTTP(S)_PROXY env on its own. See issue #384.
+    applyEnvProxy(this.exchange)
+
+    if (config.sandbox) {
+      try {
+        this.exchange.setSandboxMode(true)
+      } catch (err) {
+        // CCXT throws NotSupported for exchanges with no testnet/sandbox URL.
+        // Make it a permanent, actionable CONFIG error — symmetric with the
+        // demoTrading branch below — instead of an unclassified UNKNOWN.
+        throw new BrokerError('CONFIG', `${this.exchangeName}: cannot enable Sandbox — ${err instanceof Error ? err.message : String(err)}`)
+      }
+      // Since ccxt 4.5.7x the base describe() carries `urls.test: undefined`
+      // for every exchange, so `'test' in urls` is always true and
+      // setSandboxMode no longer throws for venues without a testnet — it
+      // silently sets urls.api = {} and the first request fails with a cryptic
+      // URL error (kucoin, kraken, coinbase, htx, mexc, …). Fail loudly now.
+      if (!hasUsableApiUrl((this.exchange as unknown as { urls?: Record<string, unknown> }).urls?.['api'])) {
+        throw new BrokerError('CONFIG', `${this.exchangeName}: cannot enable Sandbox — ${this.exchangeName} does not have a sandbox URL`)
+      }
+    }
+
+    if (config.demoTrading) {
+      const ex = this.exchange as unknown as { urls?: Record<string, unknown>; enableDemoTrading: (enable: boolean) => void }
+      try {
+        ex.enableDemoTrading(true)
+      } catch (err) {
+        // CCXT throws e.g. NotSupported when demo + sandbox are combined.
+        throw new BrokerError('CONFIG', `${this.exchangeName}: cannot enable Demo Trading — ${err instanceof Error ? err.message : String(err)}`)
+      }
+      // CCXT's base enableDemoTrading swaps urls.api ← urls.demo. Exchanges with
+      // no demo endpoint (e.g. okx, whose demo IS sandbox's x-simulated-trading
+      // header — not a separate domain) end up with urls.api === undefined and
+      // only fail much later with a cryptic "Cannot read properties of undefined
+      // (reading 'rest')" when the first request builds its URL. Fail loudly now.
+      if (ex.urls?.['api'] === undefined) {
+        throw new BrokerError('CONFIG', `${this.exchangeName} has no CCXT demo-trading endpoint. Turn off Demo Trading; if this exchange has a testnet, enable Sandbox instead, or use the dedicated ${this.exchangeName} preset.`)
+      }
+    }
+  }
+
+  // ---- Helpers ----
+
+  private get markets() {
+    return this.exchange.markets as unknown as Record<string, CcxtMarket>
+  }
+
+  private ensureInit(): void {
+    if (!this.initialized) {
+      throw new BrokerError('CONFIG', `CcxtBroker[${this.id}] not initialized. Call init() first.`)
+    }
+  }
+
+  // ---- Lifecycle ----
+
+  async init(): Promise<void> {
+    // Keyless (public-data-only) accounts skip credential validation — they
+    // only ever call public endpoints (loadMarkets / fetchOHLCV / fetchTicker).
+    // Validate credentials per the exchange's own requiredCredentials map otherwise.
+    // Hyperliquid needs walletAddress + privateKey; OKX needs apiKey + secret + password; etc.
+    if (!this.keyless) try {
+      this.exchange.checkRequiredCredentials()
+    } catch (err) {
+      const required = Object.entries(this.exchange.requiredCredentials ?? {})
+        .filter(([, needed]) => needed)
+        .map(([k]) => k)
+      const missing = required.filter(k => !(this.exchange as unknown as Record<string, unknown>)[k])
+      throw new BrokerError(
+        'CONFIG',
+        `${this.exchangeName} requires credentials: ${required.join(', ')}. Missing: ${missing.join(', ') || 'unknown'}. (${err instanceof Error ? err.message : String(err)})`,
+      )
+    }
+
+    const origFetchMarkets = this.exchange.fetchMarkets.bind(this.exchange)
+    const accountId = this.id
+
+    this.exchange.fetchMarkets = async (params?: Record<string, unknown>) => {
+      const ex = this.exchange as unknown as Record<string, unknown>
+      const opts = (ex['options'] ?? {}) as Record<string, unknown>
+      const fmOpts = (opts['fetchMarkets'] ?? {}) as Record<string, unknown>
+      // Use the exchange's own default types (set in its CCXT class describe()).
+      // Skip 'option' type — option markets are typically thousands of contracts
+      // (Bybit alone has ~10k+) and rarely useful for automated trading.
+      const originalTypes = fmOpts['types']
+      const allTypes = (originalTypes ?? []) as string[]
+      const types = allTypes.length > 0
+        ? allTypes.filter(t => t !== 'option')
+        : ['spot', 'linear', 'inverse'] // fallback for exchanges that don't declare types
+
+      try {
+        const allMarkets: unknown[] = []
+        for (const type of types) {
+          let lastErr: unknown
+          let success = false
+          for (let attempt = 1; attempt <= MAX_INIT_RETRIES; attempt++) {
+            try {
+              fmOpts['types'] = [type]
+              const markets = await origFetchMarkets(params)
+              allMarkets.push(...markets)
+              success = true
+              break
+            } catch (err) {
+              lastErr = err
+              if (attempt < MAX_INIT_RETRIES) {
+                const delay = INIT_RETRY_BASE_MS * Math.pow(2, attempt - 1)
+                const msg = err instanceof Error ? err.message : String(err)
+                console.warn(`CcxtBroker[${accountId}]: fetchMarkets(${type}) attempt ${attempt}/${MAX_INIT_RETRIES} failed, retrying in ${delay}ms... (${msg.slice(0, 160)})`)
+                await new Promise(r => setTimeout(r, delay))
+              }
+            }
+          }
+          if (!success) {
+            // A CCXT account is a full-spectrum interface — every market type
+            // the exchange supports must load, or the broker refuses to come
+            // up. Silently dropping a type (e.g. spot) would understate
+            // netLiquidation and hide real holdings, producing wrong snapshots
+            // forever until process restart. Whether the user actively trades
+            // that type is their decision, not ours.
+            const msg = lastErr instanceof Error ? lastErr.message : String(lastErr)
+            throw new Error(
+              `CcxtBroker[${accountId}]: fetchMarkets(${type}) failed after ${MAX_INIT_RETRIES} attempts: ${msg}`,
+            )
+          }
+        }
+        return allMarkets as Awaited<ReturnType<Exchange['fetchMarkets']>>
+      } finally {
+        fmOpts['types'] = originalTypes
+      }
+    }
+
+    try {
+      await this.exchange.loadMarkets()
+    } catch (err) {
+      throw BrokerError.from(err, 'NETWORK')
+    }
+
+    const marketCount = Object.keys(this.markets).length
+    if (marketCount === 0) {
+      throw new BrokerError('NETWORK', `CcxtBroker[${this.id}]: failed to load any markets`)
+    }
+    this.initialized = true
+    console.log(`CcxtBroker[${this.id}]: connected (${this.exchangeName}, ${marketCount} markets loaded)`)
+  }
+
+  async close(): Promise<void> {
+    // CCXT exchanges typically don't need explicit closing
+  }
+
+  /**
+   * Re-pull the exchange market list. CCXT's `loadMarkets(true)` (the
+   * `reload=true` overload) bypasses the cached snapshot it built during
+   * init. Call from a cron periodically — newly listed pairs and
+   * delistings come along for the ride.
+   */
+  async refreshCatalog(): Promise<void> {
+    this.ensureInit()
+    await this.exchange.loadMarkets(true)
+    const marketCount = Object.keys(this.markets).length
+    console.log(`CcxtBroker[${this.id}]: catalog refreshed (${marketCount} markets)`)
+  }
+
+  // ---- Contract search ----
+
+  async searchContracts(pattern: string): Promise<ContractDescription[]> {
+    this.ensureInit()
+    if (!pattern) return []
+
+    // Eligible candidate set: active markets with both legs of the pair, and
+    // quoted in a stablecoin / USD. This is the same filter the strict
+    // implementation used; we keep it so a "tesla" fuzzy hit doesn't drag in
+    // exotic-quote pairs the user almost certainly doesn't want.
+    const candidates: CcxtMarket[] = []
+    for (const market of Object.values(this.markets)) {
+      if (market.active === false) continue
+      if (!market.base || !market.quote) continue
+      const quote = market.quote.toUpperCase()
+      if (quote !== 'USDT' && quote !== 'USD' && quote !== 'USDC') continue
+      candidates.push(market)
+    }
+
+    // Pre-sort candidates by the broker's own preference (swap > future >
+    // spot > option, USDT > USD > USDC). fuzzyRankContracts is a stable sort
+    // and uses the input order as a tiebreaker, so this carries through —
+    // exact base matches keep showing up in the familiar derivative-first
+    // order, fuzzy hits inherit the same preference.
+    const typeOrder: Record<string, number> = { swap: 0, future: 1, spot: 2, option: 3 }
+    const quoteOrder: Record<string, number> = { USDT: 0, USD: 1, USDC: 2 }
+    candidates.sort((a, b) => {
+      const aType = typeOrder[a.type as keyof typeof typeOrder] ?? 99
+      const bType = typeOrder[b.type as keyof typeof typeOrder] ?? 99
+      if (aType !== bType) return aType - bType
+      const aQuote = quoteOrder[(a.quote ?? '').toUpperCase()] ?? 99
+      const bQuote = quoteOrder[(b.quote ?? '').toUpperCase()] ?? 99
+      return aQuote - bQuote
+    })
+
+    // Run candidates through the shared fuzzy ranker. Exact-base hits land in
+    // tier 100 (preserves the strict-matcher's behaviour for power users who
+    // type "BTC" and expect every BTC market); substring / name hits show up
+    // afterward so partial keywords (e.g. "tesl", "popcorn") still surface
+    // something useful.
+    // Skip CCXT markets that fail strict contract validation (typically
+    // dated FUT/OPT entries with missing expiry or multiplier in the
+    // exchange's market metadata). One bad market shouldn't drop the
+    // entire search; surface a one-line warning so the gap is visible
+    // without being noisy.
+    const ranked = fuzzyRankContracts(
+      candidates.flatMap((m) => {
+        try {
+          const c = marketToContract(m, this.exchangeName)
+          return [{ contract: c, base: m.base, quote: m.quote, name: m.id ?? m.symbol }]
+        } catch (err) {
+          console.warn(`ccxt[${this.exchangeName}]: skipping market ${m.symbol}: ${err instanceof Error ? err.message : String(err)}`)
+          return []
+        }
+      }),
+      pattern,
+    )
+
+    // Each ranked hit's Contract carries `localSymbol = market.symbol`
+    // (CCXT's wire format), so direct `markets[localSymbol]` lookup is
+    // the join key — matches the broker's own primary index.
+    const derivativeTypes = new Set<string>()
+    for (const desc of ranked) {
+      const m = desc.contract.localSymbol ? this.markets[desc.contract.localSymbol] : undefined
+      if (!m) continue
+      if (m.type === 'future') derivativeTypes.add('FUT')
+      if (m.type === 'option') derivativeTypes.add('OPT')
+    }
+    const derivativeSecTypes: string[] = derivativeTypes.size > 0 ? Array.from(derivativeTypes) : []
+    for (const desc of ranked) desc.derivativeSecTypes = derivativeSecTypes
+
+    return ranked
+  }
+
+  async getContractDetails(query: Contract): Promise<ContractDetails | null> {
+    this.ensureInit()
+
+    const ccxtSymbol = contractToCcxt(query, this.markets, this.exchangeName)
+    if (!ccxtSymbol) return null
+
+    const market = this.markets[ccxtSymbol]
+    if (!market) return null
+
+    const details = new ContractDetails()
+    details.contract = marketToContract(market, this.exchangeName)
+    details.longName = `${market.base}/${market.quote} ${market.type}${market.settle ? ` (${market.settle} settled)` : ''}`
+    details.minTick = market.precision?.price ?? 0
+    return details
+  }
+
+  // ---- Trading operations ----
+
+  async placeOrder(contract: Contract, order: Order, tpsl?: TpSlParams, extraParams?: Record<string, unknown>): Promise<PlaceOrderResult> {
+    this.ensureInit()
+
+
+    const ccxtSymbol = contractToCcxt(contract, this.markets, this.exchangeName)
+    if (!ccxtSymbol) {
+      return { success: false, error: 'Cannot resolve contract to CCXT symbol' }
+    }
+
+    // Use toFixed() to preserve Decimal precision across any scale.
+    // toString() would emit scientific notation for small values.
+    let size: string | undefined = !order.totalQuantity.equals(UNSET_DECIMAL)
+      ? order.totalQuantity.toFixed()
+      : undefined
+
+    // cashQty (notional) → size conversion
+    if (!size && !order.cashQty.equals(UNSET_DECIMAL) && order.cashQty.gt(0)) {
+      const ticker = await this.exchange.fetchTicker(ccxtSymbol)
+      const price = !order.lmtPrice.equals(UNSET_DECIMAL)
+        ? order.lmtPrice
+        : ticker.last != null ? new Decimal(ticker.last) : null
+      if (!price || price.isZero()) {
+        return { success: false, error: 'Cannot determine price for notional conversion' }
+      }
+      size = order.cashQty.div(price).toFixed()
+    }
+
+    if (!size) {
+      return { success: false, error: 'Either totalQuantity or cashQty must be provided' }
+    }
+
+    // Attached TP/SL on CCXT venues: REFUSE until a per-exchange override
+    // has verified the attach actually reaches the venue. Observed live on
+    // okx spot: the unified takeProfit/stopLoss params were accepted by
+    // ccxt, silently dropped at the venue mapping, and the entry filled
+    // UNPROTECTED — the ledger said "long with a stop", the exchange said
+    // "naked long". A missing stop that looks attached is the worst failure
+    // mode a trading system has; loud refusal beats silent downgrade
+    // (same rule as order-type support). Venue-verified attach
+    // implementations land via the overrides registry (fetchAllOpenOrders
+    // pattern) — okx needs attachAlgoOrds, bybit its native v5 fields.
+    if (tpsl?.takeProfit || tpsl?.stopLoss) {
+      const attachOverride = this.overrides.placeOrderWithTpSl
+      if (!attachOverride) {
+        return {
+          success: false,
+          error:
+            `Attached TP/SL is not verified to reach ${this.exchangeName} through ccxt — refusing rather than ` +
+            `risking a silently unprotected position. Place the entry first, then a separate stop/take-profit ` +
+            `order, or use a venue with verified attach support.`,
+        }
+      }
+    }
+
+    try {
+      const params: Record<string, unknown> = { ...extraParams }
+
+      if (tpsl?.takeProfit) {
+        params.takeProfit = { triggerPrice: parseFloat(tpsl.takeProfit.price) }
+      }
+      if (tpsl?.stopLoss) {
+        params.stopLoss = {
+          triggerPrice: parseFloat(tpsl.stopLoss.price),
+          ...(tpsl.stopLoss.limitPrice && { price: parseFloat(tpsl.stopLoss.limitPrice) }),
+        }
+      }
+
+      // Conditional orders: ccxt's convention is BASE type (market/limit) +
+      // params.triggerPrice — ccxt routes each venue to its algo endpoint.
+      // The old lowercase passthrough sent okx a literal ordType "stp"
+      // (51000 Parameter error, observed live), which meant the documented
+      // "place a separate stop" path didn't work either. TRAIL* stays
+      // refused until venue-verified — same rule as attached TP/SL.
+      let ccxtOrderType = ibkrOrderTypeToCcxt(order.orderType)
+      if (order.orderType === 'STP' || order.orderType === 'STP LMT') {
+        if (order.auxPrice.equals(UNSET_DECIMAL)) {
+          return { success: false, error: `${order.orderType} requires auxPrice (the stop trigger price).` }
+        }
+        params.triggerPrice = order.auxPrice.toNumber()
+        ccxtOrderType = order.orderType === 'STP' ? 'market' : 'limit'
+      } else if (order.orderType === 'TRAIL' || order.orderType === 'TRAIL LIMIT') {
+        return {
+          success: false,
+          error:
+            `${order.orderType} is not verified to reach ${this.exchangeName} through ccxt — refusing rather ` +
+            `than risking a silently mis-typed order. Use STP / STP LMT, or manage the trail manually.`,
+        }
+      }
+      const side = order.action.toLowerCase() as 'buy' | 'sell'
+      // CCXT SDK expects number for price — convert at the wire boundary.
+      const refPrice = ccxtOrderType === 'limit' && !order.lmtPrice.equals(UNSET_DECIMAL)
+        ? order.lmtPrice.toNumber()
+        : undefined
+
+      const attachOverride = this.overrides.placeOrderWithTpSl
+      const placeOverride = this.overrides.placeOrder
+      const ccxtOrder = (tpsl?.takeProfit || tpsl?.stopLoss) && attachOverride
+        // Venue-verified attach path — the gate above guarantees tpsl only
+        // gets this far when the exchange has an override for it.
+        ? await attachOverride(this.exchange, ccxtSymbol, ccxtOrderType, side, parseFloat(size), refPrice, tpsl, params)
+        : placeOverride
+          ? await placeOverride(this.exchange, ccxtSymbol, ccxtOrderType, side, parseFloat(size), refPrice, params, defaultPlaceOrder)
+          : await defaultPlaceOrder(this.exchange, ccxtSymbol, ccxtOrderType, side, parseFloat(size), refPrice, params)
+
+      // Cache orderId → symbol
+      if (ccxtOrder.id) {
+        this.orderSymbolCache.set(ccxtOrder.id, ccxtSymbol)
+      }
+
+      return {
+        success: true,
+        orderId: ccxtOrder.id,
+        orderState: makeOrderState(ccxtOrder.status),
+      }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  }
+
+  async cancelOrder(orderId: string): Promise<PlaceOrderResult> {
+    this.ensureInit()
+
+    try {
+      const ccxtSymbol = this.orderSymbolCache.get(orderId)
+      const cancelOverride = this.overrides.cancelOrderById
+      if (cancelOverride) {
+        await cancelOverride(this.exchange, orderId, ccxtSymbol, defaultCancelOrderById)
+      } else {
+        await defaultCancelOrderById(this.exchange, orderId, ccxtSymbol)
+      }
+      const orderState = new OrderState()
+      orderState.status = 'Cancelled'
+      return { success: true, orderId, orderState }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  }
+
+  async modifyOrder(orderId: string, changes: Partial<Order>): Promise<PlaceOrderResult> {
+    this.ensureInit()
+
+    try {
+      const ccxtSymbol = this.orderSymbolCache.get(orderId)
+      if (!ccxtSymbol) {
+        return { success: false, error: `Unknown order ${orderId} — cannot resolve symbol for edit` }
+      }
+
+      // editOrder requires type and side — fetch the original order to fill in defaults.
+      const fetchOverride = this.overrides.fetchOrderById
+      const original = fetchOverride
+        ? await fetchOverride(this.exchange, orderId, ccxtSymbol, defaultFetchOrderById)
+        : await defaultFetchOrderById(this.exchange, orderId, ccxtSymbol)
+      const qty = changes.totalQuantity != null && !changes.totalQuantity.equals(UNSET_DECIMAL) ? changes.totalQuantity.toNumber() : original.amount
+      const price = changes.lmtPrice != null && !changes.lmtPrice.equals(UNSET_DECIMAL) ? changes.lmtPrice.toNumber() : original.price
+
+      // Extra params for fields that don't fit editOrder's positional arguments
+      const params: Record<string, unknown> = {}
+      if (changes.auxPrice != null && !changes.auxPrice.equals(UNSET_DECIMAL)) params.stopPrice = changes.auxPrice.toNumber()
+      if (changes.trailStopPrice != null && !changes.trailStopPrice.equals(UNSET_DECIMAL)) params.trailStopPrice = changes.trailStopPrice.toNumber()
+      if (changes.trailingPercent != null && !changes.trailingPercent.equals(UNSET_DECIMAL)) params.trailingPercent = changes.trailingPercent.toNumber()
+      if (changes.tif) params.timeInForce = changes.tif.toLowerCase()
+
+      const result = await this.exchange.editOrder(
+        orderId,
+        ccxtSymbol,
+        changes.orderType ? ibkrOrderTypeToCcxt(changes.orderType) : (original.type ?? 'market'),
+        original.side,
+        qty,
+        price,
+        params,
+      )
+
+      return {
+        success: true,
+        orderId: result.id,
+        orderState: makeOrderState(result.status),
+      }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  }
+
+  async closePosition(contract: Contract, quantity?: Decimal): Promise<PlaceOrderResult> {
+    this.ensureInit()
+
+
+    const positions = await this.getPositions()
+    const markets = this.exchange.markets as Record<string, CcxtMarket>
+    const ccxtSymbol = contractToCcxt(contract, markets, this.exchangeName)
+
+    // Resolve both input + each position's contract to CCXT wire format.
+    // That's the unambiguous identity per exchange — works whether the input
+    // contract carries canonical localSymbol (post-Phase-3 internal flow) or
+    // wire-format localSymbol (legacy callers, user-constructed contracts).
+    const symbol = contract.symbol?.toUpperCase()
+    const pos = positions.find(p => {
+      const posWire = contractToCcxt(p.contract, markets, this.exchangeName)
+      if (ccxtSymbol && posWire === ccxtSymbol) return true
+      // Fallback for inputs we couldn't wire-resolve — match on symbol+secType.
+      return symbol && p.contract.symbol === symbol && p.contract.secType === contract.secType
+    })
+
+    if (!pos) {
+      return { success: false, error: `No open position for ${ccxtSymbol ?? symbol ?? 'unknown'}` }
+    }
+
+    const order = new Order()
+    order.action = pos.side === 'long' ? 'SELL' : 'BUY'
+    order.orderType = 'MKT'
+    order.totalQuantity = quantity ?? pos.quantity
+
+    // reduceOnly is a DERIVATIVES concept (never open the opposite side by
+    // accident). Spot has no position to "reduce" — okx rejects the param
+    // outright (51205 "Reduce Only is not available", observed live on a
+    // partial spot close). Spot close = plain market sell.
+    const isDerivative = pos.contract.secType === 'CRYPTO_PERP' || pos.contract.secType === 'FUT'
+    return this.placeOrder(pos.contract, order, undefined, isDerivative ? { reduceOnly: true } : undefined)
+  }
+
+  // ---- Sub-accounts ----
+
+  /** The sub-account decomposition for this venue: the override's list for
+   *  separate-wallet venues (Binance / Bitget Classic), else the single unified default. */
+  private resolveSubAccounts(): CcxtSubAccountDef[] {
+    return this.overrides.subAccounts?.length ? this.overrides.subAccounts : [UNIFIED_SUBACCOUNT]
+  }
+
+  async listSubAccounts(): Promise<SubAccountRef[]> {
+    return this.resolveSubAccounts().map(s => ({ id: s.id, label: s.label, kind: s.kind }))
+  }
+
+  /** Which sub-account a contract trades in — derived from the instrument.
+   *  Derivatives (perp/future) → the 'derivatives' sub-account; everything else
+   *  → 'spot'. Single-sub-account venues always answer with that one id. */
+  subAccountForContract(contract: Contract): string | undefined {
+    const subs = this.resolveSubAccounts()
+    if (subs.length <= 1) return subs[0]?.id
+    const isDerivative = contract.secType === 'CRYPTO_PERP' || contract.secType === 'FUT'
+    const wantKind = isDerivative ? 'derivatives' : 'spot'
+    return (subs.find(s => s.kind === wantKind) ?? subs[0])?.id
+  }
+
+  /** Resolve a (possibly absent) selector to the sub-account defs in scope.
+   *  Omitted ⇒ all (aggregate); a known id ⇒ just that one; an unknown id ⇒
+   *  loud CONFIG error listing the valid ids (the agent reads it and retries). */
+  private scopedSubAccounts(subAccountId?: string): CcxtSubAccountDef[] {
+    const subs = this.resolveSubAccounts()
+    if (subAccountId == null) return subs
+    const match = subs.find(s => s.id === subAccountId)
+    if (!match) {
+      throw new BrokerError('CONFIG', `CcxtBroker[${this.id}]: unknown sub-account "${subAccountId}". Valid sub-accounts: ${subs.map(s => s.id).join(', ')}.`)
+    }
+    return [match]
+  }
+
+  /** CCXT balance `type`s to fetch for a scope. Empty array ⇒ undefined ⇒ a
+   *  single unscoped fetchBalance() (unified-default case). */
+  private walletTypesFor(subAccountId?: string): string[] | undefined {
+    const types = [...new Set(this.scopedSubAccounts(subAccountId).flatMap(s => s.walletTypes))]
+    return types.length ? types : undefined
+  }
+
+  // ---- Queries ----
+
+  /** Keep account-level PnL and position rows on the same venue-specific
+   *  derivative route. */
+  private async fetchDerivativePositions() {
+    const fetchOverride = this.overrides.fetchPositions
+    return fetchOverride
+      ? await fetchOverride(this.exchange, defaultFetchPositions)
+      : await defaultFetchPositions(this.exchange)
+  }
+
+  /**
+   * Synthesize asset holdings (BTC/ETH/etc balances) into Position records.
+   *
+   * CCXT's fetchPositions() only returns derivative positions
+   * (SWAP/FUTURES/MARGIN/OPTION); plain asset balances sit in fetchBalance() as
+   * per-currency entries — and span multiple wallets on separate-wallet venues.
+   * Without this synthesis, a UTA user holding only spot would see an empty
+   * positions list and a netLiquidation that reflects only stablecoin balance.
+   *
+   * Treated as long positions priced at the current ticker — consistent
+   * with how IBKR exposes equity holdings. avgCost is filled with markPrice
+   * as a placeholder; UTA replaces it with a wallet-ledger-derived value
+   * (and bootstraps any unaccounted qty via `reconcileBalance` at observed
+   * markPrice) — the `avgCostSource: 'wallet'` flag signals this.
+   */
+  private async fetchAssetHoldings(subAccountId?: string): Promise<Position[]> {
+    // The SAME fungible asset can sit in multiple wallets (e.g. BTC as a spot
+    // balance AND as futures-wallet collateral) — it's the same asset, so within
+    // the requested scope we aggregate by coin into ONE holding (ANG-111).
+    // Stablecoins are cash (valued in getAccount), not holdings here. The
+    // `subAccountId` selector narrows which wallets contribute: omitted ⇒ every
+    // wallet, 'spot' ⇒ the spot wallet, 'derivatives' ⇒ the futures wallets.
+    const { balances } = await this.gatherWalletBalances(subAccountId)
+
+    const qtyByCoin = new Map<string, Decimal>()
+    for (const b of balances) {
+      for (const [coin, entry] of Object.entries(b)) {
+        if (BALANCE_RESERVED_KEYS.has(coin)) continue
+        if (STABLECOIN_TO_USD.has(coin.toUpperCase())) continue
+        if (typeof entry !== 'object' || entry === null) continue
+        const total = new Decimal(String((entry as Record<string, unknown>)['total'] ?? 0))
+        if (total.lte(0)) continue
+        qtyByCoin.set(coin, (qtyByCoin.get(coin) ?? new Decimal(0)).plus(total))
+      }
+    }
+
+    type Holding = { coin: string; quantity: Decimal; ccxtSymbol: string; market: CcxtMarket }
+    const holdings: Holding[] = []
+    for (const [coin, quantity] of qtyByCoin) {
+      // Find the most preferred quote market for pricing this holding.
+      let resolved: { ccxtSymbol: string; market: CcxtMarket } | null = null
+      for (const quote of SPOT_QUOTE_PREFERENCE) {
+        const candidate = `${coin}/${quote}`
+        const m = this.markets[candidate]
+        if (m && m.active !== false && m.type === 'spot') {
+          resolved = { ccxtSymbol: candidate, market: m }
+          break
+        }
+      }
+      if (!resolved) {
+        console.warn(`CcxtBroker[${this.id}]: holding ${coin} (${quantity.toString()}) — no <COIN>/USDT|USDC|USD spot market, skipping`)
+        continue
+      }
+      holdings.push({ coin, quantity, ...resolved })
+    }
+
+    if (holdings.length === 0) return []
+
+    // Bulk fetch tickers — one HTTP call instead of N. Some exchanges
+    // don't support multi-symbol fetchTickers; fall back to per-symbol on
+    // failure so we don't lose the entire spot view over an API quirk.
+    const symbols = holdings.map(h => h.ccxtSymbol)
+    let tickers: Record<string, { last?: number | null }> = {}
+    try {
+      tickers = await this.exchange.fetchTickers(symbols) as unknown as Record<string, { last?: number | null }>
+    } catch {
+      for (const s of symbols) {
+        try {
+          tickers[s] = await this.exchange.fetchTicker(s) as unknown as { last?: number | null }
+        } catch {
+          // skip — warned per-holding below
+        }
+      }
+    }
+
+    const result: Position[] = []
+    for (const h of holdings) {
+      const last = tickers[h.ccxtSymbol]?.last
+      if (last == null) {
+        console.warn(`CcxtBroker[${this.id}]: spot holding ${h.coin} — no ticker for ${h.ccxtSymbol}, skipping`)
+        continue
+      }
+      const markPrice = new Decimal(String(last))
+      const marketValue = h.quantity.mul(markPrice)
+
+      result.push(buildPosition({
+        contract: marketToContract(h.market, this.exchangeName),
+        currency: normalizeQuoteCurrency(h.market.quote ?? 'USDT'),
+        side: 'long',
+        quantity: h.quantity,
+        // Placeholder — UTA will replace via wallet-ledger reconstruction.
+        avgCost: markPrice.toString(),
+        marketPrice: markPrice.toString(),
+        // CCXT pre-computes marketValue per the spot-synthesis path; the
+        // upstream API doesn't give us PnL since we have no historical cost,
+        // so we explicitly pin both pre-computed values to avoid `buildPosition`
+        // re-deriving with avgCost=markPrice (which would yield 0 anyway).
+        marketValue: marketValue.toString(),
+        unrealizedPnL: '0',
+        realizedPnL: '0',
+        // CCXT spot has no IBKR-style multiplier — canonical default '1'.
+        multiplier: '1',
+        avgCostSource: 'wallet',
+      }))
+    }
+
+    return result
+  }
+
+  /**
+   * Fetch balances across the wallets in scope (ANG-111). Separate-wallet venues
+   * (binance: spot / USDⓈ-M / COIN-M behind distinct endpoints) declare
+   * `subAccounts`, each mapping to one or more CCXT balance `type`s; the
+   * `subAccountId` selector narrows which are fetched (omitted ⇒ every wallet).
+   * Unified venues (okx / bybit UTA — verified: spot/swap/contract all return the
+   * same pool) have no wallet types → one unscoped call. A per-wallet failure
+   * (e.g. an un-activated COIN-M wallet → -2015) is skipped loudly unless the
+   * venue declares strict private reads because every wallet is authoritative.
+   * Also rolls up futures `totalInitialMargin` for the account's margin figure.
+   */
+  private async gatherWalletBalances(subAccountId?: string): Promise<{ balances: Array<Record<string, unknown>>; initMargin: Decimal }> {
+    const walletTypes = this.walletTypesFor(subAccountId)
+    const balances: Array<Record<string, unknown>> = []
+    let initMargin = new Decimal(0)
+    const accrue = (b: Record<string, unknown>) => {
+      balances.push(b)
+      const info = (b['info'] ?? {}) as Record<string, unknown>
+      if (info['totalInitialMargin'] !== undefined) initMargin = initMargin.plus(new Decimal(String(info['totalInitialMargin'])))
+    }
+    const fetchBalance = async (params?: Record<string, unknown>) => {
+      const fetchOverride = this.overrides.fetchBalance
+      return fetchOverride
+        ? await fetchOverride(this.exchange, params, defaultFetchBalance)
+        : await defaultFetchBalance(this.exchange, params)
+    }
+    if (walletTypes?.length) {
+      for (const type of walletTypes) {
+        try {
+          accrue(await fetchBalance({ type }))
+        } catch (err) {
+          if (this.overrides.strictPrivateReads) throw err
+          console.warn(`CcxtBroker[${this.id}]: fetchBalance(${type}) skipped — ${err instanceof Error ? err.message.slice(0, 120) : String(err)}`)
+        }
+      }
+    } else {
+      accrue(await fetchBalance())
+    }
+    return { balances, initMargin }
+  }
+
+  async getAccount(subAccountId?: string): Promise<AccountInfo> {
+    // Keyless data sources have no account — return a zeroed one rather than
+    // calling fetchBalance (which requires credentials). The federation excludes
+    // keyless UTAs from equity aggregation, so this never shows as phantom cash.
+    if (this.keyless) {
+      return { baseCurrency: 'USD', netLiquidation: '0', totalCashValue: '0', unrealizedPnL: '0', realizedPnL: '0', initMarginReq: '0' }
+    }
+    this.ensureInit()
+
+    // Derivative PnL only belongs to a scope that actually holds derivatives —
+    // a spot-only sub-account read must not fold in perp positions. (Validates
+    // the selector as a side effect: an unknown id throws here.)
+    const scoped = this.scopedSubAccounts(subAccountId)
+    const includesDerivatives = scoped.some(s => s.kind === 'derivatives' || s.kind === 'unified')
+
+    try {
+      // ── 1. Gather balances across the wallets in scope (ANG-111) ───────────
+      const { balances, initMargin } = await this.gatherWalletBalances(subAccountId)
+      if (balances.length === 0) {
+        throw new BrokerError('NETWORK', `CcxtBroker[${this.id}]: no wallet balance readable`)
+      }
+
+      // ── 2. netLiquidation = Σ (every asset across every wallet) in USD ─────
+      // Each wallet's per-asset `total` already folds in margin + unrealized
+      // PnL (verified on binance futures: USDT total = walletBalance + uPnL),
+      // so summing wallet assets yields true equity. Positions NEVER enter this
+      // sum — adding their notional was the equity-overstatement bug. Stablecoins
+      // value at $1; everything else at its spot mark price.
+      let cash = new Decimal(0)
+      const qtyByCoin = new Map<string, Decimal>()
+      for (const b of balances) {
+        for (const [coin, entry] of Object.entries(b)) {
+          if (BALANCE_RESERVED_KEYS.has(coin)) continue
+          if (typeof entry !== 'object' || entry === null) continue
+          const total = new Decimal(String((entry as Record<string, unknown>)['total'] ?? 0))
+          if (total.lte(0)) continue
+          if (STABLECOIN_TO_USD.has(coin.toUpperCase())) cash = cash.plus(total)
+          else qtyByCoin.set(coin, (qtyByCoin.get(coin) ?? new Decimal(0)).plus(total))
+        }
+      }
+
+      let assetValue = new Decimal(0)
+      const priced: Array<{ coin: string; qty: Decimal; symbol: string }> = []
+      for (const [coin, qty] of qtyByCoin) {
+        let symbol: string | undefined
+        for (const quote of SPOT_QUOTE_PREFERENCE) {
+          const m = this.markets[`${coin}/${quote}`]
+          if (m && m.active !== false && m.type === 'spot') { symbol = `${coin}/${quote}`; break }
+        }
+        if (!symbol) { console.warn(`CcxtBroker[${this.id}]: balance asset ${coin} (${qty.toString()}) — no spot market to price, excluded from netLiq`); continue }
+        priced.push({ coin, qty, symbol })
+      }
+      if (priced.length) {
+        const symbols = priced.map(p => p.symbol)
+        let tickers: Record<string, { last?: number | null }> = {}
+        try {
+          tickers = await this.exchange.fetchTickers(symbols) as unknown as Record<string, { last?: number | null }>
+        } catch {
+          for (const s of symbols) {
+            try { tickers[s] = await this.exchange.fetchTicker(s) as unknown as { last?: number | null } } catch { /* warned below */ }
+          }
+        }
+        for (const p of priced) {
+          const last = tickers[p.symbol]?.last
+          if (last == null) { console.warn(`CcxtBroker[${this.id}]: no ticker for ${p.symbol} — ${p.coin} excluded from netLiq`); continue }
+          assetValue = assetValue.plus(p.qty.mul(new Decimal(String(last))))
+        }
+      }
+
+      // ── 3. unrealizedPnL: display roll-up of open derivative PnL ───────────
+      // (already baked into the wallet equity above, so NOT re-added to netLiq).
+      // Skipped for a spot-only scope — it has no derivative positions.
+      let unrealizedPnL = new Decimal(0)
+      let realizedPnL = new Decimal(0)
+      if (includesDerivatives) {
+        try {
+          const rawPositions = await this.fetchDerivativePositions()
+          for (const p of rawPositions) {
+            unrealizedPnL = unrealizedPnL.plus(new Decimal(String(p.unrealizedPnl ?? 0)))
+            realizedPnL = realizedPnL.plus(new Decimal(String((p as unknown as Record<string, unknown>).realizedPnl ?? 0)))
+          }
+        } catch (err) {
+          if (this.overrides.strictPrivateReads) throw err
+          // Positions are display-only for permissive venues; preserve the
+          // balance read when their optional PnL endpoint fails.
+        }
+      }
+
+      return {
+        baseCurrency: 'USD',
+        netLiquidation: cash.plus(assetValue).toString(),
+        totalCashValue: cash.toString(),
+        unrealizedPnL: unrealizedPnL.toString(),
+        realizedPnL: realizedPnL.toString(),
+        initMarginReq: initMargin.toString(),
+      }
+    } catch (err) {
+      throw BrokerError.from(err)
+    }
+  }
+
+  async getPositions(subAccountId?: string): Promise<Position[]> {
+    if (this.keyless) return []
+    this.ensureInit()
+
+    // Derivative positions belong only to a scope that holds derivatives; a
+    // spot-only sub-account skips fetchPositions entirely. Asset holdings are
+    // scoped to the requested wallets inside fetchAssetHoldings. (Validates the
+    // selector — an unknown id throws here.)
+    const scoped = this.scopedSubAccounts(subAccountId)
+    const includesDerivatives = scoped.some(s => s.kind === 'derivatives' || s.kind === 'unified')
+
+    try {
+      const [raw, spotHoldings] = await Promise.all([
+        includesDerivatives
+          ? this.fetchDerivativePositions()
+          : Promise.resolve([] as Awaited<ReturnType<typeof defaultFetchPositions>>),
+        this.fetchAssetHoldings(subAccountId),
+      ])
+      const result: Position[] = []
+
+      for (const p of raw) {
+        const market = p.symbol ? this.markets[p.symbol] : undefined
+        if (!market) continue
+
+        // Use Decimal arithmetic to avoid IEEE 754 precision loss (e.g. 0.51 → 0.50999...)
+        const contracts = new Decimal(String(p.contracts ?? 0)).abs()
+        const contractSize = new Decimal(String(p.contractSize ?? 1))
+        const quantity = contracts.mul(contractSize)
+        if (quantity.isZero()) continue
+
+        const markPrice = new Decimal(String(p.markPrice ?? 0))
+        const entryPrice = new Decimal(String(p.entryPrice ?? 0))
+        const marketValue = quantity.mul(markPrice)
+        const unrealizedPnL = new Decimal(String(p.unrealizedPnl ?? 0))
+
+        result.push(buildPosition({
+          contract: marketToContract(market, this.exchangeName),
+          currency: normalizeQuoteCurrency(market.quote ?? 'USDT'),
+          side: p.side === 'long' ? 'long' : 'short',
+          quantity,
+          avgCost: entryPrice.toString(),
+          marketPrice: markPrice.toString(),
+          // CCXT exchange already returns notional and PnL — pass through.
+          marketValue: marketValue.toString(),
+          unrealizedPnL: unrealizedPnL.toString(),
+          realizedPnL: new Decimal(String((p as unknown as Record<string, unknown>).realizedPnl ?? 0)).toString(),
+          // contracts × contractSize is folded into `quantity` upstream, so
+          // multiplier is canonical 1 here.
+          multiplier: '1',
+          avgCostSource: 'broker',
+          // Leveraged-derivative risk picture (leverage / liq price / margin
+          // mode). Spot holdings below never get one — they go through
+          // fetchAssetHoldings, which doesn't pass `risk`.
+          risk: ccxtPositionRisk(p),
+        }))
+      }
+
+      // Spot holdings carry distinct contract identity (no settle suffix
+      // in aliceId), so they coexist with derivative positions on the
+      // same underlying — same model as ETF vs futures in IBKR.
+      return [...result, ...spotHoldings]
+    } catch (err) {
+      throw BrokerError.from(err)
+    }
+  }
+
+  async getOrders(orderIds: string[]): Promise<OpenOrder[]> {
+    if (this.keyless) return []
+    this.ensureInit()
+
+
+    const results: OpenOrder[] = []
+    for (const id of orderIds) {
+      const order = await this.getOrder(id)
+      if (order) results.push(order)
+    }
+    return results
+  }
+
+  async getOrder(orderId: string, symbolHint?: string): Promise<OpenOrder | null> {
+    this.ensureInit()
+
+    // CCXT order lookup is symbol-scoped. The in-memory cache covers orders
+    // placed by this process; the hint (broker-native localSymbol persisted
+    // with the git operation) covers orders placed before a restart.
+    const ccxtSymbol = this.orderSymbolCache.get(orderId) ?? symbolHint
+    if (!ccxtSymbol) return null
+
+    const fetchOverride = this.overrides.fetchOrderById
+    try {
+      const order = fetchOverride
+        ? await fetchOverride(this.exchange, orderId, ccxtSymbol, defaultFetchOrderById)
+        : await defaultFetchOrderById(this.exchange, orderId, ccxtSymbol)
+      return this.convertCcxtOrder(order)
+    } catch {
+      return null
+    }
+  }
+
+  private convertCcxtOrder(o: CcxtOrder): OpenOrder | null {
+    const market = o.symbol ? this.markets[o.symbol] : undefined
+    if (!market || !o.symbol) return null
+
+    if (o.id) {
+      this.orderSymbolCache.set(o.id, o.symbol)
+    }
+
+    const contract = marketToContract(market, this.exchangeName)
+
+    const order = new Order()
+    order.action = (o.side ?? 'buy').toUpperCase()
+    order.totalQuantity = new Decimal(o.amount ?? 0)
+    order.orderType = (o.type ?? 'market').toUpperCase()
+    if (o.price != null) order.lmtPrice = new Decimal(o.price)
+    // Fill data — without these, a sync that sees the order filled records
+    // the transition but loses qty/price, breaking cost-basis downstream.
+    if (o.filled != null) order.filledQuantity = new Decimal(o.filled)
+    order.orderId = parseInt(o.id ?? '', 10) || 0
+
+    const tp = o.takeProfitPrice
+    const sl = o.stopLossPrice
+    const tpsl: TpSlParams | undefined = (tp != null || sl != null)
+      ? {
+        ...(tp != null && { takeProfit: { price: String(tp) } }),
+        ...(sl != null && { stopLoss: { price: String(sl) } }),
+      }
+      : undefined
+
+    return {
+      contract,
+      order,
+      orderState: makeOrderState(o.status),
+      ...(o.id && { orderId: String(o.id) }),
+      ...(o.average != null && { avgFillPrice: String(o.average) }),
+      ...(tpsl && { tpsl }),
+    }
+  }
+
+  /**
+   * All open orders on the account — the surface external-order observation
+   * diffs against. Venue-dependent: some exchanges can't enumerate open
+   * orders without a symbol scope; permissive defaults degrade to [] with a
+   * once-per-instance warning. Verified strict adapters propagate incomplete
+   * namespace reads so a partial list cannot masquerade as authoritative.
+   */
+  async getOpenOrders(): Promise<OpenOrder[]> {
+    if (this.keyless) return []
+    this.ensureInit()
+    try {
+      const fetchOverride = this.overrides.fetchAllOpenOrders
+      const raw = fetchOverride
+        ? await fetchOverride(this.exchange, defaultFetchAllOpenOrders)
+        : await defaultFetchAllOpenOrders(this.exchange)
+      const converted: OpenOrder[] = []
+      for (const o of raw) {
+        // convertCcxtOrder also seeds the orderId→symbol cache, so an
+        // observed external order is immediately syncable.
+        const open = this.convertCcxtOrder(o)
+        if (open) converted.push(open)
+      }
+      return converted
+    } catch (err) {
+      if (this.overrides.strictOpenOrderReads) throw BrokerError.from(err)
+      if (!this.warnedOpenOrdersUnsupported) {
+        this.warnedOpenOrdersUnsupported = true
+        console.warn(
+          `CcxtBroker[${this.id}]: fetchOpenOrders unavailable — external-order observation disabled for this account ` +
+          `(${err instanceof Error ? err.message : String(err)})`,
+        )
+      }
+      return []
+    }
+  }
+
+  async getQuote(contract: Contract): Promise<Quote> {
+    this.ensureInit()
+
+    const ccxtSymbol = contractToCcxt(contract, this.markets, this.exchangeName)
+    if (!ccxtSymbol) throw new BrokerError('EXCHANGE', 'Cannot resolve contract to CCXT symbol')
+
+    try {
+      const ticker = await this.exchange.fetchTicker(ccxtSymbol)
+      const market = this.markets[ccxtSymbol]
+
+      return {
+        contract: market
+          ? marketToContract(market, this.exchangeName)
+          : contract,
+        last: String(ticker.last ?? 0),
+        bid: String(ticker.bid ?? 0),
+        ask: String(ticker.ask ?? 0),
+        volume: String(ticker.baseVolume ?? 0),
+        high: ticker.high != null ? String(ticker.high) : undefined,
+        low: ticker.low != null ? String(ticker.low) : undefined,
+        timestamp: new Date(ticker.timestamp ?? Date.now()),
+      }
+    } catch (err) {
+      throw BrokerError.from(err)
+    }
+  }
+
+  /**
+   * Historical OHLCV via ccxt `fetchOHLCV`. Free public endpoint on most
+   * exchanges (realtime quality, no entitlement tier). Validates the interval
+   * against the exchange's actual `timeframes` and loud-refuses if unsupported.
+   */
+  async getHistorical(contract: Contract, params: BarParams): Promise<Bar[]> {
+    this.ensureInit()
+    const ccxtSymbol = contractToCcxt(contract, this.markets, this.exchangeName)
+    if (!ccxtSymbol) throw new BrokerError('EXCHANGE', 'Cannot resolve contract to CCXT symbol')
+    const timeframe = CCXT_TIMEFRAME[params.interval]
+    const supported = this.exchange.timeframes as Record<string, unknown> | undefined
+    if (supported && !(timeframe in supported)) {
+      throw new BrokerError('EXCHANGE', `${this.exchangeName} does not support the ${params.interval} interval`)
+    }
+    try {
+      const limit = Math.min(5000, params.limit == null ? 5000 : Math.max(1, Math.floor(params.limit)))
+      const lowerBound = params.start?.getTime()
+      const upperBound = Math.min(params.end?.getTime() ?? Date.now(), Date.now())
+      // CCXT exchanges return the FIRST `limit` rows at/after `since`. Alice's
+      // BarParams contract is the opposite: limit truncates to the MOST RECENT
+      // rows in the requested window. Anchor `since` immediately before that
+      // trailing window so one exchange page contains the latest bars instead
+      // of an ancient first page (issue #717). Ask for one extra interval:
+      // venues differ on whether the in-progress candle is visible, and an
+      // exact N-interval window otherwise returns only N-1 completed candles.
+      const queryLimit = limit == null ? undefined : limit + 1
+      const trailingSince = limit == null
+        ? undefined
+        : upperBound - BAR_INTERVAL_MS[params.interval] * queryLimit! + 1
+      const since = trailingSince == null
+        ? lowerBound
+        : Math.max(lowerBound ?? Number.NEGATIVE_INFINITY, trailingSince)
+      // Venues cap page sizes independently of the requested limit (OKX:
+      // 300). Walk forward until the window ends, not just the first page.
+      // De-duplicate inclusive boundaries and stop on non-advancing responses.
+      const byTime = new Map<number, number[]>()
+      let cursor = since
+      for (let page = 0; page < 100; page++) {
+        const rows = await this.exchange.fetchOHLCV(ccxtSymbol, timeframe, cursor, queryLimit) as number[][]
+        let latest = Number.NEGATIVE_INFINITY
+        for (const row of rows) {
+          const ts = row[0]
+          if (!Number.isFinite(ts)) continue
+          latest = Math.max(latest, ts)
+          if ((lowerBound == null || ts >= lowerBound) && ts <= upperBound) byTime.set(ts, row)
+        }
+        if (!rows.length || latest < (cursor ?? Number.NEGATIVE_INFINITY) || latest >= upperBound || byTime.size >= queryLimit!) break
+        const next = latest + BAR_INTERVAL_MS[params.interval]
+        if (!Number.isFinite(next) || next > upperBound || (cursor != null && next <= cursor)) break
+        cursor = next
+      }
+      const selected = [...byTime.values()].sort((a, b) => a[0] - b[0]).slice(-limit)
+      return selected.map(([ts, o, h, l, c, v]) => ({
+        timestamp: new Date(ts),
+        open: String(o), high: String(h), low: String(l), close: String(c),
+        volume: String(v ?? 0),
+      }))
+    } catch (err) {
+      throw BrokerError.from(err)
+    }
+  }
+
+  // ---- Capabilities ----
+
+  /** A crypto exchange's instruments are crypto — period. Even a listed "AAPL"
+   *  is a synthetic/custodial token here, not the real equity; secType (spot /
+   *  CRYPTO_PERP / FUT / OPT) is the instrument shape, not the asset class. */
+  assetClassFor(): 'crypto' {
+    return 'crypto'
+  }
+
+  getCapabilities(): AccountCapabilities {
+    return {
+      supportedSecTypes: ['CRYPTO', 'CRYPTO_PERP'],
+      supportedOrderTypes: ['MKT', 'LMT'],
+      historicalBars: { supported: true, quality: 'realtime' },
+    }
+  }
+
+  async getMarketClock(): Promise<MarketClock> {
+    return {
+      isOpen: true,
+      timestamp: new Date(),
+    }
+  }
+
+  // ---- Contract identity ----
+
+  getNativeKey(contract: Contract): string {
+    return contract.localSymbol || contract.symbol
+  }
+
+  resolveNativeKey(nativeKey: string): Contract {
+    // CCXT's nativeKey IS the unified wire symbol (e.g. "BTC/USDT:USDT"),
+    // which is also the markets-table key. Direct lookup is the only
+    // path needed — no normalization, no reverse-mapping.
+    const market = this.markets[nativeKey]
+    if (market) return marketToContract(market, this.exchange.id)
+
+    // Last-resort skeletal contract for an unknown nativeKey. Operations
+    // that need market metadata (placeOrder / getQuote / closePosition)
+    // will fail downstream — that's the loud failure we want rather than
+    // a silent half-broken contract.
+    const c = new Contract()
+    c.localSymbol = nativeKey
+    c.symbol = nativeKey.split('/')[0] ?? nativeKey
+    return c
+  }
+
+  // ---- Provider-specific methods ----
+
+  async getFundingRate(contract: Contract): Promise<FundingRate> {
+    this.ensureInit()
+
+    const ccxtSymbol = contractToCcxt(contract, this.markets, this.exchangeName)
+    if (!ccxtSymbol) throw new BrokerError('EXCHANGE', 'Cannot resolve contract to CCXT symbol')
+
+    try {
+      const funding = await this.exchange.fetchFundingRate(ccxtSymbol)
+      const market = this.markets[ccxtSymbol]
+
+      return {
+        contract: market
+          ? marketToContract(market, this.exchangeName)
+          : contract,
+        fundingRate: funding.fundingRate ?? 0,
+        nextFundingTime: funding.fundingDatetime ? new Date(funding.fundingDatetime) : undefined,
+        previousFundingRate: funding.previousFundingRate ?? undefined,
+        timestamp: new Date(funding.timestamp ?? Date.now()),
+      }
+    } catch (err) {
+      throw BrokerError.from(err)
+    }
+  }
+
+  async getOrderBook(contract: Contract, limit?: number): Promise<OrderBook> {
+    this.ensureInit()
+
+    const ccxtSymbol = contractToCcxt(contract, this.markets, this.exchangeName)
+    if (!ccxtSymbol) throw new BrokerError('EXCHANGE', 'Cannot resolve contract to CCXT symbol')
+
+    try {
+      const book = await this.exchange.fetchOrderBook(ccxtSymbol, limit)
+      const market = this.markets[ccxtSymbol]
+
+      return {
+        contract: market
+          ? marketToContract(market, this.exchangeName)
+          : contract,
+        bids: book.bids.map(([p, a]) => [p ?? 0, a ?? 0] as OrderBookLevel),
+        asks: book.asks.map(([p, a]) => [p ?? 0, a ?? 0] as OrderBookLevel),
+        timestamp: new Date(book.timestamp ?? Date.now()),
+      }
+    } catch (err) {
+      throw BrokerError.from(err)
+    }
+  }
+}

@@ -1,0 +1,321 @@
+/**
+ * SDK Equity Client
+ *
+ * Drop-in replacement for OpenBBEquityClient — same method signatures,
+ * but calls OpenTypeBB's executor instead of HTTP fetch.
+ */
+
+import { SDKBaseClient } from './base-client.js'
+import type {
+  EquityHistoricalData, EquityQuoteData, EquityPerformanceData,
+  EquitySearchData, EquityScreenerData, EquityInfoData, MarketSnapshotsData, HistoricalMarketCapData,
+  BalanceSheetData, BalanceSheetGrowthData, IncomeStatementData, IncomeStatementGrowthData,
+  CashFlowStatementData, CashFlowStatementGrowthData, FinancialRatiosData, KeyMetricsData,
+  HistoricalDividendsData, HistoricalEpsData, HistoricalEmployeesData, ExecutiveCompensationData,
+  CompanyFilingsData, HistoricalSplitsData, EarningsCallTranscriptData,
+  RevenueGeographicData, RevenueBusinessLineData, EsgScoreData,
+  CalendarIpoData, CalendarDividendData, CalendarSplitsData, CalendarEarningsData, EconomicCalendarData,
+  PriceTargetData, AnalystEstimatesData, PriceTargetConsensusData,
+  ForwardEbitdaEstimatesData, ForwardEpsEstimatesData,
+  EquityDiscoveryData, DiscoveryFilingsData, RecentPerformanceData,
+  InstitutionalOwnershipData, InsiderTradingData, ShareStatisticsData, GovernmentTradesData,
+  EquityPeersData,
+} from '@traderalice/opentypebb'
+
+export class SDKEquityClient extends SDKBaseClient {
+  // ==================== Price ====================
+
+  async getHistorical(params: Record<string, unknown>) {
+    return this.request<EquityHistoricalData>('/price/historical', params)
+  }
+
+  async getQuote(params: Record<string, unknown>) {
+    return this.request<EquityQuoteData>('/price/quote', params)
+  }
+
+  async getNBBO(params: Record<string, unknown>) {
+    return this.request('/price/nbbo', params)
+  }
+
+  async getPricePerformance(params: Record<string, unknown>) {
+    return this.request<EquityPerformanceData>('/price/performance', params)
+  }
+
+  // ==================== Info ====================
+
+  async search(params: Record<string, unknown>) {
+    return this.request<EquitySearchData>('/search', params)
+  }
+
+  async screener(params: Record<string, unknown>) {
+    return this.request<EquityScreenerData>('/screener', params)
+  }
+
+  async getProfile(params: Record<string, unknown>) {
+    return this.request<EquityInfoData>('/profile', params)
+  }
+
+  async getMarketSnapshots(params: Record<string, unknown> = {}) {
+    return this.request<MarketSnapshotsData>('/market_snapshots', params)
+  }
+
+  async getHistoricalMarketCap(params: Record<string, unknown>) {
+    return this.request<HistoricalMarketCapData>('/historical_market_cap', params)
+  }
+
+  // ==================== Fundamental ====================
+
+  async getBalanceSheet(params: Record<string, unknown>) {
+    return this.request<BalanceSheetData>('/fundamental/balance', params)
+  }
+
+  async getBalanceSheetGrowth(params: Record<string, unknown>) {
+    return this.request<BalanceSheetGrowthData>('/fundamental/balance_growth', params)
+  }
+
+  async getIncomeStatement(params: Record<string, unknown>) {
+    return this.request<IncomeStatementData>('/fundamental/income', params)
+  }
+
+  async getIncomeStatementGrowth(params: Record<string, unknown>) {
+    return this.request<IncomeStatementGrowthData>('/fundamental/income_growth', params)
+  }
+
+  async getCashFlow(params: Record<string, unknown>) {
+    return this.request<CashFlowStatementData>('/fundamental/cash', params)
+  }
+
+  async getCashFlowGrowth(params: Record<string, unknown>) {
+    return this.request<CashFlowStatementGrowthData>('/fundamental/cash_growth', params)
+  }
+
+  async getReportedFinancials(params: Record<string, unknown>) {
+    return this.request('/fundamental/reported_financials', params)
+  }
+
+  async getFinancialRatios(params: Record<string, unknown>) {
+    return this.request<FinancialRatiosData>('/fundamental/ratios', params)
+  }
+
+  async getKeyMetrics(params: Record<string, unknown>) {
+    return this.request<KeyMetricsData>('/fundamental/metrics', params)
+  }
+
+  async getDividends(params: Record<string, unknown>) {
+    return this.request<HistoricalDividendsData>('/fundamental/dividends', params)
+  }
+
+  async getEarningsHistory(params: Record<string, unknown>) {
+    return this.request<HistoricalEpsData>('/fundamental/historical_eps', params)
+  }
+
+  async getEmployeeCount(params: Record<string, unknown>) {
+    return this.request<HistoricalEmployeesData>('/fundamental/employee_count', params)
+  }
+
+  async getManagement(params: Record<string, unknown>) {
+    return this.request('/fundamental/management', params)
+  }
+
+  async getManagementCompensation(params: Record<string, unknown>) {
+    return this.request<ExecutiveCompensationData>('/fundamental/management_compensation', params)
+  }
+
+  async getFilings(params: Record<string, unknown>) {
+    return this.request<CompanyFilingsData>('/fundamental/filings', params)
+  }
+
+  async getSplits(params: Record<string, unknown>) {
+    return this.request<HistoricalSplitsData>('/fundamental/historical_splits', params)
+  }
+
+  async getTranscript(params: Record<string, unknown>) {
+    return this.request<EarningsCallTranscriptData>('/fundamental/transcript', params)
+  }
+
+  async getTrailingDividendYield(params: Record<string, unknown>) {
+    return this.request('/fundamental/trailing_dividend_yield', params)
+  }
+
+  async getRevenuePerGeography(params: Record<string, unknown>) {
+    return this.request<RevenueGeographicData>('/fundamental/revenue_per_geography', params)
+  }
+
+  async getRevenuePerSegment(params: Record<string, unknown>) {
+    return this.request<RevenueBusinessLineData>('/fundamental/revenue_per_segment', params)
+  }
+
+  async getEsgScore(params: Record<string, unknown>) {
+    return this.request<EsgScoreData>('/fundamental/esg_score', params)
+  }
+
+  async getSearchAttributes(params: Record<string, unknown>) {
+    return this.request('/fundamental/search_attributes', params)
+  }
+
+  async getLatestAttributes(params: Record<string, unknown>) {
+    return this.request('/fundamental/latest_attributes', params)
+  }
+
+  async getHistoricalAttributes(params: Record<string, unknown>) {
+    return this.request('/fundamental/historical_attributes', params)
+  }
+
+  // ==================== Calendar ====================
+
+  async getCalendarIpo(params: Record<string, unknown> = {}) {
+    return this.request<CalendarIpoData>('/calendar/ipo', params)
+  }
+
+  async getCalendarDividend(params: Record<string, unknown> = {}) {
+    return this.request<CalendarDividendData>('/calendar/dividend', params)
+  }
+
+  async getCalendarSplits(params: Record<string, unknown> = {}) {
+    return this.request<CalendarSplitsData>('/calendar/splits', params)
+  }
+
+  async getCalendarEarnings(params: Record<string, unknown> = {}) {
+    return this.request<CalendarEarningsData>('/calendar/earnings', params)
+  }
+
+  async getCalendarEvents(params: Record<string, unknown> = {}) {
+    return this.request<EconomicCalendarData>('/calendar/events', params)
+  }
+
+  // ==================== Estimates ====================
+
+  async getPriceTarget(params: Record<string, unknown>) {
+    return this.request<PriceTargetData>('/estimates/price_target', params)
+  }
+
+  async getAnalystEstimates(params: Record<string, unknown>) {
+    return this.request<AnalystEstimatesData>('/estimates/historical', params)
+  }
+
+  async getEstimateConsensus(params: Record<string, unknown>) {
+    return this.request<PriceTargetConsensusData>('/estimates/consensus', params)
+  }
+
+  async getAnalystSearch(params: Record<string, unknown>) {
+    return this.request('/estimates/analyst_search', params)
+  }
+
+  async getForwardSales(params: Record<string, unknown>) {
+    return this.request('/estimates/forward_sales', params)
+  }
+
+  async getForwardEbitda(params: Record<string, unknown>) {
+    return this.request<ForwardEbitdaEstimatesData>('/estimates/forward_ebitda', params)
+  }
+
+  async getForwardEps(params: Record<string, unknown>) {
+    return this.request<ForwardEpsEstimatesData>('/estimates/forward_eps', params)
+  }
+
+  async getForwardPe(params: Record<string, unknown>) {
+    return this.request('/estimates/forward_pe', params)
+  }
+
+  // ==================== Discovery ====================
+
+  async getGainers(params: Record<string, unknown> = {}) {
+    return this.request<EquityDiscoveryData>('/discovery/gainers', params)
+  }
+
+  async getLosers(params: Record<string, unknown> = {}) {
+    return this.request<EquityDiscoveryData>('/discovery/losers', params)
+  }
+
+  async getActive(params: Record<string, unknown> = {}) {
+    return this.request<EquityDiscoveryData>('/discovery/active', params)
+  }
+
+  async getUndervaluedLargeCaps(params: Record<string, unknown> = {}) {
+    return this.request<EquityDiscoveryData>('/discovery/undervalued_large_caps', params)
+  }
+
+  async getUndervaluedGrowth(params: Record<string, unknown> = {}) {
+    return this.request<EquityDiscoveryData>('/discovery/undervalued_growth', params)
+  }
+
+  async getAggressiveSmallCaps(params: Record<string, unknown> = {}) {
+    return this.request<EquityDiscoveryData>('/discovery/aggressive_small_caps', params)
+  }
+
+  async getGrowthTech(params: Record<string, unknown> = {}) {
+    return this.request<EquityDiscoveryData>('/discovery/growth_tech', params)
+  }
+
+  async getTopRetail(params: Record<string, unknown> = {}) {
+    return this.request<EquityDiscoveryData>('/discovery/top_retail', params)
+  }
+
+  async getDiscoveryFilings(params: Record<string, unknown> = {}) {
+    return this.request<DiscoveryFilingsData>('/discovery/filings', params)
+  }
+
+  async getLatestFinancialReports(params: Record<string, unknown> = {}) {
+    return this.request<RecentPerformanceData>('/discovery/latest_financial_reports', params)
+  }
+
+  // ==================== Ownership ====================
+
+  async getMajorHolders(params: Record<string, unknown>) {
+    return this.request('/ownership/major_holders', params)
+  }
+
+  async getInstitutional(params: Record<string, unknown>) {
+    return this.request<InstitutionalOwnershipData>('/ownership/institutional', params)
+  }
+
+  async getInsiderTrading(params: Record<string, unknown>) {
+    return this.request<InsiderTradingData>('/ownership/insider_trading', params)
+  }
+
+  async getShareStatistics(params: Record<string, unknown>) {
+    return this.request<ShareStatisticsData>('/ownership/share_statistics', params)
+  }
+
+  async getForm13F(params: Record<string, unknown>) {
+    return this.request('/ownership/form_13f', params)
+  }
+
+  async getGovernmentTrades(params: Record<string, unknown> = {}) {
+    return this.request<GovernmentTradesData>('/ownership/government_trades', params)
+  }
+
+  // ==================== Shorts ====================
+
+  async getFailsToDeliver(params: Record<string, unknown>) {
+    return this.request('/shorts/fails_to_deliver', params)
+  }
+
+  async getShortVolume(params: Record<string, unknown>) {
+    return this.request('/shorts/short_volume', params)
+  }
+
+  async getShortInterest(params: Record<string, unknown>) {
+    return this.request('/shorts/short_interest', params)
+  }
+
+  // ==================== Compare ====================
+
+  async getPeers(params: Record<string, unknown>) {
+    return this.request<EquityPeersData>('/compare/peers', params)
+  }
+
+  async getCompareGroups(params: Record<string, unknown> = {}) {
+    return this.request('/compare/groups', params)
+  }
+
+  async getCompareCompanyFacts(params: Record<string, unknown>) {
+    return this.request('/compare/company_facts', params)
+  }
+
+  // ==================== DarkPool ====================
+
+  async getOtc(params: Record<string, unknown>) {
+    return this.request('/darkpool/otc', params)
+  }
+}

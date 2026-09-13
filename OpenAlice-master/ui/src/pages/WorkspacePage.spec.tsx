@@ -1,0 +1,209 @@
+// @vitest-environment jsdom
+
+import { cleanup, render, screen } from '@testing-library/react'
+import type { ReactNode } from 'react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import '../i18n'
+import type { Workspace } from '../components/workspace/api'
+import { HarnessWorkbenchContext } from '../components/harness/context'
+import { WorkspacePage } from './WorkspacePage'
+
+const mocks = vi.hoisted(() => ({
+  openOrFocus: vi.fn(),
+  spawn: vi.fn(),
+  openAgentConfig: vi.fn(),
+  resumeSession: vi.fn(),
+  openWebSession: vi.fn(),
+  refresh: vi.fn(),
+  workspaceViewProps: vi.fn(),
+  workspaces: [] as Workspace[],
+}))
+
+vi.mock('../contexts/workspaces-context', () => ({
+  useWorkspaces: () => ({
+    workspaces: mocks.workspaces,
+    defaultAgent: 'codex',
+    agents: [{ id: 'codex', kind: 'agent' }, { id: 'pi', kind: 'agent' }],
+    spawn: mocks.spawn,
+    openAgentConfig: mocks.openAgentConfig,
+    resumeSession: mocks.resumeSession,
+    openWebSession: mocks.openWebSession,
+    refresh: mocks.refresh,
+  }),
+}))
+
+vi.mock('../tabs/store', () => ({
+  useWorkspace: (
+    selector: (state: { openOrFocus: typeof mocks.openOrFocus }) => unknown,
+  ) => selector({ openOrFocus: mocks.openOrFocus }),
+}))
+
+vi.mock('./ChatLandingPage', () => ({
+  HarnessLandingPage: (props: { mode: string; spec: { params: { targetWsId: string } } }) =>
+    <div data-testid="new-conversation" data-mode={props.mode} data-workspace={props.spec.params.targetWsId} />,
+}))
+
+vi.mock('../components/workspace/WorkspaceView', () => ({
+  WorkspaceView: (props: { label?: string; terminalHeaderActions?: ReactNode }) => {
+    mocks.workspaceViewProps(props)
+    return (
+      <div data-testid="workspace-view" data-label={props.label}>
+        {props.terminalHeaderActions}
+      </div>
+    )
+  },
+}))
+
+vi.mock('../components/workspace/WorkspaceFilesToggle', () => ({
+  WorkspaceFilesToggle: () => <button type="button">Files</button>,
+}))
+
+function workspace(overrides: Partial<Workspace> = {}): Workspace {
+  return {
+    id: 'chat-1',
+    tag: 'chat-jun30',
+    dir: '/tmp/chat-jun30',
+    createdAt: '2026-06-30T00:00:00.000Z',
+    sessions: [],
+    ...overrides,
+  }
+}
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  mocks.workspaces = [workspace({ displayName: 'Optical Networking Follow-up' })]
+})
+
+afterEach(cleanup)
+
+describe('WorkspacePage identity', () => {
+  it('uses the Workspace runtime ahead of the installation fallback for a fresh Session', () => {
+    mocks.workspaces = [workspace({ defaultAgent: 'pi' })]
+    render(
+      <WorkspacePage
+        spec={{ kind: 'workspace', params: { wsId: 'chat-1' } }}
+        visible
+      />,
+    )
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 't', metaKey: true, bubbles: true }))
+    expect(mocks.spawn).toHaveBeenCalledWith('chat-1', { agent: 'pi' }, undefined)
+  })
+
+  it('keeps the user-defined Workspace name primary in the header and runtime label', () => {
+    render(
+      <WorkspacePage
+        spec={{ kind: 'workspace', params: { wsId: 'chat-1' } }}
+        visible
+      />,
+    )
+
+    const workspaceName = screen.getByText('Optical Networking Follow-up')
+    const identity = workspaceName.parentElement
+    expect(identity?.getAttribute('title')).toBe('Optical Networking Follow-up\nchat-jun30')
+    expect(identity?.textContent).toContain('Optical Networking Follow-up')
+    expect(identity?.textContent).toContain('chat-jun30')
+    expect(screen.getByTestId('new-conversation').getAttribute('data-workspace')).toBe('chat-1')
+  })
+
+  it('falls back to the stable tag when no display name is configured', () => {
+    mocks.workspaces = [workspace({ displayName: '   ' })]
+
+    render(
+      <WorkspacePage
+        spec={{ kind: 'workspace', params: { wsId: 'chat-1' } }}
+        visible
+      />,
+    )
+
+    expect(screen.getByTitle('chat-jun30').textContent).toBe('chat-jun30')
+    expect(screen.getByTestId('new-conversation').getAttribute('data-workspace')).toBe('chat-1')
+  })
+
+  it.each(['chat', 'auto-quant', 'prediction'] as const)('uses the targeted %s composer when no Session is pinned', (source) => {
+    render(<WorkspacePage spec={{ kind: 'workspace', params: { wsId: 'chat-1', source } }} visible />)
+    const composer = screen.getByTestId('new-conversation')
+    expect(composer.getAttribute('data-mode')).toBe(source)
+    expect(composer.getAttribute('data-workspace')).toBe('chat-1')
+    expect(screen.queryByTestId('workspace-view')).toBeNull()
+    expect(mocks.spawn).not.toHaveBeenCalled()
+  })
+
+  it('promotes Workspace actions into the running terminal canvas', () => {
+    mocks.workspaces = [workspace({
+      sessions: [{
+        id: 'shell-session',
+        resumeId: 'resume-shell',
+        wsId: 'chat-1',
+        agent: 'shell',
+        name: 'sh1',
+        createdAt: '2026-07-31T00:00:00.000Z',
+        lastActiveAt: '2026-07-31T00:00:00.000Z',
+        state: 'running',
+        surface: 'terminal',
+        pid: 42,
+        startedAt: 42,
+        title: null,
+      }],
+    })]
+
+    const { container } = render(
+      <WorkspacePage
+        spec={{ kind: 'workspace', params: { wsId: 'chat-1', sessionId: 'shell-session' } }}
+        visible
+      />,
+    )
+
+    expect(container.querySelector('.workspace-page-shell')?.classList.contains('is-terminal-canvas'))
+      .toBe(true)
+    expect(screen.getByRole('button', { name: 'Files' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Settings' })).toBeTruthy()
+    expect(mocks.workspaceViewProps).toHaveBeenCalledWith(expect.objectContaining({
+      terminalHeaderActions: expect.anything(),
+    }))
+  })
+
+  it('lets a paused TUI handoff own the pane without removing the page header', () => {
+    mocks.workspaces = [workspace({
+      displayName: 'Optical Networking Follow-up',
+      sessions: [{
+        id: 'paused-session',
+        resumeId: 'resume-paused',
+        wsId: 'chat-1',
+        agent: 'codex',
+        name: 'x4',
+        createdAt: '2026-07-31T00:00:00.000Z',
+        lastActiveAt: '2026-07-31T00:00:00.000Z',
+        state: 'paused',
+        surface: 'terminal',
+        pid: null,
+        startedAt: null,
+        title: null,
+      }],
+    })]
+
+    const { container } = render(
+      <WorkspacePage
+        spec={{ kind: 'workspace', params: { wsId: 'chat-1', sessionId: 'paused-session' } }}
+        visible
+      />,
+    )
+
+    const shell = container.querySelector('.workspace-page-shell')
+    expect(shell?.classList.contains('is-paused-canvas')).toBe(true)
+    expect(shell?.classList.contains('is-terminal-canvas')).toBe(false)
+    expect(screen.getByText('Optical Networking Follow-up').parentElement?.getAttribute('title'))
+      .toBe('Optical Networking Follow-up\nchat-jun30')
+    expect(screen.getByRole('button', { name: 'Files' })).toBeTruthy()
+  })
+})
+
+it('leaves only the panel entry in the Harness header', () => {
+  render(<HarnessWorkbenchContext.Provider value={{ wsId: 'chat-1', open: false, toggle: vi.fn() }}>
+    <WorkspacePage spec={{ kind: 'workspace', params: { wsId: 'chat-1', source: 'chat' } }} visible />
+  </HarnessWorkbenchContext.Provider>)
+  expect(screen.getByRole('button', { name: 'Files' })).toBeTruthy()
+  expect(screen.queryByRole('button', { name: 'Settings' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Web Beta' })).toBeNull()
+})

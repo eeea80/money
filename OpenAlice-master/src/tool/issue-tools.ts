@@ -1,0 +1,802 @@
+/**
+ * Issue tools — the agent-facing surface over a workspace's own issue board.
+ *
+ * These are **workspace-scoped tool factories** (same shape as inbox_push /
+ * entity_upsert): the agent sees a schema WITHOUT any `wsId`, and the workspace
+ * identity is closed over by the factory from the gateway URL (`/cli/:wsId` or
+ * `/mcp/:wsId`). Registering each factory once makes it reachable via BOTH the
+ * `alice issue …` CLI (the primary agent surface) AND MCP (one
+ * adapter) for free — the gateway builds and dispatches both through the same
+ * WorkspaceToolCenter.
+ *
+ * Every tool resolves THIS workspace's checkout dir (`resolveWorkspace(self)`)
+ * and goes through the single read-modify-write seam in
+ * `../workspaces/issues/mutate.ts` (shared with the human/UI HTTP routes) or the
+ * live reader in `../workspaces/issues/declaration.ts`. The issue file
+ * (`.alice/issues/<id>.md`, YAML frontmatter + canonical markdown What) is the single
+ * source of truth; writes are working-tree only (no auto-commit).
+ *
+ * Comments are signed from authoritative run/session provenance (`@resumeId`)
+ * when available, with `ws:<workspaceLabel>` only as an unattributed fallback.
+ * The agent never supplies that identity as a tool argument.
+ */
+
+import { join } from 'node:path'
+import { awaitConversationTask, taskProjection } from './conversation.js'
+
+import { tool } from 'ai'
+import { z } from 'zod'
+
+import { MODEL_REASONING_EFFORTS } from '../ai-providers/model-semantics.js'
+import type { WorkspaceToolFactory, WorkspaceToolContext } from '../core/workspace-tool-center.js'
+import {
+  ACTIVITY_UPDATE_COALESCE_MS,
+  sessionOriginFromInboxOrigin,
+  type ProvenanceAction,
+} from '../core/provenance-store.js'
+import { readWorkspaceFile } from '../workspaces/file-service.js'
+import {
+  ISSUES_DIR_REL,
+  ISSUE_PRIORITIES,
+  ISSUE_STATUSES,
+  ISSUE_TIMEOUTS,
+  issueAssigneeResumeId,
+  issueAssigneeSchema,
+  issueWhenSchema,
+  parseIssueContent,
+  readWorkspaceIssues,
+  type IssueRecord,
+} from '../workspaces/issues/declaration.js'
+import {
+  appendIssueComment,
+  createIssue,
+  updateIssueFields,
+} from '../workspaces/issues/mutate.js'
+import {
+  readIssueComments,
+  updateIssueCommentDelivery,
+  type IssueComment,
+} from '../workspaces/issues/comments.js'
+import { dispatchIssueCommentReply } from '../workspaces/issues/comment-delivery.js'
+import { deskProgressScope, projectDeskComment } from '../workspaces/issues/telegram-desk-project.js'
+import { issueMutation, issueMutationFingerprint } from '../workspaces/issues/change-tracker.js'
+import {
+  NEW_THEN_RESUME_ASSIGNEE,
+  UNASSIGNED_ASSIGNEE,
+  deprecatedIssueAssigneeReplacement,
+  normalizeIssueAssigneeAlias,
+  sessionSignature,
+} from '../workspaces/session-signature.js'
+import {
+  flattenBoardRows,
+  type BoardInvalidWorkspace,
+  type BoardRow,
+} from '../workspaces/issues/board.js'
+
+/** Resolve THIS workspace's absolute checkout dir, or a clean error. */
+function selfDir(ctx: WorkspaceToolContext): { ok: true; dir: string } | { ok: false; error: string } {
+  const resolve = ctx.resolveWorkspace
+  if (!resolve) return { ok: false, error: 'workspace resolution is unavailable in this context' }
+  const meta = resolve(ctx.workspaceId)
+  if (!meta) return { ok: false, error: `cannot locate this workspace (${ctx.workspaceId})` }
+  return { ok: true, dir: meta.dir }
+}
+
+/**
+ * A durable Workspace can carry an older copy of the injected skill manual.
+ * Keep the live CLI error self-correcting: if a local write misses but the
+ * global board knows the Issue, explain the collaboration action instead of
+ * leaving the agent to guess that `comment` might message a peer.
+ */
+async function remoteIssueWriteHint(ctx: WorkspaceToolContext, id: string): Promise<string> {
+  if (!ctx.board) return ''
+  try {
+    const refs = await ctx.board.resolveByName(id)
+    const remote = refs.filter((ref) => ref.wsId !== ctx.workspaceId)
+    if (remote.length === 0) return ''
+    if (remote.length > 1) {
+      const labels = remote.map((ref) => `${ref.wsTag}/${ref.id}`).join(', ')
+      return `; global matches exist in other workspaces (${labels}). This command writes only this workspace. Inspect with issue show; to contact a responsible Session use issue ask with an unambiguous Issue name.`
+    }
+    const [ref] = remote
+    return `; a global match belongs to ${ref.wsTag}/${ref.id}. This command writes only this workspace. To get an answer from its responsible Session, use issue ask --id ${JSON.stringify(ref.id)} --owner --prompt <question> --await.`
+  } catch {
+    // The original local-write failure is still useful. Board lookup is an
+    // optional diagnostic and must never turn a clean tool error into a throw.
+    return ''
+  }
+}
+
+const issueAssigneeInputSchema = z.string().min(1).refine(
+  (value) => value.toLowerCase() === '@me'
+    || deprecatedIssueAssigneeReplacement(value) !== null
+    || issueAssigneeSchema.safeParse(normalizeIssueAssigneeAlias(value)).success,
+  'assignee must be @me, @new-each-run, @new-then-resume, @human, @unassigned, or an exact @resumeId',
+)
+
+function resolveIssueAssignee(
+  ctx: WorkspaceToolContext,
+  requested: string | undefined,
+): { ok: true; assignee?: string } | { ok: false; error: string } {
+  if (!requested) return { ok: true }
+  const isMe = requested.toLowerCase() === '@me'
+  const selfResumeId = isMe
+    ? sessionOriginFromInboxOrigin(ctx.workspaceId, ctx.origin)?.resumeId
+    : undefined
+  if (isMe && !selfResumeId) {
+    return { ok: false, error: '@me needs an attributable product Session' }
+  }
+  const replacement = isMe ? null : deprecatedIssueAssigneeReplacement(requested)
+  if (replacement) {
+    return { ok: false, error: `${requested} is deprecated; use ${replacement}` }
+  }
+  const assignee = isMe ? sessionSignature(selfResumeId!) : normalizeIssueAssigneeAlias(requested)
+  const parsed = issueAssigneeSchema.safeParse(assignee)
+  if (!parsed.success) return { ok: false, error: 'invalid assignee' }
+  const resumeId = issueAssigneeResumeId(parsed.data)
+  if (!resumeId) return { ok: true, assignee: parsed.data }
+  const identity = ctx.resolveSessionIdentity?.(resumeId)
+  if (ctx.resolveSessionIdentity && !identity) {
+    return { ok: false, error: `unknown product Session: ${resumeId}` }
+  }
+  if (identity && !identity.resumable) {
+    return {
+      ok: false,
+      error: `product Session ${resumeId} is not resumable yet; complete one agent turn before assigning it`,
+    }
+  }
+  return { ok: true, assignee: parsed.data }
+}
+
+/**
+ * "Who creates it owns it" only applies when the caller is an actual product
+ * Session that Alice can resume. Shell PTYs also carry an interactive
+ * SessionRecord/resumeId for terminal bookkeeping, but they have no native
+ * Agent Runtime conversation to continue. Treating those as owners creates an
+ * Issue that cannot ever run; an omitted owner therefore falls back to
+ * `@new-then-resume` for scheduled work and `@unassigned` for a plain board item, while an
+ * explicit `@me` remains a strict validation error.
+ *
+ * Older/test contexts may not expose the identity resolver. Preserve their
+ * attributable-session behavior; production always supplies the resolver.
+ */
+function defaultIssueAssignee(ctx: WorkspaceToolContext, scheduled: boolean): string {
+  const fallback = scheduled ? NEW_THEN_RESUME_ASSIGNEE : UNASSIGNED_ASSIGNEE
+  const origin = sessionOriginFromInboxOrigin(ctx.workspaceId, ctx.origin)
+  if (!origin) return fallback
+  if (!ctx.resolveSessionIdentity) return '@me'
+  return ctx.resolveSessionIdentity(origin.resumeId)?.resumable
+    ? '@me'
+    : fallback
+}
+
+/** Prefer the signed product Session; fall back only for unattributed shells. */
+function commentAuthor(ctx: WorkspaceToolContext): string {
+  const origin = sessionOriginFromInboxOrigin(ctx.workspaceId, ctx.origin)
+  return origin ? sessionSignature(origin.resumeId) : `ws:${ctx.workspaceLabel}`
+}
+
+async function recordIssueProvenance(
+  ctx: WorkspaceToolContext,
+  issueId: string,
+  action: Extract<ProvenanceAction, 'created' | 'updated' | 'commented'>,
+  mutationInput?: { before: IssueRecord; after: IssueRecord },
+): Promise<void> {
+  if (!ctx.provenanceStore) return
+  const origin = sessionOriginFromInboxOrigin(ctx.workspaceId, ctx.origin) ?? {
+    kind: 'unknown' as const,
+    reason: 'missing-session-origin',
+  }
+  const mutation = mutationInput
+    ? issueMutation(mutationInput.before, mutationInput.after)
+    : null
+  const input = {
+    artifact: { kind: 'issue' as const, workspaceId: ctx.workspaceId, issueId },
+    action,
+    origin,
+    at: Date.now(),
+    ...(action === 'created' ? { fingerprint: `issue:${ctx.workspaceId}:${issueId}:created` } : {}),
+    ...(mutationInput && mutation ? {
+      mutation,
+      fingerprint: issueMutationFingerprint(ctx.workspaceId, issueId, mutationInput.after),
+    } : {}),
+  }
+  if (action === 'updated') {
+    await ctx.provenanceStore.append(input, { coalesceWithinMs: ACTIVITY_UPDATE_COALESCE_MS })
+  } else {
+    await ctx.provenanceStore.append(input)
+  }
+}
+
+/** Project a full IssueRecord into the compact row the tools return. */
+function rowOf(issue: IssueRecord) {
+  return {
+    id: issue.id,
+    title: issue.title,
+    status: issue.status,
+    priority: issue.priority,
+    assignee: issue.assignee,
+    ...(issue.agent ? { agent: issue.agent } : {}),
+    ...(issue.credential ? { credential: issue.credential } : {}),
+    ...(issue.credentialSource ? { credentialSource: issue.credentialSource } : {}),
+    ...(issue.model ? { model: issue.model } : {}),
+    ...(issue.effort ? { effort: issue.effort } : {}),
+    ...(issue.timeout ? { timeout: issue.timeout } : {}),
+    ...(issue.commentPrompt ? { commentPrompt: issue.commentPrompt } : {}),
+    scheduled: issue.when !== undefined,
+  }
+}
+
+const ISSUE_LIST_DEFAULT_LIMIT = 8
+const ISSUE_LIST_MAX_LIMIT = 50
+const ISSUE_LIST_FOCUS_PRIORITIES = new Set(['urgent', 'high', 'medium'])
+const TERMINAL_STATUSES = new Set(['done', 'canceled'])
+const PRIORITY_RANK: Record<string, number> = {
+  urgent: 0,
+  high: 1,
+  medium: 2,
+  low: 3,
+  none: 4,
+}
+const STATUS_RANK: Record<string, number> = {
+  in_progress: 0,
+  todo: 1,
+  backlog: 2,
+  done: 3,
+  canceled: 4,
+}
+
+function compareIssueRows(a: BoardRow, b: BoardRow): number {
+  return (
+    (PRIORITY_RANK[a.priority] ?? 99) - (PRIORITY_RANK[b.priority] ?? 99) ||
+    (STATUS_RANK[a.status] ?? 99) - (STATUS_RANK[b.status] ?? 99) ||
+    Number(a.scheduled) - Number(b.scheduled) ||
+    a.workspace.tag.localeCompare(b.workspace.tag) ||
+    a.id.localeCompare(b.id)
+  )
+}
+
+function summarizeIssueRows(
+  rows: BoardRow[],
+  invalid: BoardInvalidWorkspace[],
+  selfWsId: string,
+  limit: number,
+) {
+  const active = rows.filter((row) => !TERMINAL_STATUSES.has(row.status))
+  const focus = active
+    .filter((row) => row.workspace.wsId === selfWsId || ISSUE_LIST_FOCUS_PRIORITIES.has(row.priority))
+    .sort(compareIssueRows)
+    .slice(0, limit)
+
+  const visibleKeys = new Set(focus.map((row) => `${row.workspace.wsId}/${row.id}`))
+  const hiddenActive = active.filter((row) => !visibleKeys.has(`${row.workspace.wsId}/${row.id}`))
+  const hiddenLowPriority = hiddenActive.filter((row) => !ISSUE_LIST_FOCUS_PRIORITIES.has(row.priority)).length
+  const hiddenOverflow = Math.max(0, active.length - focus.length - hiddenLowPriority)
+  const terminal = rows.length - active.length
+
+  return {
+    ok: true as const,
+    mode: 'summary' as const,
+    summary: {
+      total: rows.length,
+      focus: focus.length,
+      hiddenActive: hiddenActive.length,
+      hiddenLowPriority,
+      hiddenOverflow,
+      terminal,
+      invalid: invalid.length,
+    },
+    issues: focus.map((row) => ({
+      id: row.id,
+      title: row.title,
+      status: row.status,
+      priority: row.priority,
+      assignee: row.assignee,
+      scheduled: row.scheduled,
+      workspace: row.workspace.tag,
+      ...(row.nameCollision ? { nameCollision: true as const } : {}),
+    })),
+    invalid: invalid.map((row) => ({
+      workspace: row.tag,
+      ...(row.error ? { error: row.error } : {}),
+    })),
+    hint:
+      'Summary shows local issues plus active urgent/high/medium rows. Use `alice issue list --mode detailed` for the full board, then `alice issue show --id <id>` before acting.',
+  }
+}
+
+// ==================== issue_update ====================
+
+export const issueUpdateFactory: WorkspaceToolFactory = {
+  name: 'issue_update',
+  build(ctx: WorkspaceToolContext) {
+    return tool({
+      description: [
+        "Update one of THIS workspace's issues — its board fields.",
+        '',
+        'Patch any subset of `status`, `priority`, `assignee`, `agent`, `credential`, `credentialSource`, `model`,',
+        '`effort`, `timeout`, `what`, or `commentPrompt`; omitted fields are',
+        'left untouched. `assignee:"@me"` binds this current product',
+        'Session; `@new-then-resume` recruits once and assigns that first Session permanently;',
+        'pass an exact `@resumeId` to assign another known Session. What is the',
+        'canonical markdown work definition and exact scheduled prompt. `commentPrompt` is the',
+        'template for the comment-reply Input Prompt (`{comment}` required; null restores the',
+        'default wrapper). `timeout` is an optional',
+        'scheduled-run watchdog (`15m`/`30m`/`45m`/`60m`); omit or null means no limit. Other',
+        'schedule timing (`when`) is preserved — edit it by writing the file directly',
+        '(`.alice/issues/<id>.md`).',
+        '',
+        'Marking an issue `done` or `canceled` is how a self-scheduled issue is',
+        'turned off — there is no separate enabled flag.',
+      ].join('\n'),
+      inputSchema: z.object({
+        id: z.string().min(1).describe('The issue id (the filename stem of `.alice/issues/<id>.md`).'),
+        status: z.enum(ISSUE_STATUSES).optional().describe('New status.'),
+        priority: z.enum(ISSUE_PRIORITIES).optional().describe('New priority.'),
+        assignee: issueAssigneeInputSchema
+          .optional()
+          .describe('@new-each-run, @new-then-resume, @human, @unassigned, @me, or an exact @resumeId.'),
+        agent: z.string().min(1).nullable().optional().describe('Runtime id for @new-each-run/@new-then-resume; null inherits the Workspace default.'),
+        credential: z.string().min(1).nullable().optional().describe('OpenAlice vault slug for the fresh Session; null inherits Workspace/native auth.'),
+        credentialSource: z.literal('native').nullable().optional().describe('Use the Agent runtime login explicitly; null inherits the Workspace headless preference.'),
+        model: z.string().min(1).nullable().optional().describe('Native one-run model id; null inherits the Workspace/runtime default.'),
+        effort: z.enum(MODEL_REASONING_EFFORTS).nullable().optional().describe('One-run reasoning effort; null inherits the Workspace/runtime default.'),
+        timeout: z.enum(ISSUE_TIMEOUTS).nullable().optional().describe('Optional scheduled-run watchdog; null removes the limit so the agent may run until it exits.'),
+        what: z.string().min(1).optional().describe('Canonical markdown work definition; exact scheduled prompt.'),
+        commentPrompt: z.string().nullable().optional().describe('Comment-reply Input Prompt template. Must include {comment}. Null restores the default wrapper.'),
+      }),
+      execute: async ({ id, status, priority, assignee, agent, credential, credentialSource, model, effort, timeout, what, commentPrompt }) => {
+        const dir = selfDir(ctx)
+        if (!dir.ok) return { ok: false as const, error: dir.error }
+        const resolvedAssignee = resolveIssueAssignee(ctx, assignee)
+        if (!resolvedAssignee.ok) return { ok: false as const, error: resolvedAssignee.error }
+        if (
+          status === undefined &&
+          priority === undefined &&
+          resolvedAssignee.assignee === undefined &&
+          agent === undefined &&
+          credential === undefined &&
+          credentialSource === undefined &&
+          model === undefined &&
+          effort === undefined &&
+          timeout === undefined &&
+          what === undefined &&
+          commentPrompt === undefined
+        ) {
+          return {
+            ok: false as const,
+            error: 'no fields to update (pass status/priority/assignee/agent/credential/credentialSource/model/effort/timeout/what/commentPrompt)',
+          }
+        }
+        const res = await updateIssueFields(dir.dir, id, {
+          status,
+          priority,
+          assignee: resolvedAssignee.assignee,
+          agent,
+          credential,
+          credentialSource,
+          model,
+          effort,
+          timeout,
+          what,
+          commentPrompt,
+        })
+        if (res.ok) {
+          await recordIssueProvenance(ctx, res.issue.id, 'updated', {
+            before: res.previous,
+            after: res.issue,
+          })
+          return { ok: true as const, issue: rowOf(res.issue) }
+        }
+        if (res.reason === 'not_found') {
+          const remoteHint = await remoteIssueWriteHint(ctx, id)
+          return { ok: false as const, error: `no such issue in this workspace: ${id}${remoteHint}` }
+        }
+        return { ok: false as const, error: res.error }
+      },
+    })
+  },
+}
+
+// ==================== issue_comment ====================
+
+export const issueCommentFactory: WorkspaceToolFactory = {
+  name: 'issue_comment',
+  build(ctx: WorkspaceToolContext) {
+    return tool({
+      description: [
+        "Append a comment to one of THIS workspace's issues.",
+        '',
+        'The markdown comment is appended to the Issue’s structured JSON sidecar,',
+        'signed by the current product Session when available. It never mutates',
+        'the canonical What or changes the next scheduled prompt. If the Issue',
+        'has a different fixed @resumeId owner, OpenAlice asks that Session in',
+        'the background and records its final reply in Activity. Human comments',
+        'without a fixed owner ask the creator or a reconstructed Workspace Agent.',
+        'Agent-authored comments without a fixed owner remain durable notes.',
+      ].join('\n'),
+      inputSchema: z.object({
+        id: z.string().min(1).describe('The issue id to comment on.'),
+        text: z.string().min(1).describe('The comment text (markdown).'),
+      }),
+      execute: async ({ id, text }) => {
+        const dir = selfDir(ctx)
+        if (!dir.ok) return { ok: false as const, error: dir.error }
+        const origin = sessionOriginFromInboxOrigin(ctx.workspaceId, ctx.origin)
+        const res = await appendIssueComment(dir.dir, id, commentAuthor(ctx), text)
+        if (res.ok) {
+          await recordIssueProvenance(ctx, res.issue.id, 'commented')
+          const dispatched = await dispatchIssueCommentReply({
+            conversation: ctx.conversation,
+            issueWorkspaceId: ctx.workspaceId,
+            issue: res.issue,
+            comment: res.comment,
+            ...(origin ? { authorResumeId: origin.resumeId } : {}),
+            source: origin ?? { kind: 'workspace', workspaceId: ctx.workspaceId },
+          })
+          const run = ctx.callerRun
+          const scope = run ? deskProgressScope(run) : null
+          await projectDeskComment(res.issue, res.comment, undefined, {
+            workspaceId: ctx.workspaceId,
+            ...(scope?.workspaceId === ctx.workspaceId && scope.issueId === id
+              ? { progressScopeId: scope.scopeId } : {}),
+            automated: run?.trigger?.kind === 'issue',
+            ...(run?.status === 'running' && scope?.workspaceId === ctx.workspaceId && scope.issueId === id
+              ? { phase: 'progress' as const } : {}),
+          }).catch(() => undefined)
+          if (dispatched.status !== 'not_requested') {
+            const updated = await updateIssueCommentDelivery(
+              dir.dir,
+              id,
+              res.comment.id,
+              dispatched.delivery,
+            )
+            if (!updated.ok) {
+              return {
+                ok: true as const,
+                issue: rowOf(res.issue),
+                delivery: {
+                  status: 'failed' as const,
+                  delivery: {
+                    state: 'failed' as const,
+                    ...(dispatched.delivery.targetResumeId
+                      ? { targetResumeId: dispatched.delivery.targetResumeId }
+                      : {}),
+                    ...(dispatched.delivery.taskId ? { taskId: dispatched.delivery.taskId } : {}),
+                    error: `Comment saved, but delivery state could not be recorded: ${updated.error}`,
+                  },
+                },
+              }
+            }
+          }
+          return { ok: true as const, issue: rowOf(res.issue), delivery: dispatched }
+        }
+        if (res.reason === 'not_found') {
+          const remoteHint = await remoteIssueWriteHint(ctx, id)
+          return { ok: false as const, error: `no such issue in this workspace: ${id}${remoteHint}` }
+        }
+        return { ok: false as const, error: res.error }
+      },
+    })
+  },
+}
+
+// ==================== issue_create ====================
+
+export const issueCreateFactory: WorkspaceToolFactory = {
+  name: 'issue_create',
+  build(ctx: WorkspaceToolContext) {
+    return tool({
+      description: [
+        'Create a new issue on THIS workspace’s board.',
+        '',
+        '`title` is required; `id` is optional (derived as a kebab slug from the',
+        'title when omitted). Creating over an existing id is refused — pick a',
+        'different id or update the existing one with issue_update.',
+        '',
+        'The markdown `what` is the Issue’s work definition. Add a `when` and',
+        'the scanner sends that exact visible What to the Agent Runtime; without',
+        '`when` the same What remains a pure board work item. Assignee is the',
+        'only ownership field:',
+        '`@new-then-resume` recruits once and keeps that first Session as owner. `@new-each-run`',
+        'recruits a new Session each fire. `@me` resolves to this',
+        'calling Session, while an exact `@resumeId` keeps one accountable',
+        'Session (including a deliberately signed Session from another Workspace).',
+        'When ownership is omitted, scheduled work defaults to `@new-then-resume`; an',
+        'unscheduled board item defaults to `@unassigned`. An attributable',
+        'resumable caller still owns the Issue as `@me`.',
+        'A scheduled run is unattended: if its result is meant for the human,',
+        'What must explicitly tell it to use `alice inbox push`.',
+      ].join('\n'),
+      inputSchema: z.object({
+        title: z.string().min(1).describe('Short human title (required).'),
+        id: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Explicit id (filename stem). Omit to derive a kebab slug from the title.'),
+        status: z.enum(ISSUE_STATUSES).optional().describe('Initial status (default "todo").'),
+        priority: z.enum(ISSUE_PRIORITIES).optional().describe('Initial priority (default "none").'),
+        assignee: issueAssigneeInputSchema
+          .optional()
+          .describe('Initial owner. Omitted scheduled work defaults to @new-then-resume; an attributable resumable caller defaults to @me. @new-each-run explicitly recruits a fresh Session each fire.'),
+        when: issueWhenSchema
+          .optional()
+          .describe('Schedule shape — { kind:"at", at } | { kind:"every", every } | { kind:"cron", cron, timezone?:"local"|IANA }. Present iff the issue self-schedules.'),
+        what: z.string().min(1).optional().describe('Markdown work definition; exact scheduled prompt. Defaults to title.'),
+        agent: z.string().min(1).optional().describe('Adapter id when assignee is @new-each-run or @new-then-resume; an exact Session owns its runtime.'),
+        credential: z.string().min(1).optional().describe('OpenAlice vault slug to freeze into the fresh Session binding.'),
+        credentialSource: z.literal('native').optional().describe('Use the Agent runtime login explicitly instead of inheriting Workspace access.'),
+        model: z.string().min(1).optional().describe('Native model id for the selected credential/runtime source.'),
+        effort: z.enum(MODEL_REASONING_EFFORTS).optional().describe('Reasoning effort for one scheduled run.'),
+        timeout: z.enum(ISSUE_TIMEOUTS).optional().describe('Optional scheduled-run watchdog (15m/30m/45m/60m). Omit for no limit.'),
+        commentPrompt: z.string().min(1).optional().describe('Comment-reply Input Prompt template. Must include {comment}. Omit for the default wrapper.'),
+      }),
+      execute: async ({ title, id, status, priority, assignee, when, what, agent, credential, credentialSource, model, effort, timeout, commentPrompt }) => {
+        const dir = selfDir(ctx)
+        if (!dir.ok) return { ok: false as const, error: dir.error }
+        // Structured creation is attributable: "who creates it owns it". A
+        // human/unattributed caller has no Session to sign with, so scheduled
+        // work recruits once while a plain board item remains Workspace-owned.
+        const defaultAssignee = defaultIssueAssignee(ctx, when !== undefined)
+        const resolvedAssignee = resolveIssueAssignee(ctx, assignee ?? defaultAssignee)
+        if (!resolvedAssignee.ok) return { ok: false as const, error: resolvedAssignee.error }
+        const res = await createIssue(dir.dir, {
+          title,
+          id,
+          status,
+          priority,
+          assignee: resolvedAssignee.assignee,
+          when,
+          what,
+          agent,
+          credential,
+          credentialSource,
+          model,
+          effort,
+          timeout,
+          commentPrompt,
+        })
+        if (res.ok) {
+          await recordIssueProvenance(ctx, res.issue.id, 'created')
+          return { ok: true as const, issue: rowOf(res.issue) }
+        }
+        if (res.reason === 'conflict') return { ok: false as const, error: `issue already exists: ${res.id}` }
+        return { ok: false as const, error: res.error }
+      },
+    })
+  },
+}
+
+// ==================== issue_list ====================
+
+export const issueListFactory: WorkspaceToolFactory = {
+  name: 'issue_list',
+  build(ctx: WorkspaceToolContext) {
+    return tool({
+      description: [
+        'List the issue board for agent startup.',
+        '',
+        'Default `summary` mode is intentionally small: it shows local issues',
+        'plus active urgent/high/medium rows from the global board, hiding',
+        'low-priority scheduled noise behind counts. Use `mode:"detailed"`',
+        'when you are deliberately auditing the whole board.',
+      ].join('\n'),
+      inputSchema: z.object({
+        mode: z
+          .enum(['summary', 'detailed'])
+          .optional()
+          .describe('summary (default) returns a short startup-safe focus list; detailed returns every row.'),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(ISSUE_LIST_MAX_LIMIT)
+          .optional()
+          .describe(`Max summary focus rows (default ${ISSUE_LIST_DEFAULT_LIMIT}; ignored in detailed mode).`),
+      }),
+      execute: async ({ mode, limit }) => {
+        // GLOBAL board when the service-backed reader is wired (the
+        // `alice` surface). Reads EVERY workspace's issues.
+        if (ctx.board) {
+          const snapshot = await ctx.board.snapshot()
+          const { rows, invalid } = flattenBoardRows(snapshot)
+          if (mode === 'detailed') {
+            return {
+              ok: true as const,
+              mode: 'detailed' as const,
+              count: rows.length,
+              issues: rows.sort(compareIssueRows),
+              invalid,
+            }
+          }
+          return summarizeIssueRows(
+            rows,
+            invalid,
+            ctx.workspaceId,
+            limit ?? ISSUE_LIST_DEFAULT_LIMIT,
+          )
+        }
+        // FALLBACK (no service: older contexts / unit tests): this workspace's
+        // own files only, preserving the original self-scoped behavior.
+        const dir = selfDir(ctx)
+        if (!dir.ok) return { ok: false as const, error: dir.error }
+        const res = await readWorkspaceIssues(dir.dir)
+        if (res.ok) {
+          const rows = res.issues.map((issue) => ({
+            ...rowOf(issue),
+            workspace: { wsId: ctx.workspaceId, tag: ctx.workspaceLabel },
+            ...(issue.when !== undefined ? { scheduled: true } : { scheduled: false }),
+          }))
+          if (mode === 'detailed') {
+            return { ok: true as const, mode: 'detailed' as const, count: rows.length, issues: rows, invalid: res.invalid }
+          }
+          return summarizeIssueRows(
+            rows,
+            res.invalid.map((invalid) => ({
+              wsId: ctx.workspaceId,
+              tag: ctx.workspaceLabel,
+              error: `${invalid.id}: ${invalid.error}`,
+            })),
+            ctx.workspaceId,
+            limit ?? ISSUE_LIST_DEFAULT_LIMIT,
+          )
+        }
+        if (res.reason === 'absent') {
+          return summarizeIssueRows([], [], ctx.workspaceId, limit ?? ISSUE_LIST_DEFAULT_LIMIT)
+        }
+        return { ok: false as const, error: res.error }
+      },
+    })
+  },
+}
+
+// ==================== issue_show ====================
+
+export const issueShowFactory: WorkspaceToolFactory = {
+  name: 'issue_show',
+  build(ctx: WorkspaceToolContext) {
+    return tool({
+      description: [
+        'Show one issue from the global board in full — resolved by its NAME',
+        '(case-insensitive id OR title), across every workspace.',
+        '',
+        'Summary mode (default) returns the issue once plus compact execution and',
+        'report references. Detailed mode includes each run prompt and full report.',
+        'If the name matches issues in MORE THAN ONE workspace, returns',
+        '`ambiguous` (candidate { wsId, wsTag, id, title } list) — pick one by',
+        'workspace and call again. Use this before updating or commenting.',
+      ].join('\n'),
+      inputSchema: z.object({
+        id: z.string().min(1).describe("The issue's name to show — its id OR title (case-insensitive)."),
+        mode: z.enum(['summary', 'detailed']).optional().default('summary'),
+      }),
+      execute: async ({ id, mode }) => {
+        const outputMode = mode ?? 'summary'
+        // GLOBAL by-name resolution when the service-backed reader is wired.
+        // Handle-addressed: the agent never supplies a wsId UUID up front; a
+        // collision returns candidates so it can disambiguate by workspace.
+        if (ctx.board) {
+          const refs = await ctx.board.resolveByName(id)
+          if (refs.length === 1) {
+            const detail = await ctx.board.detail(refs[0].wsId, refs[0].id)
+            if (detail) {
+              if (outputMode === 'detailed') return { ok: true as const, mode: outputMode, ...detail }
+              return {
+                ok: true as const,
+                mode: outputMode,
+                issue: detail.issue,
+                runs: detail.runs.map((run) => ({
+                  taskId: run.taskId,
+                  resumeId: run.resumeId,
+                  ...(run.parentTaskId ? { parentTaskId: run.parentTaskId } : {}),
+                  agent: run.agent,
+                  status: run.status,
+                  startedAt: run.startedAt,
+                  ...(run.durationMs !== undefined ? { durationMs: run.durationMs } : {}),
+                  ...(run.error ? { error: run.error } : {}),
+                  ...(run.output ? { output: run.output } : {}),
+                  resumable: run.resumable,
+                })),
+                inboxReports: detail.inboxReports.map((entry) => ({
+                  id: entry.id,
+                  workspaceId: entry.workspaceId,
+                  workspaceLabel: entry.workspaceLabel,
+                  ts: entry.ts,
+                  body: entry.body,
+                  fileRevisions: entry.fileRevisions,
+                  ...(entry.origin ? { origin: entry.origin } : {}),
+                })),
+                provenance: detail.provenance,
+                hint: 'Use --mode detailed only when you need every execution prompt and full report metadata.',
+              }
+            }
+            // detail vanished between resolve and read → fall through to self.
+          } else if (refs.length > 1) {
+            return {
+              ok: true as const,
+              ambiguous: refs.map((r) => ({ wsId: r.wsId, wsTag: r.wsTag, id: r.id, title: r.title })),
+            }
+          }
+          // 0 matches → fall through to the self-file read so a local id still
+          // resolves; if that misses too, it returns the not_found error.
+        }
+        return readSelfIssue(ctx, id)
+      },
+    })
+  },
+}
+
+/** Read one issue from THIS workspace's own files — the issue_show fallback
+ *  when the global board reader is absent or finds no match. */
+async function readSelfIssue(
+  ctx: WorkspaceToolContext,
+  id: string,
+): Promise<{ ok: true; issue: IssueRecord; comments: IssueComment[] } | { ok: false; error: string }> {
+  const dir = selfDir(ctx)
+  if (!dir.ok) return { ok: false, error: dir.error }
+  const raw = await readWorkspaceFile(dir.dir, join(ISSUES_DIR_REL, `${id}.md`))
+  if (raw === null) return { ok: false, error: `no such issue: ${id}` }
+  const parsed = parseIssueContent(id, raw)
+  if (!parsed.ok) return { ok: false, error: parsed.error }
+  const comments = await readIssueComments(dir.dir, id)
+  if (!comments.ok) return { ok: false, error: comments.error }
+  return { ok: true, issue: parsed.issue, comments: comments.comments }
+}
+
+/** Dispatch through the same service as the Issue page, never through ask. */
+function issueRunFactory(retry: boolean): WorkspaceToolFactory {
+  return {
+    name: retry ? 'issue_retry' : 'issue_run',
+    build(ctx) {
+      return tool({
+        description: retry
+          ? 'Retry the latest failed or interrupted Issue run using its current canonical What and owner. Preserves schedule cadence and records retry lineage.'
+          : 'Run a live scheduled Issue now using its canonical What and configured owner/runtime. Preserves schedule cadence; rejects overlapping runs.',
+        inputSchema: z.object({
+          id: z.string().min(1).describe('Issue id or title on the global board.'),
+          wsId: z.string().min(1).optional().describe('Workspace id to disambiguate matching Issues.'),
+          ...(retry ? { runId: z.string().min(1).describe('Exact latest failed or interrupted taskId to retry.') } : {}),
+          await: z.boolean().optional().default(false).describe('Wait for completion; otherwise return taskId immediately.'),
+        }),
+        execute: async (input) => {
+          if (!ctx.board || !ctx.issueRuns) return { ok: false, error: 'Issue execution is unavailable' }
+          if (input.await && !ctx.conversation) return { ok: false, error: 'Conversation wait is unavailable' }
+          try {
+            const refs = (await ctx.board.resolveByName(input.id)).filter((ref) => !input.wsId || ref.wsId === input.wsId)
+            if (refs.length !== 1) return {
+              ok: false, error: refs.length ? 'Issue name is ambiguous; specify --ws-id' : 'Issue not found',
+              ...(refs.length ? { candidates: refs.map(({ wsId, id, title }) => ({ wsId, id, title })) } : {}),
+            }
+            const ref = refs[0]!
+            const result = await ctx.issueRuns.start(ref.wsId, ref.id, retry && typeof input.runId === 'string' ? input.runId : undefined)
+            const subject = { workspaceId: ref.wsId, issueId: ref.id }
+            if (input.await && ctx.conversation) {
+              const task = await awaitConversationTask(ctx.conversation, result.taskId)
+              if (!task) return { ok: false, ...result, error: 'Dispatched run is unavailable' }
+              return { ok: true, ...subject, ...taskProjection(task, 'summary'), awaited: task.status !== 'running' }
+            }
+            return { ok: true, ...subject, ...result, next: `alice conversation read --task-id ${result.taskId}` }
+          } catch (err) {
+            return { ok: false, error: err instanceof Error ? err.message : String(err),
+              ...((err && typeof err === 'object' && 'code' in err) ? { code: err.code } : {}) }
+          }
+        },
+      })
+    },
+  }
+}
+
+export const issueRunNowFactory = issueRunFactory(false)
+export const issueRetryFactory = issueRunFactory(true)
+
+/** All issue tool factories, in registration order. */
+export const issueToolFactories: WorkspaceToolFactory[] = [
+  issueUpdateFactory,
+  issueCommentFactory,
+  issueCreateFactory,
+  issueListFactory,
+  issueShowFactory,
+  issueRunNowFactory,
+  issueRetryFactory,
+]

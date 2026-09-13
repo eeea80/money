@@ -1,0 +1,1683 @@
+import { stickerHandlers } from './stickers'
+import { http, HttpResponse } from 'msw'
+import type { AliceHarnessConfig } from '../../hooks/useAliceHarness'
+import {
+  DEMO_AUTO_QUANT_WORKSPACE_ID,
+  DEMO_AUTO_PREDICTION_WORKSPACE_ID,
+  DEMO_CHAT_WORKSPACE_ID,
+  demoChatWorkspace,
+  demoWorkspaces,
+  demoTemplates,
+} from '../fixtures/workspaces'
+import { demoWorkspaceFilePaths, demoWorkspaceFiles } from '../fixtures/inbox'
+import {
+  createDemoWebSnapshot,
+  demoWebCapabilities,
+  demoWebFollowUp,
+  demoWebPendingToolCall,
+  demoWebPermissionOutcome,
+  demoWebPermissionRequest,
+  demoWebSeeds,
+  demoWebWire,
+  type DemoWebSeed,
+} from '../fixtures/web-session'
+import type {
+  AgentConfig,
+  AgentConfigBundle,
+  AgentId,
+  DepartedWorkspace,
+  PausedSessionRuntimeUpdate,
+  SessionRecord,
+  WebConversationMessage,
+  WebSessionSnapshot,
+  Workspace,
+  WorkspaceMetadataPatch,
+  WorkspaceRuntimePreference,
+} from '../../components/workspace/api'
+
+const demoSessionPresence = new Map<string, 'active' | 'archived' | 'deleted'>()
+const demoResumeRuntimes = new Map<string, NonNullable<SessionRecord['runtime']>>([
+  ['resume-demo-thesis-owner', {
+    credentialSource: 'native',
+    model: 'claude-opus-4-6',
+    reasoningEffort: 'high',
+  }],
+])
+
+const demoManagerSession = {
+  id: 'demo-manager-session',
+  resumeId: 'demo-resume-manager',
+  wsId: 'workspace-manager',
+  agent: 'pi',
+  name: 'p1',
+  createdAt: new Date().toISOString(),
+  lastActiveAt: new Date().toISOString(),
+  state: 'running' as const,
+  surface: 'webpi' as const,
+  pid: 0,
+  startedAt: Date.now(),
+  title: 'Audit the active Workspace floor',
+}
+
+let demoManagerMessages: WebConversationMessage[] = []
+let demoQuickChatSequence = 0
+const demoResumedSessions = new Map<string, SessionRecord>()
+let demoWorkspaceCreateSequence = 0
+let demoAutoQuantDefaultWorkspaceId: string | null = DEMO_AUTO_QUANT_WORKSPACE_ID
+let demoAutoPredictionDefaultWorkspaceId: string | null = DEMO_AUTO_PREDICTION_WORKSPACE_ID
+const demoCreatedWorkspaceIds = new Set<string>()
+const DEMO_WORKSPACE_TAG_RE = /^[a-z0-9][a-z0-9_-]{0,32}$/
+
+export function resetDemoWorkspaceCreateState(): void {
+  for (const id of demoCreatedWorkspaceIds) {
+    const index = demoWorkspaces.findIndex((workspace) => workspace.id === id)
+    if (index >= 0) demoWorkspaces.splice(index, 1)
+  }
+  demoCreatedWorkspaceIds.clear()
+  demoWorkspaceCreateSequence = 0
+  demoAutoQuantDefaultWorkspaceId = DEMO_AUTO_QUANT_WORKSPACE_ID
+  demoAutoPredictionDefaultWorkspaceId = DEMO_AUTO_PREDICTION_WORKSPACE_ID
+}
+
+function webKey(wsId: string, sessionId: string): string {
+  return `${wsId}::${sessionId}`
+}
+
+function createSeededWebSessions(): Map<string, WebSessionSnapshot> {
+  return new Map(demoWebSeeds.map((seed) => [
+    webKey(seed.wsId, seed.sessionId),
+    createDemoWebSnapshot(seed),
+  ]))
+}
+
+let demoWebSessions = createSeededWebSessions()
+let demoWebRequestSequence = 0
+
+export function resetDemoWorkspaceWebState(): void {
+  demoManagerMessages = []
+  demoQuickChatSequence = 0
+  demoWebRequestSequence = 0
+  demoWebSessions = createSeededWebSessions()
+  demoResumeRuntimes.clear()
+  demoResumeRuntimes.set('resume-demo-thesis-owner', {
+    credentialSource: 'native',
+    model: 'claude-opus-4-6',
+    reasoningEffort: 'high',
+  })
+  for (let index = 0; index < demoWorkspaces.length; index += 1) {
+    const workspace = demoWorkspaces[index]!
+    demoWorkspaces[index] = {
+      ...workspace,
+      sessions: workspace.sessions.map((session) => demoResumedSessions.get(webKey(workspace.id, session.id)) ?? session).filter((session) =>
+        !session.id.startsWith('demo-quick-chat-')
+        && !session.id.startsWith('run-demo-resume-')),
+    }
+  }
+  demoResumedSessions.clear()
+}
+
+function setDemoWebSession(seed: DemoWebSeed): WebSessionSnapshot {
+  const snapshot = createDemoWebSnapshot(seed)
+  demoWebSessions.set(webKey(seed.wsId, seed.sessionId), snapshot)
+  return snapshot
+}
+
+function findDemoWebSession(wsId: string, sessionId: string): WebSessionSnapshot | null {
+  return demoWebSessions.get(webKey(wsId, sessionId)) ?? null
+}
+
+function ensureDemoWebSession(wsId: string, sessionId: string): WebSessionSnapshot | null {
+  const existing = findDemoWebSession(wsId, sessionId)
+  if (existing) return existing
+  const record = demoWorkspaces
+    .find((workspace) => workspace.id === wsId)
+    ?.sessions.find((session) => session.id === sessionId && session.agent in demoWebCapabilities)
+  if (!record) return null
+  return setDemoWebSession({
+    wsId,
+    sessionId,
+    resumeId: record.resumeId,
+    agent: record.agent,
+    startedAt: record.startedAt ?? Date.now(),
+    messages: [],
+  })
+}
+
+function updateDemoWebSession(
+  wsId: string,
+  sessionId: string,
+  patch: (current: WebSessionSnapshot) => Partial<WebSessionSnapshot>,
+): WebSessionSnapshot | null {
+  const current = ensureDemoWebSession(wsId, sessionId)
+  if (!current) return null
+  const next: WebSessionSnapshot = { ...current, ...patch(current), revision: current.revision + 1 }
+  demoWebSessions.set(webKey(wsId, sessionId), next)
+  return next
+}
+
+const DEMO_FILE_MTIME = new Date().toISOString()
+
+function demoDirectoryListing(workspaceId: string, requestedPath: string) {
+  const segments = requestedPath.split('/').filter((segment) => segment !== '' && segment !== '.')
+  if (segments.includes('..')) return null
+
+  const path = segments.join('/')
+  const prefix = path ? `${path}/` : ''
+  const entries = new Map<string, {
+    name: string
+    kind: 'file' | 'dir'
+    sizeBytes: number | null
+    mtime: string
+  }>()
+
+  for (const filePath of demoWorkspaceFilePaths[workspaceId] ?? []) {
+    if (!filePath.startsWith(prefix)) continue
+    const remainder = filePath.slice(prefix.length)
+    if (!remainder) continue
+    const slash = remainder.indexOf('/')
+    const name = slash === -1 ? remainder : remainder.slice(0, slash)
+    if (entries.has(name)) continue
+
+    const kind = slash === -1 ? 'file' as const : 'dir' as const
+    entries.set(name, {
+      name,
+      kind,
+      sizeBytes: kind === 'file'
+        ? new TextEncoder().encode(demoWorkspaceFiles[filePath] ?? '').byteLength
+        : null,
+      mtime: DEMO_FILE_MTIME,
+    })
+  }
+
+  return {
+    path,
+    entries: [...entries.values()].sort((a, b) => {
+      if (a.kind === 'dir' && b.kind !== 'dir') return -1
+      if (a.kind !== 'dir' && b.kind === 'dir') return 1
+      return a.name.localeCompare(b.name)
+    }),
+  }
+}
+
+function appendDemoWebMessages(
+  wsId: string,
+  sessionId: string,
+  messages: readonly WebConversationMessage[],
+): WebSessionSnapshot | null {
+  return updateDemoWebSession(wsId, sessionId, (current) => ({
+    phase: 'idle',
+    messages: [...current.messages, ...messages],
+    streamingMessage: null,
+    requests: [],
+  }))
+}
+
+// Runtimes that ask before running tools pause on the first prompt with a
+// pending permission request; the user's answer decides how the turn ends.
+function startDemoWebTurn(wsId: string, sessionId: string, message: string): WebSessionSnapshot | null {
+  const current = ensureDemoWebSession(wsId, sessionId)
+  if (!current) return null
+  if (!demoWebCapabilities[current.agent]?.permissionPrompts) {
+    return appendDemoWebMessages(wsId, sessionId, demoWebFollowUp(current.agent, message))
+  }
+  const requestId = `demo-web-request-${++demoWebRequestSequence}`
+  if (current.agent === 'codex' && /ask me/i.test(message)) {
+    return updateDemoWebSession(wsId, sessionId, () => ({
+      phase: 'awaiting-input',
+      messages: [...current.messages, { role: 'user', content: message }],
+      streamingMessage: null,
+      requests: [{ id: requestId, kind: 'question', title: 'Project name', description: 'What should we call this project?', options: [], allowText: true, createdAt: Date.now() }],
+    }))
+  }
+  return updateDemoWebSession(wsId, sessionId, () => ({
+    phase: 'awaiting-input',
+    messages: [...current.messages, { role: 'user', content: message }],
+    streamingMessage: demoWebPendingToolCall(requestId),
+    requests: [demoWebPermissionRequest(current.agent, requestId)],
+  }))
+}
+
+function answerDemoWebRequest(
+  wsId: string,
+  sessionId: string,
+  requestId: string,
+  optionId: string,
+  text?: string,
+): WebSessionSnapshot | null | 'unknown_request' | 'unknown_option' {
+  const current = findDemoWebSession(wsId, sessionId)
+  if (!current) return null
+  const request = current.requests.find((entry) => entry.id === requestId)
+  if (!request) return 'unknown_request'
+  if (text !== undefined) {
+    if (request.kind !== 'question' || !request.allowText || optionId !== '' || !text.trim()) return 'unknown_option'
+    return appendDemoWebMessages(wsId, sessionId, [{ role: 'assistant', content: [{ type: 'text', text: `Project name: ${text}` }] }])
+  }
+  const option = request.options.find((entry) => entry.id === optionId)
+  if (!option) return 'unknown_option'
+  return appendDemoWebMessages(
+    wsId,
+    sessionId,
+    demoWebPermissionOutcome(current.agent, requestId, option.tone === 'allow'),
+  )
+}
+
+// Demo mutations live only for the current MSW worker lifetime. Keeping agent
+// config state here lets the real Settings -> save event -> Quick Start refresh
+// path be exercised without touching a user's Workspace files.
+const demoAgentConfigs = new Map<string, Partial<Record<AgentId, AgentConfig>>>()
+
+function demoAgentConfigBundle(workspaceId: string): AgentConfigBundle {
+  const saved = demoAgentConfigs.get(workspaceId)
+  return {
+    claude: saved?.claude ?? null,
+    codex: saved?.codex ?? null,
+    opencode: saved?.opencode ?? null,
+    pi: saved?.pi ?? null,
+  }
+}
+
+function demoManagerSnapshot(): WebSessionSnapshot {
+  return {
+    recordId: demoManagerSession.id,
+    wsId: demoManagerSession.wsId,
+    resumeId: demoManagerSession.resumeId,
+    agent: demoManagerSession.agent,
+    wire: demoWebWire(demoManagerSession.agent),
+    nativeSessionId: 'demo-native-manager',
+    pid: 0,
+    startedAt: demoManagerSession.startedAt,
+    phase: 'idle' as const,
+    messages: demoManagerMessages,
+    streamingMessage: null,
+    requests: [],
+    error: null,
+    stderrTail: '',
+    revision: demoManagerMessages.length,
+  }
+}
+
+const demoDepartedWorkspaces: DepartedWorkspace[] = [{
+  id: 'chat-quiet-slate-archive',
+  tag: 'macro-research-archive',
+  activeDir: '/demo/workspaces/chat-quiet-slate-archive',
+  departedDir: '/demo/departed-workspaces/chat-quiet-slate-archive',
+  createdAt: '2026-06-01T00:00:00.000Z',
+  updatedAt: '2026-07-11T08:30:00.000Z',
+  departedAt: '2026-07-11T08:30:00.000Z',
+  lifecycle: 'departed' as const,
+  reason: 'Research mandate moved to the durable macro desk.',
+  handoff: {
+    preparedAt: '2026-07-11T08:30:00.000Z',
+    dirtyFiles: [' M research/rates.md'],
+    openIssueIds: ['review-fed-regime'],
+    scheduledIssueIds: [],
+    resumeIds: ['resume-quiet-slate-owner'],
+    sessionRecords: 1,
+  },
+}]
+
+const demoAgentRuntimeReadiness = {
+  agents: {
+    claude: {
+      agent: 'claude',
+      displayName: 'Claude Code',
+      installed: true,
+      binPath: '/usr/local/bin/claude',
+      status: 'ready',
+      ready: true,
+      source: 'global-login',
+      checkedAt: '2026-07-08T00:00:00.000Z',
+      durationMs: 12,
+      message: 'Claude Code replied to the readiness probe.',
+    },
+    codex: {
+      agent: 'codex',
+      displayName: 'Codex',
+      installed: true,
+      binPath: '/usr/local/bin/codex',
+      status: 'ready',
+      ready: true,
+      source: 'global-login',
+      checkedAt: '2026-07-08T00:00:00.000Z',
+      durationMs: 14,
+      message: 'Codex replied to the readiness probe.',
+    },
+    opencode: {
+      agent: 'opencode',
+      displayName: 'opencode',
+      installed: true,
+      binPath: '/usr/local/bin/opencode',
+      status: 'ready',
+      ready: true,
+      source: 'launcher-vault',
+      checkedAt: '2026-07-08T00:00:00.000Z',
+      durationMs: 18,
+      message: 'opencode replied to the readiness probe.',
+    },
+    pi: {
+      agent: 'pi',
+      displayName: 'Pi',
+      installed: true,
+      binPath: '/usr/local/bin/pi',
+      status: 'ready',
+      ready: true,
+      source: 'launcher-vault',
+      checkedAt: '2026-07-08T00:00:00.000Z',
+      durationMs: 16,
+      message: 'Pi replied to the readiness probe.',
+    },
+  },
+  overallReady: true,
+  checkedAt: '2026-07-08T00:00:00.000Z',
+}
+
+const demoSkillProjection = () => ({
+  injectedVersion: '1.0.0+previous', injectedAt: '2026-07-08T00:00:00.000Z',
+  name: 'alice', enabled: true, installed: true, canonicalPresent: true,
+  customized: true, sourceChanged: true, mirrorDiverged: false,
+  files: ['.agents', '.claude'].map((root) => ({ path: `${root}/skills/alice/SKILL.md`, currentPreview: '# Alice\n\nLocal research instructions.', sourcePreview: '# Alice\n\nProject-provided collaboration and data CLI guidance.', differs: true, truncated: false, unverified: false })),
+})
+
+const demoTemplateUpgradePlan = (workspaceId: string) => ({
+  workspaceId,
+  template: 'chat',
+  fromVersion: '0.1.0',
+  toVersion: '0.2.0',
+  strategy: 'managed-context' as const,
+  planDigest: 'demo-template-upgrade-plan',
+  source: 'legacy-root-commit' as const,
+  blocked: false,
+  blockers: [],
+  activity: { busy: false, sessions: [], headless: [] },
+  files: [
+    {
+      path: 'README.md', status: 'ready', operation: 'update', canUseTemplate: true,
+      currentPreview: '# Chat workspace\n\nUse the OpenAlice CLI.',
+      templatePreview: '# Chat workspace\n\nUse the OpenAlice CLI and sign durable work.',
+      currentTruncated: false, templateTruncated: false,
+    },
+    {
+      path: '.agents/skills/template-research/SKILL.md', status: 'ready', operation: 'update', canUseTemplate: true,
+      currentPreview: 'Old collaboration guidance.\n\nLocal preference.', templatePreview: 'Current collaboration guidance.',
+      mergedPreview: 'Current collaboration guidance.\n\nLocal preference.', mergedTruncated: false,
+      currentTruncated: false, templateTruncated: false,
+    },
+    {
+      path: 'AGENTS.md', status: 'preserved', operation: 'keep', canUseTemplate: true,
+      currentPreview: 'Workspace-specific desk instructions.', templatePreview: 'Template desk instructions.',
+      currentTruncated: false, templateTruncated: false,
+      note: 'Changed only in this Workspace; it will stay as-is.',
+    },
+    {
+      path: '.claude/skills/template-research/SKILL.md', status: 'conflict', operation: 'update', canUseTemplate: true,
+      basePreview: 'Report scheduled work to the owner.', baseTruncated: false,
+      currentPreview: 'Report scheduled work to the owner with the local checklist.',
+      templatePreview: 'Report scheduled work to Inbox with a signed artifact.',
+      currentTruncated: false, templateTruncated: false,
+      note: 'Git could not merge these overlapping edits automatically.',
+    },
+  ],
+  summary: { ready: 2, preserved: 1, conflicts: 1, unchanged: 0 },
+})
+
+const demoHarnessConfigs = new Map<string, AliceHarnessConfig>()
+const demoHarnessCommands = { alice: ['rss', 'market', 'analysis', 'peer', 'inbox', 'issue', 'harness'], traderhub: ['equity', 'economy'], 'alice-uta': ['account', 'order'] }
+
+export const workspacesHandlers = [
+  ...stickerHandlers,
+  http.get('/api/workspaces/auto-quant/default-workspace', () => {
+    const workspace = demoAutoQuantDefaultWorkspaceId
+      ? demoWorkspaces.find((candidate) =>
+          candidate.id === demoAutoQuantDefaultWorkspaceId
+          && candidate.template === 'auto-quant-v2')
+      : undefined
+    return HttpResponse.json({
+      defaultWorkspaceId: workspace?.id ?? null,
+      configuredWorkspaceId: demoAutoQuantDefaultWorkspaceId,
+      ready: workspace !== undefined,
+    })
+  }),
+  http.put('/api/workspaces/auto-quant/default-workspace', async ({ request }) => {
+    const body = (await request.json().catch(() => null)) as { workspaceId?: unknown } | null
+    const workspace = typeof body?.workspaceId === 'string'
+      ? demoWorkspaces.find((candidate) =>
+          candidate.id === body.workspaceId
+          && candidate.template === 'auto-quant-v2')
+      : undefined
+    if (!workspace) {
+      return HttpResponse.json({ error: 'workspace_not_found' }, { status: 404 })
+    }
+    demoAutoQuantDefaultWorkspaceId = workspace.id
+    return HttpResponse.json({ defaultWorkspaceId: workspace.id, ready: true })
+  }),
+  http.get('/api/workspaces/project-setup', () => HttpResponse.json({ schemaVersion: 1, pending: [], errors: {} })),
+  http.post('/api/workspaces/project-setup/retry', () => HttpResponse.json({ schemaVersion: 1, pending: [], errors: {} })),
+  http.post('/api/workspaces/chat/initialize', () => {
+    const workspace = demoWorkspaces.find((candidate) => candidate.template === 'chat')
+    if (!workspace) {
+      return HttpResponse.json({ error: 'workspace_not_found' }, { status: 404 })
+    }
+    return HttpResponse.json({ workspace })
+  }),
+  http.post('/api/workspaces/auto-quant/initialize', () => {
+    const workspace = demoWorkspaces.find((candidate) =>
+      candidate.template === 'auto-quant-v2')
+    if (!workspace) {
+      return HttpResponse.json({ error: 'workspace_not_found' }, { status: 404 })
+    }
+    demoAutoQuantDefaultWorkspaceId = workspace.id
+    return HttpResponse.json({ workspace })
+  }),
+  http.get('/api/workspaces/auto-prediction/default-workspace', () => {
+    const workspace = demoAutoPredictionDefaultWorkspaceId
+      ? demoWorkspaces.find((candidate) =>
+          candidate.id === demoAutoPredictionDefaultWorkspaceId
+          && candidate.template === 'auto-prediction')
+      : undefined
+    return HttpResponse.json({
+      defaultWorkspaceId: workspace?.id ?? null,
+      configuredWorkspaceId: demoAutoPredictionDefaultWorkspaceId,
+      ready: workspace !== undefined,
+    })
+  }),
+  http.put('/api/workspaces/auto-prediction/default-workspace', async ({ request }) => {
+    const body = (await request.json().catch(() => null)) as { workspaceId?: unknown } | null
+    const workspace = typeof body?.workspaceId === 'string'
+      ? demoWorkspaces.find((candidate) =>
+          candidate.id === body.workspaceId
+          && candidate.template === 'auto-prediction')
+      : undefined
+    if (!workspace) {
+      return HttpResponse.json({ error: 'workspace_not_found' }, { status: 404 })
+    }
+    demoAutoPredictionDefaultWorkspaceId = workspace.id
+    return HttpResponse.json({ defaultWorkspaceId: workspace.id, ready: true })
+  }),
+  http.post('/api/workspaces/auto-prediction/initialize', () => {
+    const workspace = demoWorkspaces.find((candidate) => candidate.template === 'auto-prediction')
+    if (!workspace) {
+      return HttpResponse.json({ error: 'workspace_not_found' }, { status: 404 })
+    }
+    demoAutoPredictionDefaultWorkspaceId = workspace.id
+    return HttpResponse.json({ workspace })
+  }),
+  http.put('/api/workspaces/terminal-view-attributes', () =>
+    HttpResponse.json({ ok: true, changed: true })),
+  http.get('/api/workspaces', () => HttpResponse.json({ workspaces: demoWorkspaces })),
+  http.get('/api/workspaces/manager', () => HttpResponse.json({
+    manager: {
+      id: 'workspace-manager', tag: 'Workspace Manager',
+      activeWorkspaceCount: demoWorkspaces.length,
+      sessions: demoManagerMessages.length > 0 ? [demoManagerSession] : [],
+    },
+  })),
+  http.post('/api/workspaces/manager/quick-start', async ({ request }) => {
+    const body = await request.json().catch(() => ({})) as {
+      prompt?: string
+      agent?: string
+      credentialSlug?: string
+      model?: string
+      reasoningEffort?: string
+    }
+    demoManagerMessages = [
+      { role: 'user', content: body.prompt ?? 'Audit the active Workspace floor.' },
+      { role: 'assistant', content: [{ type: 'text', text: 'Demo manager: active desks are inventoried and ready for coordination.' }] },
+    ]
+    return HttpResponse.json({
+      manager: {
+        id: 'workspace-manager', tag: 'Workspace Manager',
+        activeWorkspaceCount: demoWorkspaces.length, sessions: [demoManagerSession],
+      },
+      session: demoManagerSession,
+      snapshot: demoManagerSnapshot(),
+    }, { status: 201 })
+  }),
+  http.get('/api/workspaces/departed', () => HttpResponse.json({ workspaces: demoDepartedWorkspaces })),
+  http.post('/api/workspaces/departed/:id/restore', ({ params }) => {
+    const index = demoDepartedWorkspaces.findIndex((workspace) => workspace.id === String(params.id))
+    if (index < 0) return HttpResponse.json({ error: 'not_found' }, { status: 404 })
+    demoDepartedWorkspaces.splice(index, 1)
+    return HttpResponse.json({ ok: true })
+  }),
+  http.delete('/api/workspaces/departed/:id', ({ params }) => {
+    const workspace = demoDepartedWorkspaces.find((candidate) => candidate.id === String(params.id))
+    if (!workspace) return HttpResponse.json({ error: 'not_found' }, { status: 404 })
+    Object.assign(workspace, { lifecycle: 'purged', purgedAt: new Date().toISOString() })
+    return HttpResponse.json({ ok: true })
+  }),
+  http.post('/api/workspaces', async ({ request }) => {
+    const body = await request.json().catch(() => ({})) as {
+      tag?: unknown
+      template?: unknown
+      sourceVersion?: unknown
+    }
+    if (typeof body.tag !== 'string') {
+      return HttpResponse.json({ error: 'tag_required', message: 'Workspace tag is required.' }, { status: 400 })
+    }
+    const tag = body.tag.trim()
+    if (!DEMO_WORKSPACE_TAG_RE.test(tag)) {
+      return HttpResponse.json({
+        error: 'invalid_tag',
+        message: 'Use a-z, 0-9, "-", or "_"; start with a letter or number; maximum 33 characters.',
+      }, { status: 400 })
+    }
+    if (demoWorkspaces.some((workspace) => workspace.tag === tag)) {
+      return HttpResponse.json({
+        error: 'tag_in_use',
+        message: `A Workspace with tag "${tag}" already exists.`,
+      }, { status: 409 })
+    }
+
+    const templateName = typeof body.template === 'string' && body.template.length > 0
+      ? body.template
+      : demoTemplates[0]?.name
+    if (!templateName) {
+      return HttpResponse.json({
+        error: 'no_templates_configured',
+        message: 'No Workspace templates are available.',
+      }, { status: 500 })
+    }
+    const template = demoTemplates.find((candidate) => candidate.name === templateName)
+    if (!template) {
+      return HttpResponse.json({
+        error: 'unknown_template',
+        message: `Unknown Workspace template: ${templateName}`,
+      }, { status: 400 })
+    }
+    const sourceVersion = typeof body.sourceVersion === 'string'
+      ? body.sourceVersion
+      : template.source?.defaultVersion
+    const source = template.source?.versions.find((candidate) => candidate.version === sourceVersion)
+    if (template.source && !source) {
+      return HttpResponse.json({
+        error: 'unknown_source_version',
+        message: `Unknown source version: ${String(sourceVersion)}`,
+      }, { status: 400 })
+    }
+
+    demoWorkspaceCreateSequence += 1
+    const workspace: Workspace = {
+      id: `demo-created-ws-${demoWorkspaceCreateSequence}`,
+      tag,
+      dir: `/demo/workspaces/${tag}`,
+      createdAt: new Date().toISOString(),
+      template: template.name,
+      ...(source && template.source
+        ? {
+            harnessSource: {
+              schemaVersion: 1 as const,
+              template: template.name,
+              repository: template.source.repository,
+              version: source.version,
+              commit: source.commit,
+            },
+          }
+        : {}),
+      ...(template.version
+        ? { spawnedFromVersion: template.version, currentVersion: template.version }
+        : {}),
+      upgradeAvailable: null,
+      sessions: [],
+      agentOverride: { claude: false, codex: false, opencode: false, pi: false },
+    }
+    demoWorkspaces.push(workspace)
+    demoCreatedWorkspaceIds.add(workspace.id)
+    return HttpResponse.json({ workspace }, { status: 201 })
+  }),
+  http.get('/api/workspaces/:id/offboarding', ({ params }) => {
+    const workspace = demoWorkspaces.find((candidate) => candidate.id === String(params.id))
+    if (!workspace) return HttpResponse.json({ error: 'not_found' }, { status: 404 })
+    const resumeIds = workspace.sessions.map((session) => session.resumeId)
+    return HttpResponse.json({
+      assessment: {
+        workspace: { id: workspace.id, tag: workspace.tag, dir: `/demo/workspaces/${workspace.id}` },
+        canOffboard: true,
+        blockers: [],
+        runningHeadless: [],
+        untrackedHeadlessActive: false,
+        runningSessions: workspace.sessions.filter((session) => session.state === 'running').length,
+        sessionRecords: workspace.sessions.length,
+        resumeIds,
+        openIssueIds: ['review-current-thesis'],
+        scheduledIssueIds: [],
+        git: { branch: 'main', clean: false, files: [{ status: ' M', path: 'research/latest.md' }] },
+      },
+    })
+  }),
+  http.post('/api/workspaces/:id/offboard', async ({ params, request }) => {
+    const index = demoWorkspaces.findIndex((candidate) => candidate.id === String(params.id))
+    if (index < 0) return HttpResponse.json({ error: 'not_found' }, { status: 404 })
+    const workspace = demoWorkspaces[index]!
+    const body = await request.json().catch(() => ({})) as { reason?: string; notes?: string }
+    const now = new Date().toISOString()
+    demoWorkspaces.splice(index, 1)
+    demoDepartedWorkspaces.unshift({
+      id: workspace.id,
+      tag: workspace.tag,
+      activeDir: `/demo/workspaces/${workspace.id}`,
+      departedDir: `/demo/departed-workspaces/${workspace.id}`,
+      createdAt: workspace.createdAt,
+      updatedAt: now,
+      departedAt: now,
+      lifecycle: 'departed',
+      reason: body.reason ?? 'Offboarded in demo mode',
+      handoff: {
+        preparedAt: now,
+        ...(body.notes ? { notes: body.notes } : {}),
+        dirtyFiles: [' M research/latest.md'],
+        openIssueIds: ['review-current-thesis'],
+        scheduledIssueIds: [],
+        resumeIds: workspace.sessions.map((session) => session.resumeId),
+        sessionRecords: workspace.sessions.length,
+      },
+    })
+    return HttpResponse.json({ ok: true })
+  }),
+  http.get('/api/workspaces/alice-harness/catalog', () => HttpResponse.json({
+    version: '1.0.0+demo-skills',
+    commands: { alice: { rss: ['glob', 'grep', 'read'], harness: ['upgrade'] }, traderhub: { equity: ['profile'] }, 'alice-uta': { account: ['list'] } },
+    skills: [{ name: 'alice', files: [{ path: 'SKILL.md', content: '# Alice\n\nProject-provided collaboration and data CLI guidance.' }] }],
+    workspaces: demoWorkspaces.map((ws) => ({ id: ws.id, name: ws.tag, template: ws.template, projections: [demoSkillProjection()], plan: {
+      ...demoTemplateUpgradePlan(ws.id), template: 'alice-harness',
+      fromVersion: 'unversioned', toVersion: '1.0.0+demo-skills',
+      files: demoTemplateUpgradePlan(ws.id).files.filter((file) => file.path.includes('/skills/')).map((file) => ({ ...file, path: file.path.replace('template-research', 'alice') })),
+      summary: { ready: 1, preserved: 0, conflicts: 1, unchanged: 0 },
+    } })),
+  })),
+  http.get('/api/workspaces/:id/alice-harness/skills/:skill', () => HttpResponse.json(demoSkillProjection())),
+  http.get('/api/workspaces/:id/alice-harness', ({ params }) => HttpResponse.json({
+    appliedVersion: '1.0.0+demo', availableVersion: '1.1.0+demo', runtimeAuthority: 'alice-project',
+    skillDefaults: { alice: true, 'alice-analysis': true, 'alice-uta': true, traderhub: true, 'self-scheduling': true },
+    managedSkillNames: ['alice', 'alice-analysis', 'alice-uta', 'traderhub', 'self-scheduling', 'alice-workspace'],
+    config: demoHarnessConfigs.get(String(params.id)) ?? { schemaVersion: 1, cli: {} },
+    commands: demoHarnessCommands,
+  })),
+  http.put('/api/workspaces/:id/alice-harness/config', async ({ params, request }) => {
+    demoHarnessConfigs.set(String(params.id), await request.json() as AliceHarnessConfig)
+    return HttpResponse.json({ ok: true })
+  }),
+  http.get('/api/workspaces/:id/alice-harness-upgrade', ({ params, request }) => {
+    const action = new URL(request.url).searchParams.get('action')
+    const files = demoSkillProjection().files.map((file) => ({
+      path: file.path, status: action === 'restore' || action === 'install' ? 'ready' : 'conflict',
+      operation: action === 'remove' ? 'remove' : 'update', currentPreview: file.currentPreview,
+      basePreview: '# Alice\n\nPrevious Project guidance.', baseTruncated: false,
+      templatePreview: action === 'remove' ? null : file.sourcePreview,
+      currentTruncated: false, templateTruncated: false, canUseTemplate: true,
+    }))
+    return HttpResponse.json({ plan: {
+      ...demoTemplateUpgradePlan(String(params.id)), template: 'alice-harness',
+      fromVersion: '1.0.0+demo', toVersion: '1.1.0+demo', files,
+      summary: { ready: files.filter((file) => file.status === 'ready').length, preserved: 0, conflicts: files.filter((file) => file.status === 'conflict').length, unchanged: 0 },
+    } })
+  }),
+  http.post('/api/workspaces/:id/alice-harness-upgrade', () => HttpResponse.json({ error: 'demo_read_only', message: 'This recorded preview does not modify Workspace files.' }, { status: 409 })),
+  http.get('/api/workspaces/:id/template-upgrade', ({ params }) => {
+    const workspace = demoWorkspaces.find((candidate) => candidate.id === String(params.id))
+    if (!workspace) return HttpResponse.json({ error: 'not_found' }, { status: 404 })
+    if (!workspace.upgradeAvailable) {
+      return HttpResponse.json({
+        plan: {
+          ...demoTemplateUpgradePlan(workspace.id),
+          fromVersion: workspace.currentVersion ?? '0.2.0',
+          toVersion: workspace.currentVersion ?? '0.2.0',
+          source: 'recorded-baseline',
+          files: [],
+          summary: { ready: 0, preserved: 0, conflicts: 0, unchanged: 0 },
+        },
+      })
+    }
+    return HttpResponse.json({ plan: demoTemplateUpgradePlan(workspace.id) })
+  }),
+  http.post('/api/workspaces/:id/template-upgrade', async ({ params, request }) => {
+    const workspace = demoWorkspaces.find((candidate) => candidate.id === String(params.id))
+    if (!workspace) return HttpResponse.json({ error: 'not_found' }, { status: 404 })
+    const body = await request.json().catch(() => ({})) as {
+      planDigest?: string
+      resolutions?: Record<string, string>
+    }
+    if (body.planDigest !== 'demo-template-upgrade-plan') {
+      return HttpResponse.json({ error: 'stale_plan', message: 'Refresh the preview.' }, { status: 409 })
+    }
+    if (!body.resolutions?.['.claude/skills/self-scheduling/SKILL.md']) {
+      return HttpResponse.json({ error: 'unresolved_conflict', message: 'Choose a copy first.' }, { status: 400 })
+    }
+    ;(workspace as { currentVersion?: string; upgradeAvailable?: { from: string; to: string } | null }).currentVersion = '0.2.0'
+    ;(workspace as { currentVersion?: string; upgradeAvailable?: { from: string; to: string } | null }).upgradeAvailable = null
+    return HttpResponse.json({
+      result: {
+        workspaceId: workspace.id,
+        fromVersion: '0.1.0',
+        toVersion: '0.2.0',
+        commit: 'd3m0c0de12345678',
+        changedPaths: ['README.md', '.agents/skills/alice/SKILL.md'],
+        keptPaths: ['AGENTS.md'],
+      },
+      workspace,
+    })
+  }),
+  http.get('/api/workspaces/:id/absorb/:sourceId', ({ params }) => {
+    const target = demoWorkspaces.find((candidate) => candidate.id === String(params.id))
+    const source = demoWorkspaces.find((candidate) => candidate.id === String(params.sourceId))
+    if (!target || !source || target.id === source.id) {
+      return HttpResponse.json({ error: 'not_found' }, { status: 404 })
+    }
+    return HttpResponse.json({
+      plan: {
+        source: { id: source.id, tag: source.tag, displayName: source.displayName },
+        target: { id: target.id, tag: target.tag, displayName: target.displayName },
+        importRoot: `imports/${source.tag}-${source.id.slice(-6)}`,
+        planDigest: `demo-absorb-${target.id}-${source.id}`,
+        blocked: false,
+        blockers: [],
+        activity: {
+          source: { busy: false, sessions: [], headless: [] },
+          target: { busy: false, sessions: [], headless: [] },
+        },
+        sourceInventory: {
+          sessions: source.sessions.length,
+          resumeIds: source.sessions.length,
+          openIssues: ['review-source-thesis'],
+          scheduledIssues: ['daily-source-scan'],
+          dirtyFiles: 2,
+        },
+        files: [
+          {
+            path: 'research/source-thesis.md', status: 'ready', operation: 'add',
+            sourcePreview: '# Source thesis\n\nReviewed research from the source desk.', targetPreview: null,
+            sourceTruncated: false, targetTruncated: false, sourceSize: 82, targetSize: null,
+            canUseSource: true, keepBothPath: `imports/${source.tag}-${source.id.slice(-6)}/research/source-thesis.md`,
+          },
+          {
+            path: 'research/watchlist.md', status: 'conflict', operation: 'choose',
+            sourcePreview: '# Watchlist\n\nNVDA, TSM, MU', targetPreview: '# Watchlist\n\nSPY, QQQ, IWM',
+            sourceTruncated: false, targetTruncated: false, sourceSize: 28, targetSize: 29,
+            canUseSource: true, keepBothPath: `imports/${source.tag}-${source.id.slice(-6)}/research/watchlist.md`,
+          },
+          {
+            path: 'research/market-conventions.md', status: 'duplicate', operation: 'skip',
+            sourcePreview: '# Market conventions', targetPreview: '# Market conventions',
+            sourceTruncated: false, targetTruncated: false, sourceSize: 20, targetSize: 20,
+            canUseSource: true, keepBothPath: `imports/${source.tag}-${source.id.slice(-6)}/research/market-conventions.md`,
+          },
+        ],
+        summary: { ready: 1, duplicates: 1, conflicts: 1, excluded: 12, bytes: 130 },
+      },
+    })
+  }),
+  http.post('/api/workspaces/:id/absorb/:sourceId', async ({ params, request }) => {
+    const target = demoWorkspaces.find((candidate) => candidate.id === String(params.id))
+    const sourceIndex = demoWorkspaces.findIndex((candidate) => candidate.id === String(params.sourceId))
+    if (!target || sourceIndex < 0) return HttpResponse.json({ error: 'not_found' }, { status: 404 })
+    const source = demoWorkspaces[sourceIndex]!
+    const body = await request.json().catch(() => ({})) as {
+      planDigest?: string
+      resolutions?: Record<string, string>
+    }
+    if (body.planDigest !== `demo-absorb-${target.id}-${source.id}`) {
+      return HttpResponse.json({ error: 'stale_plan', message: 'Review the refreshed plan.' }, { status: 409 })
+    }
+    if (!body.resolutions?.['research/watchlist.md']) {
+      return HttpResponse.json({ error: 'unresolved_conflict', message: 'Choose how to keep research/watchlist.md.' }, { status: 400 })
+    }
+    const now = new Date().toISOString()
+    demoWorkspaces.splice(sourceIndex, 1)
+    demoDepartedWorkspaces.unshift({
+      id: source.id,
+      tag: source.tag,
+      activeDir: `/demo/workspaces/${source.id}`,
+      departedDir: `/demo/departed-workspaces/${source.id}`,
+      createdAt: source.createdAt,
+      updatedAt: now,
+      departedAt: now,
+      absorbedAt: now,
+      absorbedIntoWorkspaceId: target.id,
+      absorbCommit: 'ab50bed123456789',
+      lifecycle: 'departed',
+      reason: `Absorbed into ${target.tag}`,
+      handoff: {
+        preparedAt: now,
+        dirtyFiles: [' M research/source-thesis.md'],
+        openIssueIds: ['review-source-thesis'],
+        scheduledIssueIds: ['daily-source-scan'],
+        resumeIds: source.sessions.map((session) => session.resumeId),
+        sessionRecords: source.sessions.length,
+      },
+    })
+    return HttpResponse.json({
+      result: {
+        sourceWorkspaceId: source.id,
+        targetWorkspaceId: target.id,
+        commit: 'ab50bed123456789',
+        changedPaths: ['research/source-thesis.md', 'imports/source/research/watchlist.md'],
+        skippedPaths: ['research/market-conventions.md'],
+        departedDir: `/demo/departed-workspaces/${source.id}`,
+      },
+      workspace: target,
+    })
+  }),
+  http.delete('/api/workspaces/:id', () => HttpResponse.json(true)),
+  http.post('/api/workspaces/:id/stop', () => HttpResponse.json(true)),
+  http.patch('/api/workspaces/:id/metadata', async ({ params, request }) => {
+    const workspace = demoWorkspaces.find((w) => w.id === String(params.id))
+    if (!workspace) return HttpResponse.json({ error: 'not_found' }, { status: 404 })
+    const mutableWorkspace = workspace as {
+      displayName?: string
+      description?: string
+    }
+
+    const body = (await request.json().catch(() => ({}))) as WorkspaceMetadataPatch
+    if ('defaultAgent' in body) {
+      return HttpResponse.json({ error: 'invalid_metadata', message: 'Agent preferences belong in runtime-settings, not metadata' }, { status: 400 })
+    }
+    if ('displayName' in body) {
+      if (body.displayName == null || body.displayName.trim() === '') {
+        delete mutableWorkspace.displayName
+      } else {
+        mutableWorkspace.displayName = body.displayName.trim()
+      }
+    }
+    if ('description' in body) {
+      if (body.description == null || body.description.trim() === '') {
+        delete mutableWorkspace.description
+      } else {
+        mutableWorkspace.description = body.description.trim()
+      }
+    }
+    return HttpResponse.json({ workspace })
+  }),
+  http.put('/api/workspaces/:id/runtime-settings', async ({ params, request }) => {
+    const index = demoWorkspaces.findIndex((workspace) => workspace.id === String(params.id))
+    if (index < 0) return HttpResponse.json({ error: 'not_found' }, { status: 404 })
+    type ModeInput = {
+      defaultAgent?: string | null
+      agents?: Record<string, WorkspaceRuntimePreference>
+    }
+    const body = (await request.json().catch(() => ({}))) as {
+      interactive?: ModeInput
+      headless?: ModeInput
+    }
+    if (!body.interactive || !body.headless) {
+      return HttpResponse.json({ error: 'invalid_runtime_settings' }, { status: 400 })
+    }
+    const workspace = demoWorkspaces[index]!
+    const currentSettings = workspace.runtimeSettings ?? {
+      version: 3 as const,
+      runtime: {
+        interactive: { agents: {}, recent: { agents: {} } },
+        headless: { agents: {}, recent: { agents: {} } },
+      },
+    }
+    const mode = (name: 'interactive' | 'headless') => ({
+      ...(body[name]?.defaultAgent ? { defaultAgent: body[name].defaultAgent } : {}),
+      agents: body[name]?.agents ?? {},
+      recent: currentSettings.runtime[name].recent,
+    })
+    const nextSettings = {
+      version: 3 as const,
+      runtime: { interactive: mode('interactive'), headless: mode('headless') },
+    }
+    const nextWorkspace = { ...workspace, runtimeSettings: nextSettings, defaultAgent: nextSettings.runtime.interactive.defaultAgent ?? nextSettings.runtime.interactive.recent.agent }
+    demoWorkspaces[index] = nextWorkspace
+    return HttpResponse.json({ settings: nextSettings, workspace: nextWorkspace })
+  }),
+
+  http.get('/api/workspaces/templates', () => HttpResponse.json({ templates: demoTemplates })),
+  http.get('/api/workspaces/templates/:name/readme', () =>
+    HttpResponse.text('', { status: 404 }),
+  ),
+
+  http.get('/api/workspaces/agents', () =>
+    HttpResponse.json({
+      // `installed` is PATH-probed on a real backend; the demo has no host to
+      // probe, so present everything as installed (a clean showcase, not a
+      // "go install things" prompt).
+      agents: [
+        { id: 'claude', displayName: 'Claude Code', installed: true, binPath: '/usr/local/bin/claude', capabilities: { parallelPerCwd: true, resumeLast: false, resumeById: true, transcriptDiscovery: 'fs-watch', headless: true, web: { wire: 'claude-stream-json', permissionPrompts: true, freshSession: true }, aiProvider: { credentialSource: 'runtime-or-workspace', wirePreference: ['anthropic'], defaultWire: 'anthropic' } } },
+        { id: 'codex', displayName: 'Codex', installed: true, binPath: '/usr/local/bin/codex', capabilities: { parallelPerCwd: true, resumeLast: true, resumeById: true, transcriptDiscovery: 'subprocess', headless: true, web: { wire: 'codex-app-server', permissionPrompts: true, freshSession: true }, aiProvider: { credentialSource: 'runtime-or-workspace', wirePreference: ['openai-responses'], defaultWire: 'openai-responses' } } },
+        { id: 'cursor', displayName: 'Cursor Agent', installed: true, binPath: '/usr/local/bin/cursor-agent', capabilities: { parallelPerCwd: true, resumeLast: true, resumeById: true, transcriptDiscovery: 'subprocess', headless: true, web: { wire: 'acp', permissionPrompts: true, freshSession: true }, aiProvider: { credentialSource: 'runtime-or-workspace', wirePreference: [], directVendors: ['cursor'] } } },
+        { id: 'agy', displayName: 'Antigravity', installed: true, binPath: '/usr/local/bin/agy', capabilities: { parallelPerCwd: true, resumeLast: true, resumeById: true, transcriptDiscovery: 'subprocess', headless: true, aiProvider: { credentialSource: 'runtime-or-workspace', wirePreference: ['google-generative-ai'], defaultWire: 'google-generative-ai' } } },
+        { id: 'grok', displayName: 'Grok Build', installed: true, binPath: '/usr/local/bin/grok', capabilities: { parallelPerCwd: true, resumeLast: true, resumeById: true, transcriptDiscovery: 'subprocess', headless: true, web: { wire: 'acp', permissionPrompts: true, freshSession: true }, aiProvider: { credentialSource: 'runtime-or-workspace', wirePreference: ['openai-chat', 'openai-responses'], defaultWire: 'openai-chat' } } },
+        { id: 'omp', displayName: 'Oh My Pi', installed: true, binPath: '/usr/local/bin/omp', capabilities: { parallelPerCwd: true, resumeLast: true, resumeById: true, transcriptDiscovery: 'subprocess', headless: true, web: { wire: 'pi-rpc', permissionPrompts: false, freshSession: true }, aiProvider: { credentialSource: 'runtime-or-workspace', wirePreference: ['google-generative-ai', 'openai-chat', 'anthropic', 'openai-responses'], defaultWire: 'openai-chat', vendorPolicies: { minimax: { wirePreference: ['anthropic'], legacyRequestedWireFallbacks: { 'openai-chat': 'anthropic' } } }, modelRegistration: { contextWindow: true, reasoning: true } } } },
+        { id: 'opencode', displayName: 'opencode', installed: true, binPath: '/usr/local/bin/opencode', capabilities: { parallelPerCwd: true, resumeLast: true, resumeById: true, transcriptDiscovery: 'subprocess', headless: true, web: { wire: 'acp', permissionPrompts: true, freshSession: true }, aiProvider: { credentialSource: 'runtime-or-workspace', wirePreference: ['google-generative-ai', 'openai-chat', 'anthropic', 'openai-responses'], defaultWire: 'openai-chat', vendorPolicies: { minimax: { wirePreference: ['anthropic'], legacyRequestedWireFallbacks: { 'openai-chat': 'anthropic' } } }, modelRegistration: { contextWindow: true, reasoning: true, effortVariants: true } } } },
+        { id: 'pi', displayName: 'Pi', installed: true, binPath: '/usr/local/bin/pi', capabilities: { parallelPerCwd: true, resumeLast: true, resumeById: true, transcriptDiscovery: 'none', headless: true, web: { wire: 'pi-rpc', permissionPrompts: false, freshSession: true }, aiProvider: { credentialSource: 'runtime-or-workspace', wirePreference: ['google-generative-ai', 'openai-chat', 'anthropic', 'openai-responses'], defaultWire: 'openai-chat', vendorPolicies: { minimax: { wirePreference: ['anthropic'], legacyRequestedWireFallbacks: { 'openai-chat': 'anthropic' } } }, modelRegistration: { contextWindow: true, reasoning: true } } } },
+      ],
+    }),
+  ),
+  http.get('/api/workspaces/:id/launch-plan', ({ params, request }) => {
+    const wsId = String(params.id)
+    const workspace = demoWorkspaces.find((candidate) => candidate.id === wsId)
+    const url = new URL(request.url)
+    const agent = url.searchParams.get('agent') ?? ''
+    const displayName = {
+      claude: 'Claude Code',
+      codex: 'Codex',
+      cursor: 'Cursor Agent',
+      agy: 'Antigravity',
+      grok: 'Grok Build',
+      omp: 'Oh My Pi',
+      opencode: 'opencode',
+      pi: 'Pi',
+      shell: 'Shell',
+    }[agent] ?? agent
+    const commands: Record<string, readonly string[]> = {
+      claude: ['claude', '--settings', '.claude/openalice-autotrust.json'],
+      codex: ['codex', '--sandbox', 'danger-full-access', '--ask-for-approval', 'never'],
+      cursor: ['cursor-agent'],
+      agy: ['agy'],
+      grok: ['grok', '--no-leader'],
+      omp: ['omp'],
+      opencode: ['opencode'],
+      pi: ['pi', '--session-id', 'demo-fresh-session'],
+      shell: ['/bin/zsh', '--login'],
+    }
+    const command = commands[agent] ?? [agent]
+    const capabilities = agent === 'shell'
+      ? { parallelPerCwd: true, resumeLast: false, resumeById: false, transcriptDiscovery: 'none' as const }
+      : {
+          parallelPerCwd: true,
+          resumeLast: agent !== 'claude',
+          resumeById: true,
+          transcriptDiscovery: agent === 'claude' ? 'fs-watch' as const : agent === 'pi' ? 'none' as const : 'subprocess' as const,
+          headless: true,
+        }
+    const cwd = workspace?.dir ?? `/demo/workspaces/${wsId}`
+    return HttpResponse.json({
+      workspace: { id: wsId, tag: workspace?.tag ?? wsId, dir: cwd },
+      agent: {
+        id: agent,
+        displayName,
+        kind: agent === 'shell' ? 'utility' : 'agent',
+        installed: true,
+        binPath: agent === 'shell' ? '/bin/zsh' : agent === 'cursor' ? '/usr/local/bin/cursor-agent' : `/usr/local/bin/${agent}`,
+        capabilities,
+      },
+      launch: {
+        intent: 'fresh',
+        mode: 'direct',
+        composedCommand: command,
+        resolvedCommand: command,
+        cwd,
+        envPWD: cwd,
+        environment: [
+          { key: 'TERM', source: 'terminal', presentation: 'value', value: 'xterm-256color' },
+          { key: 'TERM_PROGRAM', source: 'terminal', presentation: 'value', value: 'openalice-workspaces' },
+          { key: 'PWD', source: 'workspace', presentation: 'value', value: cwd },
+          { key: 'AQ_WS_ID', source: 'workspace', presentation: 'value', value: wsId },
+          { key: 'PATH', source: 'tools', presentation: 'path-count', count: 12 },
+          { key: 'OPENALICE_TOOL_SOCKET', source: 'tools', presentation: 'configured' },
+        ],
+        transcriptDir: agent === 'shell' || agent === 'pi'
+          ? null
+          : `/demo/transcripts/${agent}/${wsId}`,
+      },
+    })
+  }),
+  http.get('/api/workspaces/agent-runtime-readiness', () =>
+    HttpResponse.json(demoAgentRuntimeReadiness),
+  ),
+  http.post('/api/workspaces/agent-runtime-readiness/probe', () =>
+    HttpResponse.json(demoAgentRuntimeReadiness),
+  ),
+  http.get('/api/agent-runtimes/readiness', () =>
+    HttpResponse.json(demoAgentRuntimeReadiness),
+  ),
+  http.post('/api/agent-runtimes/readiness/probe', () =>
+    HttpResponse.json({
+      probeId: 'demo-runtime-probe',
+      agents: Object.keys(demoAgentRuntimeReadiness.agents),
+      snapshot: demoAgentRuntimeReadiness,
+    }, { status: 202 }),
+  ),
+  // Two sample vault credentials let the quick-chat demo show that a remembered
+  // provider can win over the first compatible option. Both speak openai-chat,
+  // which every loginless runtime accepts.
+  http.get('/api/workspaces/credentials', () =>
+    HttpResponse.json({
+      credentials: [
+        { slug: 'openai-1', vendor: 'openai', label: 'OpenAI', authType: 'api-key', wires: { 'openai-chat': 'https://api.openai.com/v1' }, lastModel: 'gpt-5.6-sol', resolvedModel: 'gpt-5.6-sol', apiKey: 'demo-openai-key-not-secret' },
+        { slug: 'minimax-1', vendor: 'minimax', label: 'MiniMax', authType: 'api-key', wires: { 'openai-chat': 'https://api.minimax.io/v1' }, lastModel: 'MiniMax-M2.1', resolvedModel: 'MiniMax-M2.1', apiKey: 'demo-minimax-key-not-secret' },
+      ],
+    }),
+  ),
+  http.post('/api/workspaces/credentials', () =>
+    HttpResponse.json({ slug: 'custom-1', vendor: 'custom' }, { status: 201 }),
+  ),
+
+  http.get('/api/workspaces/:id/git/log', () => HttpResponse.json({ entries: [] })),
+  http.get('/api/workspaces/:id/git/status', () =>
+    HttpResponse.json({ branch: 'main', clean: true, files: [] }),
+  ),
+  http.get('/api/workspaces/:id/cli/:export/manifest', ({ params }) => {
+    const binary = params.export === 'data' ? 'alice' : params.export === 'traderhub' ? 'traderhub' : 'alice-uta'
+    const policy = demoHarnessConfigs.get(String(params.id))?.cli[binary]
+    const groups = policy?.enabled === false ? [] : demoHarnessCommands[binary].filter((group) => policy?.groups?.[group] !== false)
+    return HttpResponse.json({
+      export: params.export, description: 'Demonstration command catalog',
+      groups: Object.fromEntries(groups.map((group) => [group, { show: { description: 'Demonstration command. Production uses the live registry.', schema: { type: 'object', properties: {} } } }])),
+    })
+  }),
+  http.get('/api/workspaces/:id/files', ({ params, request }) => {
+    const path = new URL(request.url).searchParams.get('path') ?? ''
+    const listing = demoDirectoryListing(String(params.id), path)
+    if (!listing) {
+      return HttpResponse.json(
+        { error: 'invalid_path', message: `refused to escape workspace: ${path}` },
+        { status: 400 },
+      )
+    }
+    return HttpResponse.json(listing)
+  }),
+  http.get('/api/workspaces/:id/content', ({ request }) => {
+    const url = new URL(request.url)
+    const path = url.searchParams.get('path') ?? ''
+    const content = demoWorkspaceFiles[path]
+    if (content == null) return HttpResponse.json({ error: 'file_not_found' }, { status: 404 })
+    if (url.searchParams.get('metadata') === '1') return HttpResponse.json({ path, size: content.length })
+    return new HttpResponse(content, { headers: { 'Content-Type': 'application/octet-stream' } })
+  }),
+  http.get('/api/workspaces/:id/file', ({ request }) => {
+    const url = new URL(request.url)
+    const path = url.searchParams.get('path') ?? ''
+    const content = demoWorkspaceFiles[path]
+    if (content != null) return HttpResponse.json({ content })
+    return HttpResponse.json({ error: 'file_not_found' }, { status: 404 })
+  }),
+
+  http.post('/api/workspaces/:id/sessions/spawn', ({ params }) =>
+    HttpResponse.json({
+      sessionId: 'demo-session',
+      wsId: String(params.id),
+      name: 'c1',
+      pid: 0,
+      startedAt: Date.now(),
+      agent: 'claude',
+      resumeId: 'demo-resume-spawn',
+      title: null,
+    }),
+  ),
+  http.get('/api/workspaces/signatures/:resumeId', ({ params }) => {
+    const resumeId = String(params.resumeId)
+    const workspace = demoWorkspaces.find((candidate) =>
+      candidate.sessions.some((session) => session.resumeId === resumeId),
+    ) ?? (resumeId === 'resume-demo-thesis-owner'
+      ? demoWorkspaces.find((candidate) => candidate.id === DEMO_AUTO_QUANT_WORKSPACE_ID)
+      : undefined)
+    if (!workspace) return HttpResponse.json({ error: 'not_found' }, { status: 404 })
+    const session = workspace.sessions.find((candidate) => candidate.resumeId === resumeId)
+    return HttpResponse.json({
+      signature: `@${resumeId}`,
+      resumeId,
+      workspaceId: workspace.id,
+      agent: session?.agent ?? 'claude',
+      lifecycle: 'active',
+      resumable: true,
+    })
+  }),
+  http.patch('/api/workspaces/:id/resumes/:resumeId/metadata', async ({ params, request }) => {
+    const resumeId = String(params.resumeId)
+    const body = await request.json().catch(() => ({})) as { displayName?: unknown }
+    if (!Object.prototype.hasOwnProperty.call(body, 'displayName')) {
+      return HttpResponse.json({ error: 'invalid_display_name' }, { status: 400 })
+    }
+    const raw = body.displayName
+    if (raw !== null && typeof raw !== 'string') {
+      return HttpResponse.json({ error: 'invalid_display_name' }, { status: 400 })
+    }
+    const displayName = typeof raw === 'string' ? raw.trim() : ''
+    const workspace = demoWorkspaces.find((candidate) =>
+      candidate.sessions.some((session) => session.resumeId === resumeId),
+    )
+    const session = workspace?.sessions.find((candidate) => candidate.resumeId === resumeId)
+    if (session) {
+      Object.assign(session, displayName ? { displayName } : { displayName: undefined })
+    }
+    return HttpResponse.json({
+      resumeId,
+      ...(displayName ? { displayName } : {}),
+    })
+  }),
+  http.put('/api/workspaces/:id/resumes/:resumeId/runtime', async ({ params, request }) => {
+    const resumeId = String(params.resumeId)
+    const body = await request.json().catch(() => ({})) as Partial<PausedSessionRuntimeUpdate>
+    if (
+      (body.credentialSource !== 'native' && body.credentialSource !== 'vault')
+      || (body.credentialSource === 'vault' && !body.credentialSlug)
+    ) {
+      return HttpResponse.json({ error: 'bad_request' }, { status: 400 })
+    }
+    const runtime = {
+      credentialSource: body.credentialSource,
+      ...(body.credentialSource === 'vault' ? { credentialSlug: body.credentialSlug! } : {}),
+      ...(body.model ? { model: body.model } : {}),
+      ...(body.reasoningEffort ? { reasoningEffort: body.reasoningEffort } : {}),
+    }
+    demoResumeRuntimes.set(resumeId, runtime)
+    return HttpResponse.json({
+      resumeId,
+      agent: resumeId === 'resume-demo-thesis-owner' ? 'claude' : 'pi',
+      runtime,
+    })
+  }),
+  http.patch('/api/workspaces/:id/resumes/:resumeId', async ({ params, request }) => {
+    const resumeId = String(params.resumeId)
+    const body = await request.json().catch(() => ({})) as { presence?: unknown }
+    const presence = body.presence
+    if (presence !== 'active' && presence !== 'archived' && presence !== 'deleted') {
+      return HttpResponse.json({ error: 'invalid_presence' }, { status: 400 })
+    }
+    demoSessionPresence.set(resumeId, presence)
+    return HttpResponse.json({ resumeId, presence, lifecycle: 'active' })
+  }),
+  http.get('/api/workspaces/:id/resumes', ({ params, request }) => {
+    const requestedResume = new URL(request.url).searchParams.get('resumeId')
+    const wsId = String(params.id)
+    if (wsId === DEMO_AUTO_QUANT_WORKSPACE_ID) {
+      return HttpResponse.json({
+        workspace: { id: wsId, tag: 'auto-quant' },
+        sessions: [{
+          resumeId: 'resume-demo-thesis-owner', agent: 'claude', issueAttached: true,
+          createdAt: Date.now() - 86_400_000, updatedAt: Date.now() - 60_000,
+          lifecycle: 'active', resumable: true, active: false,
+          runtime: demoResumeRuntimes.get('resume-demo-thesis-owner'),
+          latestExecution: {
+            taskId: 'demo-thesis-owner-run', status: 'done',
+            startedAt: Date.now() - 180_000,
+            finishedAt: Date.now() - 60_000,
+            assistantPreview: 'Reviewed the active thesis invalidation rules.',
+          },
+        }].filter((session) => !requestedResume || session.resumeId === requestedResume),
+      })
+    }
+    const workspace = demoWorkspaces.find((candidate) => candidate.id === wsId)
+    const sessions: Array<{
+      resumeId: string
+      agent: string
+      createdAt: number
+      updatedAt: number
+      lifecycle: 'active' | 'retired'
+      presence?: 'active' | 'archived' | 'deleted'
+      resumable: boolean
+      active: boolean
+      runtime?: SessionRecord['runtime']
+      interactive?: {
+        name: string
+        title?: string
+        state: 'running' | 'paused'
+        lastActiveAt: string
+      }
+      latestExecution?: {
+        taskId: string
+        status: 'running' | 'done' | 'failed' | 'interrupted'
+        startedAt: number
+        finishedAt?: number
+        issueId?: string
+        assistantPreview?: string
+      }
+    }> = (workspace?.sessions ?? []).map((session) => ({
+      resumeId: session.resumeId,
+      agent: session.agent,
+      createdAt: Date.parse(session.createdAt),
+      updatedAt: Date.parse(session.lastActiveAt),
+      lifecycle: 'active',
+      resumable: session.agent !== 'shell',
+      active: session.state === 'running',
+      runtime: demoResumeRuntimes.get(session.resumeId) ?? session.runtime,
+      ...(session.surface === 'headless'
+        ? {}
+        : {
+            interactive: {
+              name: session.name,
+              ...(session.title ? { title: session.title } : {}),
+              state: session.state,
+              lastActiveAt: session.lastActiveAt,
+            },
+          }),
+    }))
+    if (wsId === DEMO_CHAT_WORKSPACE_ID) {
+      const completedHeadless = sessions.find(
+        (session) => session.resumeId === 'resume-demo-headless-colleague',
+      )
+      if (completedHeadless) {
+        completedHeadless.latestExecution = {
+          taskId: 'demo-headless-colleague-run',
+          status: 'done',
+          startedAt: Date.now() - 180_000,
+          finishedAt: Date.now() - 120_000,
+          assistantPreview: 'Morning scan complete. Semis still lead.',
+        }
+      }
+      const runningHeadless = sessions.find(
+        (session) => session.resumeId === 'resume-demo-headless-running',
+      )
+      if (runningHeadless) {
+        runningHeadless.latestExecution = {
+          taskId: 'demo-headless-running',
+          status: 'running',
+          startedAt: Date.now() - 30_000,
+          issueId: 'scan-open',
+        }
+      }
+      sessions.push(
+        {
+          resumeId: 'resume-demo-archived-colleague',
+          agent: 'pi',
+          createdAt: Date.now() - 2_400_000,
+          updatedAt: Date.now() - 1_800_000,
+          lifecycle: 'active',
+          presence: 'archived',
+          resumable: true,
+          active: false,
+          latestExecution: {
+            taskId: 'demo-archived-colleague-run',
+            status: 'done',
+            startedAt: Date.now() - 2_000_000,
+            finishedAt: Date.now() - 1_800_000,
+            assistantPreview: 'Filed last week’s metals watch.',
+          },
+        },
+        {
+          resumeId: 'resume-demo-headless-retired',
+          agent: 'pi',
+          createdAt: Date.now() - 86_400_000,
+          updatedAt: Date.now() - 86_000_000,
+          lifecycle: 'retired',
+          resumable: false,
+          active: false,
+        },
+      )
+    }
+    return HttpResponse.json({
+      workspace: { id: wsId, tag: workspace?.tag ?? wsId },
+      sessions: sessions.filter((session) => !requestedResume || session.resumeId === requestedResume).map((session) => {
+        const presence = demoSessionPresence.get(session.resumeId) ?? session.presence
+        return presence && presence !== 'active' ? { ...session, presence } : session
+      }),
+    })
+  }),
+  http.post('/api/workspaces/:id/resumes/:resumeId/session', async ({ params, request }) => {
+    const wsId = String(params.id)
+    const resumeId = String(params.resumeId)
+    const workspace = demoWorkspaces.find((candidate) => candidate.id === wsId)
+    if (!workspace) return HttpResponse.json({ error: 'workspace_not_found' }, { status: 404 })
+    const existing = workspace.sessions.find((session) => session.resumeId === resumeId)
+    if (existing) return HttpResponse.json({ session: existing, created: false })
+    const body = await request.json().catch(() => ({})) as { title?: unknown }
+    const now = new Date().toISOString()
+    const session = {
+      id: `run-${resumeId}`,
+      resumeId,
+      wsId,
+      agent: 'codex',
+      name: `x${workspace.sessions.length + 1}`,
+      createdAt: now,
+      lastActiveAt: now,
+      state: 'running' as const,
+      pid: 0,
+      startedAt: Date.now(),
+      title: typeof body.title === 'string' && body.title.trim()
+        ? body.title.trim()
+        : 'Resumed demo run',
+      sourceRunId: 'demo-headless-1',
+    }
+    ;(workspace.sessions as Array<typeof session>).push(session)
+    return HttpResponse.json({ session, created: true }, { status: 201 })
+  }),
+
+  // Quick-chat launch — honor an explicit Chat Workspace target and otherwise
+  // reuse the recent demo Chat workspace. Runtimes with a structured protocol
+  // open in the real Web conversation UI with a recorded response; runtimes
+  // without one keep the TUI placeholder so visitors still see that OpenAlice
+  // is multi-runtime.
+  http.post('/api/workspaces/quick-chat', async ({ request }) => {
+    const body = (await request.json().catch(() => null)) as {
+      surface?: unknown
+      prompt?: unknown
+      agent?: unknown
+      targetWsId?: unknown
+      template?: unknown
+      credentialSlug?: unknown
+      model?: unknown
+      reasoningEffort?: unknown
+    } | null
+    const explicit = typeof body?.targetWsId === 'string'
+      ? demoWorkspaces.find((workspace) => workspace.id === body.targetWsId)
+      : undefined
+    const fallback = body?.template === 'auto-quant-v2'
+      ? demoWorkspaces.find((workspace) => workspace.template === 'auto-quant-v2')
+      : body?.template === 'auto-prediction'
+        ? demoWorkspaces.find((workspace) => workspace.template === 'auto-prediction')
+        : demoWorkspaces.find((workspace) => workspace.id === demoChatWorkspace.id)
+    const ws = explicit ?? fallback
+    if (!ws) return HttpResponse.json({ error: 'workspace_not_found' }, { status: 404 })
+
+    const prompt = typeof body?.prompt === 'string' && body.prompt.trim()
+      ? body.prompt.trim()
+      : 'Show me how this Workspace is doing.'
+    const agent = typeof body?.agent === 'string'
+      ? body.agent
+      : ws.defaultAgent ?? 'pi'
+    const startedAt = Date.now()
+    const now = new Date(startedAt).toISOString()
+    const sessionId = `demo-quick-chat-${++demoQuickChatSequence}`
+    const resumeId = `demo-resume-quick-chat-${demoQuickChatSequence}`
+    const prefix = ({ claude: 'c', codex: 'x', grok: 'g', omp: 'om', opencode: 'o', pi: 'p' } as Record<string, string>)[agent]
+      ?? agent.slice(0, 1)
+    const name = `${prefix}${ws.sessions.filter((session) => session.agent === agent).length + 1}`
+    if (body?.surface === 'webpi' && !(agent in demoWebCapabilities)) return HttpResponse.json({ error: 'unsupported_surface' }, { status: 400 })
+    const surface = body?.surface === 'terminal' ? 'terminal' as const : agent in demoWebCapabilities ? 'webpi' as const : 'terminal' as const
+    const record: SessionRecord = {
+      id: sessionId,
+      wsId: ws.id,
+      agent,
+      name,
+      createdAt: now,
+      lastActiveAt: now,
+      state: 'running',
+      surface,
+      resumeId,
+      pid: 0,
+      startedAt,
+      title: prompt,
+    }
+    const updatedWorkspace = {
+      ...ws,
+      sessions: [...ws.sessions, record],
+    }
+    const workspaceIndex = demoWorkspaces.findIndex((workspace) => workspace.id === ws.id)
+    demoWorkspaces[workspaceIndex] = updatedWorkspace
+
+    if (surface === 'webpi') {
+      setDemoWebSession({
+        wsId: ws.id,
+        sessionId,
+        resumeId,
+        agent,
+        startedAt,
+        messages: [],
+      })
+      startDemoWebTurn(ws.id, sessionId, prompt)
+    }
+    return HttpResponse.json(
+      {
+        workspace: updatedWorkspace,
+        session: {
+          sessionId,
+          wsId: ws.id,
+          name,
+          pid: 0,
+          startedAt,
+          agent,
+          resumeId,
+          title: prompt,
+          surface,
+        },
+      },
+      { status: 201 },
+    )
+  }),
+  http.post('/api/workspaces/:id/sessions/:sid/pause', () => HttpResponse.json(true)),
+  http.put('/api/workspaces/:id/sessions/:sid/runtime', async ({ params, request }) => {
+    const workspaceIndex = demoWorkspaces.findIndex((candidate) => candidate.id === String(params.id))
+    const workspace = workspaceIndex >= 0 ? demoWorkspaces[workspaceIndex] : undefined
+    const sessionIndex = workspace?.sessions.findIndex((candidate) => candidate.id === String(params.sid)) ?? -1
+    const session = sessionIndex >= 0 ? workspace?.sessions[sessionIndex] : undefined
+    if (!workspace || !session) {
+      return HttpResponse.json({ error: 'not_found' }, { status: 404 })
+    }
+    if (session.state !== 'paused') {
+      return HttpResponse.json({
+        error: 'session_not_paused',
+        message: 'Pause this Session before changing its credential, model, or effort',
+      }, { status: 409 })
+    }
+    const body = await request.json().catch(() => ({})) as Partial<PausedSessionRuntimeUpdate>
+    if (
+      (body.credentialSource !== 'native' && body.credentialSource !== 'vault')
+      || (body.credentialSource === 'vault' && !body.credentialSlug)
+    ) {
+      return HttpResponse.json({ error: 'bad_request' }, { status: 400 })
+    }
+    const updatedSession: SessionRecord = {
+      ...session,
+      runtime: {
+        credentialSource: body.credentialSource,
+        ...(body.credentialSource === 'vault' ? { credentialSlug: body.credentialSlug! } : {}),
+        ...(body.model ? { model: body.model } : {}),
+        ...(body.reasoningEffort ? { reasoningEffort: body.reasoningEffort } : {}),
+      },
+    }
+    demoWorkspaces[workspaceIndex] = {
+      ...workspace,
+      sessions: workspace.sessions.map((candidate, index) => (
+        index === sessionIndex ? updatedSession : candidate
+      )),
+    }
+    return HttpResponse.json({ session: updatedSession })
+  }),
+  http.post('/api/workspaces/:id/sessions/:sid/resume', ({ params }) => {
+    const workspace = demoWorkspaces.find((candidate) => candidate.id === String(params.id))
+    const session = workspace?.sessions.find((candidate) => candidate.id === String(params.sid))
+    if (!workspace || !session) {
+      return HttpResponse.json({ error: 'not_found', message: 'This demo Session is unavailable.' }, { status: 404 })
+    }
+    const key = webKey(workspace.id, session.id)
+    if (!demoResumedSessions.has(key)) demoResumedSessions.set(key, session)
+    // Demo never starts a PTY; pid 0 represents the existing terminal preview.
+    const updated: SessionRecord = {
+      ...session, state: 'running', surface: 'terminal', pid: 0,
+      startedAt: session.state === 'running' ? (session.startedAt ?? Date.now()) : Date.now(),
+      lastActiveAt: new Date().toISOString(),
+    }
+    const index = demoWorkspaces.indexOf(workspace)
+    demoWorkspaces[index] = { ...workspace, sessions: workspace.sessions.map((row) => row.id === session.id ? updated : row) }
+    return HttpResponse.json({
+      sessionId: updated.id, wsId: workspace.id, name: updated.name,
+      pid: updated.pid, startedAt: updated.startedAt, agent: updated.agent,
+      resumeId: updated.resumeId, title: updated.title ?? null, surface: 'terminal',
+    })
+  }),
+  http.delete('/api/workspaces/:id/sessions/:sid', ({ params }) => {
+    const wsId = String(params.id)
+    const sessionId = String(params.sid)
+    const workspaceIndex = demoWorkspaces.findIndex((candidate) => candidate.id === String(params.id))
+    const workspace = demoWorkspaces[workspaceIndex]
+    if (workspace) {
+      demoWorkspaces[workspaceIndex] = {
+        ...workspace,
+        sessions: workspace.sessions.filter((session) => session.id !== sessionId),
+      }
+    }
+    demoWebSessions.delete(webKey(wsId, sessionId))
+    return HttpResponse.json(true)
+  }),
+  http.get('/api/workspaces/:id/sessions/:sid/diagnostics', () =>
+    HttpResponse.json({ status: 'demo' }),
+  ),
+  http.post('/api/workspaces/:id/sessions/:sid/web/open', ({ params }) => {
+    const wsId = String(params.id)
+    const sessionId = String(params.sid)
+    if (wsId === demoManagerSession.wsId && sessionId === demoManagerSession.id) {
+      return HttpResponse.json({ snapshot: demoManagerSnapshot() })
+    }
+    const record = demoWorkspaces
+      .find((workspace) => workspace.id === wsId)
+      ?.sessions.find((session) => session.id === sessionId)
+    if (record && !(record.agent in demoWebCapabilities)) {
+      return HttpResponse.json({
+        error: 'unsupported_surface',
+        message: `${record.agent} has no Web conversation surface; open it in the terminal instead`,
+      }, { status: 409 })
+    }
+    const snapshot = ensureDemoWebSession(wsId, sessionId)
+    return snapshot
+      ? HttpResponse.json({ snapshot })
+      : HttpResponse.json({ error: 'web_session_not_found' }, { status: 404 })
+  }),
+  http.get('/api/workspaces/:id/sessions/:sid/web', ({ params, request }) => {
+    const wsId = String(params.id)
+    const sessionId = String(params.sid)
+    const snapshot = wsId === demoManagerSession.wsId && sessionId === demoManagerSession.id
+      ? demoManagerSnapshot()
+      : findDemoWebSession(wsId, sessionId)
+    if (!snapshot) return HttpResponse.json({ error: 'web_not_running' }, { status: 409 })
+    const revision = Number.parseInt(new URL(request.url).searchParams.get('revision') ?? '', 10)
+    return Number.isFinite(revision) && revision === snapshot.revision
+      ? HttpResponse.json({ unchanged: true, revision: snapshot.revision })
+      : HttpResponse.json({ snapshot })
+  }),
+  http.post('/api/workspaces/:id/sessions/:sid/web/prompt', async ({ params, request }) => {
+    const body = await request.json().catch(() => ({})) as { message?: string }
+    const wsId = String(params.id)
+    const sessionId = String(params.sid)
+    const message = body.message?.trim() ?? ''
+    if (!message) return HttpResponse.json({ error: 'bad_request', message: 'message is required' }, { status: 400 })
+    if (wsId === demoManagerSession.wsId && sessionId === demoManagerSession.id) {
+      demoManagerMessages = [
+        ...demoManagerMessages,
+        { role: 'user', content: message },
+        { role: 'assistant', content: [{ type: 'text', text: 'Demo manager: I would inspect the live CLI indexes before changing any desk.' }] },
+      ]
+      return HttpResponse.json({ snapshot: demoManagerSnapshot() })
+    }
+    const current = findDemoWebSession(wsId, sessionId)
+    if (current && current.phase === 'awaiting-input') {
+      return HttpResponse.json({
+        error: 'web_prompt_failed',
+        message: 'answer the pending request before sending another message',
+      }, { status: 409 })
+    }
+    const snapshot = startDemoWebTurn(wsId, sessionId, message)
+    return snapshot
+      ? HttpResponse.json({ snapshot })
+      : HttpResponse.json({ error: 'web_not_running' }, { status: 409 })
+  }),
+  http.post('/api/workspaces/:id/sessions/:sid/web/abort', ({ params }) => {
+    const wsId = String(params.id)
+    const sessionId = String(params.sid)
+    if (wsId === demoManagerSession.wsId && sessionId === demoManagerSession.id) {
+      return HttpResponse.json({ snapshot: demoManagerSnapshot() })
+    }
+    // Aborting mid-request drops the pending question and records the stop.
+    const snapshot = updateDemoWebSession(wsId, sessionId, (current) => ({
+      phase: 'idle',
+      streamingMessage: null,
+      requests: [],
+      messages: current.requests.length > 0 || current.streamingMessage
+        ? [...current.messages, { role: 'notice', text: 'Turn stopped by the user.' }]
+        : current.messages,
+    }))
+    return snapshot
+      ? HttpResponse.json({ snapshot })
+      : HttpResponse.json({ error: 'web_not_running' }, { status: 409 })
+  }),
+  http.post('/api/workspaces/:id/sessions/:sid/web/respond', async ({ params, request }) => {
+    const body = await request.json().catch(() => ({})) as { requestId?: unknown; optionId?: unknown; text?: unknown }
+    const wsId = String(params.id)
+    const sessionId = String(params.sid)
+    if (typeof body.requestId !== 'string' || typeof body.optionId !== 'string' || (body.text !== undefined && typeof body.text !== 'string')) {
+      return HttpResponse.json({ error: 'bad_request', message: 'requestId and optionId are required' }, { status: 400 })
+    }
+    const result = answerDemoWebRequest(wsId, sessionId, body.requestId, body.optionId, body.text as string | undefined)
+    if (result === null) return HttpResponse.json({ error: 'web_not_running' }, { status: 409 })
+    if (result === 'unknown_request') {
+      return HttpResponse.json({ error: 'web_respond_failed', message: `no pending request ${body.requestId}` }, { status: 409 })
+    }
+    if (result === 'unknown_option') {
+      return HttpResponse.json({ error: 'web_respond_failed', message: `unknown option ${body.optionId}` }, { status: 409 })
+    }
+    return HttpResponse.json({ snapshot: result })
+  }),
+
+  http.get('/api/workspaces/:id/agent-config', ({ params }) =>
+    HttpResponse.json(demoAgentConfigBundle(String(params.id)))),
+  http.get('/api/workspaces/:id/agent-readiness', () =>
+    HttpResponse.json({
+      agents: {
+        claude: {
+          agent: 'claude',
+          ready: true,
+          requiresCredential: false,
+          source: 'runtime-login',
+          hasWorkspaceConfig: false,
+          hasUsableWorkspaceConfig: false,
+          detectedCredentialSlug: null,
+          compatibleCredentialSlugs: [],
+          injectableCredentialSlugs: [],
+        },
+        codex: {
+          agent: 'codex',
+          ready: true,
+          requiresCredential: false,
+          source: 'runtime-login',
+          hasWorkspaceConfig: false,
+          hasUsableWorkspaceConfig: false,
+          detectedCredentialSlug: null,
+          compatibleCredentialSlugs: [],
+          injectableCredentialSlugs: [],
+        },
+        opencode: {
+          agent: 'opencode',
+          ready: true,
+          requiresCredential: true,
+          source: 'launcher-vault',
+          hasWorkspaceConfig: false,
+          hasUsableWorkspaceConfig: false,
+          detectedCredentialSlug: null,
+          compatibleCredentialSlugs: ['openai-1', 'minimax-1'],
+          injectableCredentialSlugs: ['openai-1', 'minimax-1'],
+        },
+        pi: {
+          agent: 'pi',
+          ready: true,
+          requiresCredential: true,
+          source: 'launcher-vault',
+          hasWorkspaceConfig: false,
+          hasUsableWorkspaceConfig: false,
+          detectedCredentialSlug: null,
+          compatibleCredentialSlugs: ['openai-1', 'minimax-1'],
+          injectableCredentialSlugs: ['openai-1', 'minimax-1'],
+        },
+      },
+    }),
+  ),
+  http.get('/api/workspaces/:id/agent-config/:agent/credential', ({ params }) => {
+    const workspaceId = String(params.id)
+    const agent = String(params.agent) as AgentId
+    const config = demoAgentConfigs.get(workspaceId)?.[agent]
+    const configured = Boolean(config?.baseUrl && config.apiKey && config.model)
+    const baseUrl = config?.baseUrl ?? ''
+    const slug = baseUrl.includes('api.openai.com')
+      ? 'openai-1'
+      : baseUrl.includes('api.minimax.io')
+        ? 'minimax-1'
+        : null
+    return HttpResponse.json({
+      configured,
+      slug: configured ? slug : null,
+      model: configured ? config?.model ?? null : null,
+      contextWindow: configured ? config?.contextWindow ?? null : null,
+      wireShape: configured ? config?.wireShape ?? null : null,
+      reasoning: configured ? config?.reasoning ?? null : null,
+      reasoningEffort: configured ? config?.reasoningEffort ?? null : null,
+      reasoningMode: null,
+      reasoningDefaultEnabled: null,
+      ...(agent === 'grok' && !configured
+        ? { interactiveSetupStatus: 'workspace-trust-required' as const }
+        : {}),
+    })
+  }),
+  http.put('/api/workspaces/:id/agent-config/:agent', async ({ params, request }) => {
+    const workspaceId = String(params.id)
+    const agent = String(params.agent) as AgentId
+    const config = await request.json() as AgentConfig
+    demoAgentConfigs.set(workspaceId, {
+      ...demoAgentConfigs.get(workspaceId),
+      [agent]: config,
+    })
+    return HttpResponse.json({ ok: true })
+  }),
+  http.post('/api/workspaces/:id/agent-config/:agent/test', () =>
+    HttpResponse.json({ ok: true, response: 'Demo mode — test is stubbed.' }),
+  ),
+]

@@ -1,0 +1,89 @@
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { setupServer } from 'msw/node'
+
+import { configKeysHandlers, demoCredentialPresets } from './configKeys'
+
+const server = setupServer(...configKeysHandlers)
+const baseUrl = window.location.origin
+
+beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
+afterEach(() => server.resetHandlers())
+afterAll(() => server.close())
+
+function modelIds(presetId: string): string[] {
+  const preset = demoCredentialPresets.find((candidate) => candidate.id === presetId)
+  const model = preset?.schema.properties.model as {
+    default?: string
+    oneOf?: Array<{ const: string }>
+  } | undefined
+  return model?.oneOf?.map((option) => option.const) ?? []
+}
+
+describe('demo credential catalog', () => {
+  it('covers the current OpenAI and Anthropic forms instead of falling back to Custom', () => {
+    expect(modelIds('codex-api')).toEqual([
+      'gpt-5.6-sol',
+      'gpt-5.6-terra',
+      'gpt-5.6-luna',
+      'gpt-5.5',
+      'gpt-5.4',
+    ])
+    expect(modelIds('claude-api')).toEqual([
+      'claude-fable-5',
+      'claude-opus-5',
+      'claude-sonnet-5',
+      'claude-haiku-4-5',
+      'claude-opus-4-8',
+      'claude-sonnet-4-6',
+    ])
+    expect(modelIds('openrouter')).toEqual([
+      'openai/gpt-5.6-luna',
+      'anthropic/claude-sonnet-5',
+      'deepseek/deepseek-v4-flash-0731',
+      'tencent/hy3',
+      'z-ai/glm-5.2',
+      'xiaomi/mimo-v2.5',
+      'anthropic/claude-opus-5',
+      'anthropic/claude-fable-5',
+      'openai/gpt-5.6-sol',
+      'openai/gpt-5.6-terra',
+      'x-ai/grok-4.6',
+      'google/gemini-3.7-flash',
+      'minimax/minimax-m3',
+      'moonshotai/kimi-k3',
+      'deepseek/deepseek-v4-pro',
+    ])
+    expect(modelIds('gemini')).toEqual([
+      'gemini-3.6-flash',
+      'gemini-3.5-flash-lite',
+      'gemini-3.5-flash',
+      'gemini-3.1-pro-preview',
+      'gemini-3.1-flash-lite',
+      'gemini-2.5-pro',
+      'gemini-2.5-flash',
+      'gemini-2.5-flash-lite',
+    ])
+  })
+})
+
+describe('demo snapshot config', () => {
+  it('mirrors production duration validation and normalization', async () => {
+    const invalid = await fetch(`${baseUrl}/api/config/snapshot`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: true, every: 'nonsense' }),
+    })
+
+    expect(invalid.status).toBe(400)
+    expect(await invalid.json()).toEqual({ error: 'Validation failed' })
+
+    const valid = await fetch(`${baseUrl}/api/config/snapshot`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: false, every: ' 2h15m ' }),
+    })
+
+    expect(valid.status).toBe(200)
+    expect(await valid.json()).toEqual({ enabled: false, every: '2h15m' })
+  })
+})

@@ -1,0 +1,61 @@
+packages:
+  - apps/*
+  - packages/*
+  - services/*
+  - ui
+
+allowBuilds:
+  bufferutil: false
+  ccxt: false
+  dugite: true
+  electron: true
+  electron-winstaller: false
+  esbuild: false
+  msw: false
+  node-pty: true
+  protobufjs: false
+
+minimumReleaseAgeExclude:
+  - '@earendil-works/pi-tui@0.83.0'
+
+overrides:
+  '@alpacahq/alpaca-trade-api>axios': ^0.33.0
+  '@alpacahq/alpaca-trade-api>eslint': '-'
+  '@babel/core': ^7.29.6
+  '@hono/node-server': ^2.0.12
+  body-parser: ^2.3.0
+  'brace-expansion@^1.0.0': 5.0.8
+  'brace-expansion@^2.0.0': 5.0.8
+  'brace-expansion@>=3.0.0': 5.0.8
+  esbuild: ^0.28.1
+  fast-uri: ^3.1.4
+  hono: ^4.12.32
+  js-yaml: ^4.3.0
+  postcss: ^8.5.18
+  protobufjs: ^7.6.5
+  tar: ^7.5.22
+  qs: ^6.15.2
+  ip-address: ^10.1.1
+  tmp: ^0.2.6
+  form-data: ^4.0.6
+  undici@^6.0.0: ^6.27.0
+  undici@^7.0.0: ^7.28.0
+  ws@^7.0.0: ^7.5.11
+  ws@^8.0.0: ^8.20.1
+  lodash: ^4.18.0
+  path-to-regexp: ^8.4.0
+  msw>path-to-regexp: ^6.3.0
+  follow-redirects: ^1.16.0
+  express-rate-limit: ^8.2.2
+  picomatch: ^4.0.4
+  rollup: ^4.59.0
+  vitest>vite: ^7.3.5
+  '@vitest/mocker>vite': ^7.3.5
+
+patchedDependencies:
+  # Adapted from stablyai/orca@ab0f220. See THIRD_PARTY_NOTICES.md.
+  '@xterm/addon-serialize@0.15.0-beta.287': patches/@xterm__addon-serialize@0.15.0-beta.287.patch
+  # Adapted from stablyai/orca@1b331f2. See THIRD_PARTY_NOTICES.md.
+  '@xterm/addon-webgl@0.20.0-beta.286': patches/@xterm__addon-webgl@0.20.0-beta.286.patch
+  # Adapted from stablyai/orca@ab0f220. See THIRD_PARTY_NOTICES.md.
+  '@xterm/xterm@6.1.0-beta.287': patches/@xterm__xterm@6.1.0-beta.287.patch

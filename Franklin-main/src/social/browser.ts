@@ -1,0 +1,468 @@
+/**
+ * Native Playwright-core wrapper for Franklin's social subsystem.
+ *
+ * Mirrors the 9 browser primitives social-bot exposes via its `browse` CLI
+ * (open, snapshot, click, type, press, scroll, screenshot, getUrl, close).
+ * Persistent context so login state survives across runs:
+ *
+ *   ~/.blockrun/social-chrome-profile/
+ *
+ * Unlike social-bot's shell=True subprocess calls, every interaction goes
+ * through Playwright's argv-based API — no shell injection surface even if
+ * the LLM generates `$(rm -rf /)` as reply text.
+ */
+
+import path from 'node:path';
+import fs from 'node:fs';
+import os from 'node:os';
+import type { BrowserContext, Page } from 'playwright-core';
+
+// ─── Persistent profile location ───────────────────────────────────────────
+
+export const SOCIAL_PROFILE_DIR = path.join(os.homedir(), '.blockrun', 'social-chrome-profile');
+
+function ensureProfileDir(): void {
+  if (!fs.existsSync(SOCIAL_PROFILE_DIR)) {
+    fs.mkdirSync(SOCIAL_PROFILE_DIR, { recursive: true });
+  }
+}
+
+// Chrome leaves a few singleton lock files in the user-data-dir when running.
+// If the previous Chromium process crashed (or franklin was killed with -9)
+// these files survive even though no real Chrome owns the profile. The next
+// launchPersistentContext sees them and refuses to start the browser. We
+// detect that case (lock exists + no process), remove the locks, and retry.
+const SINGLETON_LOCKS = ['SingletonLock', 'SingletonCookie', 'SingletonSocket'];
+
+function readSingletonOwnerPid(): number | null {
+  // On macOS/Linux, Chrome writes the PID into SingletonLock as a symlink
+  // target like "hostname-12345". Parse it; if any token is a live PID, the
+  // profile is genuinely in use.
+  const lockPath = path.join(SOCIAL_PROFILE_DIR, 'SingletonLock');
+  try {
+    const target = fs.readlinkSync(lockPath);
+    const match = /-(\d+)$/.exec(target);
+    if (!match) return null;
+    const pid = Number.parseInt(match[1], 10);
+    return Number.isFinite(pid) ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    // ESRCH = no such process. EPERM = exists but we can't signal it (still alive).
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+function clearStaleSingletonLocks(): boolean {
+  const pid = readSingletonOwnerPid();
+  if (pid !== null && isPidAlive(pid)) return false; // real Chrome still using it
+  let removedAny = false;
+  for (const name of SINGLETON_LOCKS) {
+    const p = path.join(SOCIAL_PROFILE_DIR, name);
+    try {
+      fs.rmSync(p, { force: true });
+      removedAny = true;
+    } catch {
+      // ignore — file may simply not exist
+    }
+  }
+  return removedAny;
+}
+
+function isProfileLockError(msg: string): boolean {
+  const m = msg.toLowerCase();
+  return (
+    m.includes('profile') && (m.includes('in use') || m.includes('locked')) ||
+    m.includes('singletonlock') ||
+    m.includes('processsingleton') ||
+    m.includes('user data directory is already in use') ||
+    m.includes('failed to create a chromedriver')
+  );
+}
+
+// ─── A11y tree serialization ───────────────────────────────────────────────
+
+/**
+ * Ref assigned to every interactive AX node. Format matches social-bot:
+ *   [depth-index]
+ * e.g. [0-3], [2-17]. Depth is the tree nesting level; index is the
+ * order within that level.
+ */
+export interface AxRef {
+  id: string;          // e.g. "2-17"
+  role: string;
+  name: string;
+  selector: string;    // Playwright locator string usable with page.locator()
+}
+
+interface AxNode {
+  role?: string;
+  name?: string;
+  value?: string;
+  description?: string;
+  children?: AxNode[];
+}
+
+/**
+ * Walk an AX tree and produce:
+ *   1. A flat text dump with [depth-idx] refs (for regex-based element finding)
+ *   2. A map of ref ID → role/name/selector for click-by-ref lookups
+ *
+ * The flat text shape intentionally mirrors social-bot's `browse snapshot`
+ * output so code patterns and regexes are directly portable.
+ */
+export function serializeAxTree(root: AxNode): {
+  tree: string;
+  refs: Map<string, AxRef>;
+} {
+  const lines: string[] = [];
+  const refs = new Map<string, AxRef>();
+  // Counter per-depth so each depth gets sequential indexes
+  const depthCounters: number[] = [];
+  // Counter per (role,name) to disambiguate multiple same-named elements
+  const nameOccurrences = new Map<string, number>();
+
+  function walk(node: AxNode, depth: number): void {
+    if (!node) return;
+    const role = node.role || '';
+    const name = (node.name || '').trim().slice(0, 120);
+    // Skip uninteresting nodes — they'd pollute the tree
+    const isInteresting =
+      role && role !== 'none' && role !== 'presentation' && role !== 'generic';
+
+    if (isInteresting) {
+      while (depthCounters.length <= depth) depthCounters.push(0);
+      const idx = depthCounters[depth]++;
+      const id = `${depth}-${idx}`;
+      const labelStr = name || (node.value || '').trim().slice(0, 120);
+      const indent = '  '.repeat(depth);
+      lines.push(`${indent}[${id}] ${role}: ${labelStr}`);
+
+      // Build a Playwright locator. Prefer getByRole+name, fall back to
+      // nth match if there are duplicates.
+      const key = `${role}||${labelStr}`;
+      const occ = nameOccurrences.get(key) || 0;
+      nameOccurrences.set(key, occ + 1);
+      let selector: string;
+      if (labelStr) {
+        // Escape quotes in the name
+        const escaped = labelStr.replace(/"/g, '\\"');
+        selector = occ === 0
+          ? `role=${role}[name="${escaped}"]`
+          : `role=${role}[name="${escaped}"] >> nth=${occ}`;
+      } else {
+        selector = `role=${role} >> nth=${idx}`;
+      }
+
+      refs.set(id, { id, role, name: labelStr, selector });
+    }
+
+    if (node.children) {
+      for (const child of node.children) {
+        walk(child, isInteresting ? depth + 1 : depth);
+      }
+    }
+  }
+
+  walk(root, 0);
+  return { tree: lines.join('\n'), refs };
+}
+
+// ─── CDP Accessibility tree adapter ───────────────────────────────────────
+
+/**
+ * Shape of a single node from CDP's `Accessibility.getFullAXTree`. We only
+ * pull the fields `serializeAxTree` consumes; everything else is ignored.
+ */
+interface CdpAxNode {
+  nodeId: string;
+  parentId?: string;
+  childIds?: string[];
+  ignored?: boolean;
+  role?: { value?: unknown };
+  name?: { value?: unknown };
+  value?: { value?: unknown };
+  description?: { value?: unknown };
+}
+
+function cdpStringValue(v: unknown): string {
+  if (v === undefined || v === null) return '';
+  if (typeof v === 'string') return v;
+  return String(v);
+}
+
+function cdpNodesToAxTree(nodes: CdpAxNode[] | undefined): AxNode | null {
+  if (!nodes || nodes.length === 0) return null;
+  const byId = new Map<string, CdpAxNode>();
+  const childSet = new Set<string>();
+  for (const n of nodes) {
+    byId.set(n.nodeId, n);
+    if (n.childIds) for (const cid of n.childIds) childSet.add(cid);
+  }
+  // The root has no parent (or no entry pointing at it as a child).
+  const root =
+    nodes.find((n) => !n.parentId && !childSet.has(n.nodeId)) ??
+    nodes.find((n) => !n.parentId) ??
+    nodes[0];
+
+  const seen = new Set<string>();
+  function build(node: CdpAxNode): AxNode | null {
+    if (seen.has(node.nodeId)) return null;
+    seen.add(node.nodeId);
+    const ax: AxNode = {
+      role: cdpStringValue(node.role?.value),
+      name: cdpStringValue(node.name?.value),
+      value: cdpStringValue(node.value?.value),
+      description: cdpStringValue(node.description?.value),
+      children: [],
+    };
+    if (node.childIds) {
+      for (const cid of node.childIds) {
+        const child = byId.get(cid);
+        if (!child) continue;
+        const built = build(child);
+        if (built) ax.children!.push(built);
+      }
+    }
+    return ax;
+  }
+  return build(root);
+}
+
+// ─── Browser class ─────────────────────────────────────────────────────────
+
+export interface BrowserOptions {
+  headless?: boolean;          // default: false for social (user needs to see the browser)
+  channel?: 'chrome' | 'chromium' | 'msedge';  // default: use user's Chrome if installed
+  slowMo?: number;             // ms to slow each action (helps avoid anti-bot)
+  viewport?: { width: number; height: number };
+}
+
+/**
+ * Franklin's social browser driver. Lazy-imports playwright-core so the
+ * rest of the CLI stays fast to start.
+ */
+export class SocialBrowser {
+  private context: BrowserContext | null = null;
+  private page: Page | null = null;
+  private lastRefs: Map<string, AxRef> = new Map();
+  private opts: Required<BrowserOptions>;
+
+  constructor(opts: BrowserOptions = {}) {
+    this.opts = {
+      headless: opts.headless ?? false,
+      channel: opts.channel ?? 'chrome',
+      slowMo: opts.slowMo ?? 150,
+      viewport: opts.viewport ?? { width: 1280, height: 900 },
+    };
+  }
+
+  async launch(): Promise<void> {
+    ensureProfileDir();
+    // Lazy import — playwright-core is ~2MB and we don't want to pay the
+    // import cost on every franklin command (e.g. `franklin --version`)
+    const { chromium } = await import('playwright-core');
+
+    const launchOnce = () => chromium.launchPersistentContext(SOCIAL_PROFILE_DIR, {
+      headless: this.opts.headless,
+      channel: this.opts.channel,
+      slowMo: this.opts.slowMo,
+      viewport: this.opts.viewport,
+      // Pretend to be a regular Chrome (not headless fingerprint)
+      args: [
+        '--disable-blink-features=AutomationControlled',
+        '--no-default-browser-check',
+      ],
+    });
+
+    try {
+      this.context = await launchOnce();
+    } catch (err) {
+      const msg = (err as Error).message;
+      if (msg.includes('Executable doesn') || msg.includes("wasn't found")) {
+        throw new Error(
+          `Chrome/Chromium not found. Run:\n  franklin social setup\n\n` +
+          `Or install manually:\n  npx playwright install chromium\n\n` +
+          `Original error: ${msg}`
+        );
+      }
+      // Stale singleton-lock from a crashed Chrome / killed franklin. If no
+      // live PID owns the lock, scrub it and retry once. Don't auto-clean
+      // when a real process still owns the profile — that would corrupt
+      // their running session.
+      if (isProfileLockError(msg) || msg.toLowerCase().includes('failed to launch')) {
+        const cleared = clearStaleSingletonLocks();
+        if (cleared) {
+          try {
+            this.context = await launchOnce();
+          } catch (err2) {
+            throw new Error(
+              `Chrome profile lock recovery failed. The profile dir at\n  ${SOCIAL_PROFILE_DIR}\n` +
+              `had stale lock files; we removed them and retried, but launch still failed.\n` +
+              `Close any running Chrome/Chromium using this profile and try again.\n\n` +
+              `Original error: ${msg}\nRetry error: ${(err2 as Error).message}`
+            );
+          }
+        } else {
+          throw new Error(
+            `Chrome profile is in use at\n  ${SOCIAL_PROFILE_DIR}\n` +
+            `Another franklin instance (or a Chrome with that user-data-dir) is running.\n` +
+            `Close it and retry, or run: pkill -f social-chrome-profile\n\n` +
+            `Original error: ${msg}`
+          );
+        }
+      } else {
+        throw err;
+      }
+    }
+
+    // Reuse existing tab if any, else open new
+    const existing = this.context.pages();
+    this.page = existing.length > 0 ? existing[0] : await this.context.newPage();
+  }
+
+  async close(): Promise<void> {
+    if (this.context) {
+      await this.context.close().catch(() => {});
+      this.context = null;
+      this.page = null;
+    }
+  }
+
+  // ─── Primitives ────────────────────────────────────────────────────────
+
+  async open(url: string): Promise<void> {
+    this.requirePage();
+    await this.page!.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  }
+
+  /**
+   * Capture the page as a flat [N-M] ref tree (social-bot style).
+   * Also stores the ref map internally so click(ref) can find the node.
+   */
+  async snapshot(): Promise<string> {
+    this.requirePage();
+    // page.accessibility was removed from playwright-core (gone by 1.59).
+    // Calling it threw `Cannot read properties of undefined (reading 'snapshot')`
+    // in production (failures.jsonl entries 1776662596215 / 1776662608060).
+    // The supported replacement is the CDP Accessibility domain, which still
+    // ships with Chromium-based browsers.
+    const cdp = await this.page!.context().newCDPSession(this.page!);
+    let axRoot: AxNode | null;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = (await cdp.send('Accessibility.getFullAXTree' as any)) as { nodes?: CdpAxNode[] };
+      axRoot = cdpNodesToAxTree(result?.nodes);
+    } finally {
+      await cdp.detach().catch(() => {});
+    }
+    if (!axRoot) return '';
+    const { tree, refs } = serializeAxTree(axRoot);
+    this.lastRefs = refs;
+    return tree;
+  }
+
+  /**
+   * Click by ref from the last snapshot. Throws if the ref isn't known.
+   * The ref map is reset on every snapshot() call.
+   */
+  async click(ref: string): Promise<void> {
+    this.requirePage();
+    const axRef = this.lastRefs.get(ref);
+    if (!axRef) {
+      throw new Error(
+        `Unknown ref "${ref}". Refs are only valid until the next snapshot() call. Known refs: ${this.lastRefs.size}`
+      );
+    }
+    await this.page!.locator(axRef.selector).first().click({ timeout: 15000 });
+  }
+
+  async clickXY(x: number, y: number): Promise<void> {
+    this.requirePage();
+    await this.page!.mouse.click(x, y);
+  }
+
+  /**
+   * Type text into the currently focused element. Safe against any content
+   * in `text` — Playwright passes it as argv, not through a shell.
+   */
+  async type(text: string): Promise<void> {
+    this.requirePage();
+    await this.page!.keyboard.type(text, { delay: 20 });
+  }
+
+  async press(key: string): Promise<void> {
+    this.requirePage();
+    await this.page!.keyboard.press(key);
+  }
+
+  async scroll(x: number, y: number, dx: number, dy: number): Promise<void> {
+    this.requirePage();
+    await this.page!.mouse.move(x, y);
+    await this.page!.mouse.wheel(dx, dy);
+  }
+
+  async screenshot(filePath: string): Promise<void> {
+    this.requirePage();
+    await this.page!.screenshot({ path: filePath, fullPage: false });
+  }
+
+  async getUrl(): Promise<string> {
+    this.requirePage();
+    return this.page!.url();
+  }
+
+  async getTitle(): Promise<string> {
+    this.requirePage();
+    return this.page!.title();
+  }
+
+  async waitForTimeout(ms: number): Promise<void> {
+    this.requirePage();
+    await this.page!.waitForTimeout(ms);
+  }
+
+  /**
+   * Resolve a ref from the last snapshot to its href attribute.
+   * Returns the href string, or null if the ref isn't a link or has no href.
+   */
+  async getHref(ref: string): Promise<string | null> {
+    this.requirePage();
+    const axRef = this.lastRefs.get(ref);
+    if (!axRef) return null;
+    try {
+      const el = this.page!.locator(axRef.selector).first();
+      // Try the element itself, then walk up to find the nearest <a>
+      const href = await el.evaluate((node) => {
+        const anchor = node.closest('a') || (node.tagName === 'A' ? node : null);
+        return anchor ? (anchor as HTMLAnchorElement).href : null;
+      });
+      return href;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Block until the user closes the browser tab (used by the login flow).
+   * Resolves when the context is closed.
+   */
+  async waitForClose(): Promise<void> {
+    this.requirePage();
+    await new Promise<void>((resolve) => {
+      this.context!.on('close', () => resolve());
+      this.page!.on('close', () => resolve());
+    });
+  }
+
+  private requirePage(): void {
+    if (!this.page) throw new Error('SocialBrowser not launched — call launch() first');
+  }
+}

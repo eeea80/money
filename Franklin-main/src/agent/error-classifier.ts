@@ -1,0 +1,298 @@
+/**
+ * Classify model/runtime errors so recovery and UX can be more consistent.
+ *
+ * Multi-layer classification:
+ * - Separate 'overloaded' category (529) from general server errors — shorter retry budget
+ * - Auth errors (401) get special handling (token refresh, not retry)
+ * - EPIPE/connection reset handled as network errors (retryable)
+ */
+
+export type AgentErrorCategory =
+  | 'rate_limit'
+  | 'payment'
+  | 'payment_rejected'
+  | 'network'
+  | 'timeout'
+  | 'context_limit'
+  | 'overloaded'
+  | 'server'
+  | 'auth'
+  | 'schema'
+  | 'unknown';
+
+export interface AgentErrorInfo {
+  category: AgentErrorCategory;
+  label: 'RateLimit' | 'Payment' | 'PaymentRejected' | 'Network' | 'Timeout' | 'Context' | 'Overloaded' | 'Server' | 'Auth' | 'Schema' | 'Unknown';
+  isTransient: boolean;
+  /** Max retries for this error type (overrides default). undefined = use default. */
+  maxRetries?: number;
+  /** User-facing suggestion for how to recover. Appended to error message in UI. */
+  suggestion?: string;
+  /**
+   * Upstream-recommended wait time before retrying. Parsed from a
+   * `[retry-after-ms=...]` tag the streaming client appends to the error
+   * message when the response carries a `Retry-After` header (typically
+   * 429 / 503). The agent loop should honor this in place of its
+   * default exponential backoff. Capped at 10 minutes upstream so a
+   * malicious or buggy server can't pin the agent indefinitely.
+   */
+  retryAfterMs?: number;
+  /**
+   * The gateway rejected the model id itself (400 "Unknown model", 404, 410
+   * provider EOL) — not the request shape. Retrying the same id can never
+   * succeed; when the id came from Auto routing the loop feeds it to the
+   * router's dead-rung kill-switch (markModelUnavailable) and re-routes.
+   */
+  modelUnavailable?: boolean;
+}
+
+function includesAny(text: string, patterns: string[]): boolean {
+  return patterns.some((p) => text.includes(p));
+}
+
+export function classifyAgentError(message: string): AgentErrorInfo {
+  const err = message.toLowerCase();
+
+  // Extract Retry-After hint that streaming-client appended (see llm.ts
+  // 429 path). Surfaces on the AgentErrorInfo so the loop can honor the
+  // upstream's recommended wait instead of guessing with exponential
+  // backoff.
+  let retryAfterMs: number | undefined;
+  const retryAfterTag = /\[retry-after-ms=(\d+)\]/i.exec(message);
+  if (retryAfterTag) {
+    const n = parseInt(retryAfterTag[1], 10);
+    if (Number.isFinite(n) && n > 0 && n <= 600_000) retryAfterMs = n;
+  }
+
+  // payment_rejected — the gateway received a SIGNED payment header and
+  // rejected it during verification (signature mismatch, replay-nonce
+  // reuse, clock skew, wrong-chain wallet). Different remedy from
+  // payment_required: re-presenting the same signature won't help.
+  // Verified 2026-05-04 in a live session: ExaSearch returned
+  // `Exa /v1/exa/search failed (402): {"error":"Payment verification failed",...}`.
+  // Classify BEFORE the generic 'payment' branch below since the body
+  // contains both 'payment' and 'verification failed'.
+  //
+  // Treated as transient with a small retry budget: real-world telemetry
+  // (2026-05-28 audit) shows the gateway intermittently rejects valid
+  // signed payments under burst load — identical prompts succeed 5s
+  // later. Most plausible root cause is a nonce-cache race in the
+  // gateway's replay protection. Retrying re-signs with a fresh nonce on
+  // each attempt (llm.ts derives a new nonce per request), so a retry
+  // is NOT a replay. Three attempts is enough to ride out the blip
+  // without burning tokens on a model whose wallet is genuinely
+  // misconfigured (clock skew, wrong chain) — those failure modes are
+  // deterministic and will exhaust the budget quickly.
+  if (includesAny(err, [
+    'verification failed',
+    'payment verification',
+    'signature mismatch',
+    'invalid payment signature',
+    'invalid x-payment',
+    'nonce reuse',
+    'replay protection',
+  ])) {
+    return {
+      category: 'payment_rejected', label: 'PaymentRejected', isTransient: true, maxRetries: 3,
+      suggestion: 'The gateway rejected your signed payment. If this keeps happening: run `franklin balance` to confirm funds + chain. Common causes: clock skew (resync system clock), wrong chain selected (use `/chain` to switch). Transient blips are auto-retried.',
+    };
+  }
+
+  if (includesAny(err, [
+    'insufficient',
+    'payment',
+    'balance',
+    '402',
+    'free tier',
+  ])) {
+    return {
+      category: 'payment', label: 'Payment', isTransient: false,
+      suggestion: 'Run `franklin balance` to check funds. Try /model free for free models.',
+    };
+  }
+
+  // Auth errors — not retryable (need user action: re-login, new API key)
+  if (includesAny(err, [
+    '401',
+    'unauthorized',
+    'unauthenticated',
+    'not authenticated',
+    'invalid api key',
+    'invalid x-api-key',
+    'authentication failed',
+    'authentication required',
+  ])) {
+    return {
+      category: 'auth', label: 'Auth', isTransient: false,
+      suggestion: 'Check your API key or wallet configuration. Run `franklin setup` to reconfigure.',
+    };
+  }
+
+  if (includesAny(err, [
+    '429',
+    'rate limit',
+    'too many requests',
+    'too many tokens',           // Anthropic per-day TPM cap leak via gateway
+    'tokens per day',
+    'please wait before trying',
+    'quota exceeded',
+  ])) {
+    // 1 retry is plenty: a per-second rate limit clears in seconds (one
+    // backoff covers it), but a per-day TPM quota won't clear in this
+    // session at all — caller falls back to a different provider after.
+    return {
+      category: 'rate_limit', label: 'RateLimit', isTransient: true, maxRetries: 1,
+      suggestion: 'Try /model to switch to a different model, or wait a moment and /retry.',
+      retryAfterMs,
+    };
+  }
+
+  if (includesAny(err, [
+    'prompt is too long',
+    'context length',
+    'context_length_exceeded',   // OpenAI-style code, leaks via gateway for non-Anthropic models
+    'context window',
+    'context_window',
+    'maximum context',
+    'prompt too long',
+    'token limit exceeded',
+  ])) {
+    return {
+      category: 'context_limit', label: 'Context', isTransient: false,
+      suggestion: 'Run /compact to compress conversation history.',
+    };
+  }
+
+  if (includesAny(err, [
+    'timeout',
+    'timed out',
+    'deadline exceeded',
+  ])) {
+    return {
+      category: 'timeout', label: 'Timeout', isTransient: true, maxRetries: 1,
+      suggestion: 'Check your network connection. Use /retry to try again.',
+    };
+  }
+
+  if (includesAny(err, [
+    'fetch failed',
+    'econnrefused',
+    'econnreset',
+    'enotfound',
+    'epipe',
+    'network',
+    'socket hang up',
+    'connection reset',
+    'dns resolution',
+  ])) {
+    return {
+      category: 'network', label: 'Network', isTransient: true, maxRetries: 1,
+      suggestion: 'Check your network connection. Use /retry to try again.',
+    };
+  }
+
+  // 529 / Overloaded — separate from generic server errors
+  // Limited retries since these tend to persist
+  if (includesAny(err, [
+    '529',
+    'overloaded',
+    'workers are busy',
+    'all workers are busy',
+    'server busy',
+    'high demand',
+    'capacity',
+  ])) {
+    return {
+      category: 'overloaded', label: 'Overloaded', isTransient: true, maxRetries: 3,
+      suggestion: 'The model is overloaded. Try /model to switch, or wait and /retry.',
+    };
+  }
+
+  // Reasoning / thinking-mode format errors — NOT transient.
+  // DeepSeek V4 family and similar thinking-enabled models reject requests
+  // when the message history's reasoning_content fields don't match the
+  // upstream's expected shape (typically: tool-call assistant messages must
+  // carry reasoning_content; non-tool-call ones must not, or vice versa).
+  // The fix is to drop the polluting history, not to swap models — every
+  // thinking-enabled model has the same constraint just with different
+  // specifics. /clear forces a fresh context that won't have the bad shape.
+  // Classified BEFORE the generic schema branch below so we surface the
+  // right suggestion.
+  if (includesAny(err, [
+    'reasoning_content',
+    'reasoning content',
+    'thinking mode must',
+    'message format incompatible',
+    'reasoning_format_error',
+  ])) {
+    return {
+      category: 'schema', label: 'Schema', isTransient: false, maxRetries: 0,
+      suggestion: 'Thinking-mode history is incompatible with this model. Use /clear to reset and retry, or /model to switch to a non-thinking model.',
+    };
+  }
+
+  // Schema / tool-definition errors — NOT transient, retrying won't help.
+  // These can be wrapped in 5xx responses (e.g. '503: 400 Invalid schema'),
+  // so classify them BEFORE the generic server-error branch below.
+  if (includesAny(err, [
+    'invalid schema',
+    'array schema missing items',
+    'schema missing',
+    'invalid tool_use',
+    'invalid function',
+    'tool_use_id',
+    'unsupported parameter',
+    'invalid request',
+  ])) {
+    return {
+      category: 'schema', label: 'Schema', isTransient: false, maxRetries: 0,
+      suggestion: 'Tool schema rejected by this model. Try /model to switch to a more permissive model (e.g. sonnet), or upgrade Franklin.',
+    };
+  }
+
+  // Unknown / typo'd model id — gateway returns HTTP 400 with a body like
+  // "Unknown model: moonshot/kimi-k2". Without this branch the error falls
+  // through to the catch-all 'unknown' category and shows the user a bare
+  // "Type: Unknown" with no actionable next step.
+  // A retired id looks the same to the loop: NVIDIA EOLs surface as HTTP
+  // 410 through the gateway (qwen3-next 2026-07-27, deepseek-v4-flash
+  // 2026-08-12), and a model the gateway dropped from its catalog 400s as
+  // unknown. Either way the id is dead for the rest of the session.
+  if (includesAny(err, [
+    'unknown model',
+    'model not found',
+    'model does not exist',
+    'no such model',
+    'model has been retired',
+    'model is retired',
+    'model is no longer available',
+    'model no longer available',
+  ]) || (/\b410\b/.test(err) && err.includes('model'))) {
+    return {
+      category: 'schema', label: 'Schema', isTransient: false, maxRetries: 0,
+      modelUnavailable: true,
+      suggestion: 'The gateway rejected the model id (unknown / retired). Use /model to pick a valid one, or upgrade Franklin if a fallback chain references a stale id.',
+    };
+  }
+
+  if (includesAny(err, [
+    '500',
+    '502',
+    '503',
+    '504',
+    'internal server error',
+    'bad gateway',
+    'service unavailable',
+    'temporarily unavailable',
+    'please retry later',
+    'retry in a few',
+    'upstream error',
+  ])) {
+    return {
+      category: 'server', label: 'Server', isTransient: true,
+      suggestion: 'Server error. Use /retry to try again, or /model to switch models.',
+    };
+  }
+
+  return { category: 'unknown', label: 'Unknown', isTransient: false };
+}

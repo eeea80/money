@@ -1,0 +1,380 @@
+/**
+ * Persistence layer for per-user learnings.
+ * Stored as JSONL at ~/.blockrun/learnings.jsonl.
+ */
+
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { BLOCKRUN_DIR } from '../config.js';
+import type { Learning, LearningCategory, Skill } from './types.js';
+
+const LEARNINGS_PATH = path.join(BLOCKRUN_DIR, 'learnings.jsonl');
+const MAX_LEARNINGS = 50;
+const DECAY_AFTER_DAYS = 30;
+const DECAY_AMOUNT = 0.15;
+const PRUNE_THRESHOLD = 0.2;
+const MERGE_SIMILARITY = 0.6;
+
+// ─── Load / Save ──────────────────────────────────────────────────────────
+
+export function loadLearnings(): Learning[] {
+  try {
+    const raw = fs.readFileSync(LEARNINGS_PATH, 'utf-8');
+    const results: Learning[] = [];
+    for (const line of raw.split('\n')) {
+      if (!line.trim()) continue;
+      try { results.push(JSON.parse(line)); } catch { /* skip corrupted lines */ }
+    }
+    return results;
+  } catch {
+    return [];
+  }
+}
+
+export function saveLearnings(learnings: Learning[]): void {
+  fs.mkdirSync(BLOCKRUN_DIR, { recursive: true });
+  const tmpPath = LEARNINGS_PATH + '.tmp';
+  const content = learnings.map(l => JSON.stringify(l)).join('\n') + '\n';
+  fs.writeFileSync(tmpPath, content);
+  fs.renameSync(tmpPath, LEARNINGS_PATH);
+}
+
+// ─── Merge / Dedup ────────────────────────────────────────────────────────
+
+function tokenize(text: string): Set<string> {
+  return new Set(
+    text.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).filter(w => w.length > 2)
+  );
+}
+
+function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 && b.size === 0) return 1;
+  let intersection = 0;
+  for (const w of a) if (b.has(w)) intersection++;
+  return intersection / (a.size + b.size - intersection);
+}
+
+export function mergeLearning(
+  existing: Learning[],
+  newEntry: { learning: string; category: LearningCategory; confidence: number; source_session: string },
+): Learning[] {
+  const now = Date.now();
+  const newTokens = tokenize(newEntry.learning);
+
+  // Find similar existing learning in same category
+  for (const entry of existing) {
+    if (entry.category !== newEntry.category) continue;
+    const similarity = jaccardSimilarity(tokenize(entry.learning), newTokens);
+    if (similarity >= MERGE_SIMILARITY) {
+      // Merge: boost confidence, update timestamp
+      entry.times_confirmed++;
+      entry.last_confirmed = now;
+      entry.confidence = Math.min(entry.confidence + 0.1, 1.0);
+      // Prefer more specific wording
+      if (newEntry.learning.length > entry.learning.length) {
+        entry.learning = newEntry.learning;
+      }
+      return existing;
+    }
+  }
+
+  // No match — insert new
+  existing.push({
+    id: crypto.randomBytes(8).toString('hex'),
+    learning: newEntry.learning,
+    category: newEntry.category,
+    confidence: newEntry.confidence,
+    source_session: newEntry.source_session,
+    created_at: now,
+    last_confirmed: now,
+    times_confirmed: 1,
+  });
+
+  // Cap at MAX_LEARNINGS — drop lowest-scoring
+  if (existing.length > MAX_LEARNINGS) {
+    existing.sort((a, b) => score(b) - score(a));
+    existing.length = MAX_LEARNINGS;
+  }
+
+  return existing;
+}
+
+function score(l: Learning): number {
+  return l.confidence * Math.log2(l.times_confirmed + 1);
+}
+
+// ─── Decay ────────────────────────────────────────────────────────────────
+
+export function decayLearnings(learnings: Learning[]): Learning[] {
+  const now = Date.now();
+  const cutoff = DECAY_AFTER_DAYS * 24 * 60 * 60 * 1000;
+
+  return learnings.filter(l => {
+    if (l.times_confirmed >= 3) return true; // Immune to time decay
+    if (now - l.last_confirmed > cutoff) {
+      l.confidence -= DECAY_AMOUNT;
+      return l.confidence >= PRUNE_THRESHOLD;
+    }
+    return true;
+  });
+}
+
+// ─── Format for System Prompt ─────────────────────────────────────────────
+
+const MAX_PROMPT_CHARS = 2000; // ~500 tokens
+
+export function formatForPrompt(learnings: Learning[]): string {
+  if (learnings.length === 0) return '';
+
+  // Separate negative learnings (highest priority) from others
+  const negative = learnings.filter(l => l.category === 'negative');
+  const projectCtx = learnings.filter(l => l.category === 'project_context');
+  const preferences = learnings.filter(l => l.category !== 'negative' && l.category !== 'project_context');
+
+  const sections: string[] = [];
+  let chars = 0;
+
+  // Negative learnings first (most important — prevents repeating mistakes)
+  if (negative.length > 0) {
+    const negSorted = [...negative].sort((a, b) => score(b) - score(a));
+    const negLines = negSorted
+      .filter(l => { if (chars + l.learning.length + 5 > MAX_PROMPT_CHARS) return false; chars += l.learning.length + 5; return true; })
+      .map(l => `- ⛔ ${l.learning}`);
+    if (negLines.length > 0) {
+      sections.push('## Rules (from past corrections)\n' + negLines.join('\n'));
+    }
+  }
+
+  // Project context
+  if (projectCtx.length > 0) {
+    const ctxSorted = [...projectCtx].sort((a, b) => score(b) - score(a));
+    const ctxLines = ctxSorted
+      .filter(l => { if (chars + l.learning.length + 5 > MAX_PROMPT_CHARS) return false; chars += l.learning.length + 5; return true; })
+      .map(l => `- ${l.learning}`);
+    if (ctxLines.length > 0) {
+      sections.push('## Project Context\n' + ctxLines.join('\n'));
+    }
+  }
+
+  // General preferences
+  if (preferences.length > 0) {
+    const prefSorted = [...preferences].sort((a, b) => score(b) - score(a));
+    const prefLines = prefSorted
+      .filter(l => { if (chars + l.learning.length + 5 > MAX_PROMPT_CHARS) return false; chars += l.learning.length + 5; return true; })
+      .map(l => {
+        const conf = l.confidence >= 0.8 ? '●' : l.confidence >= 0.5 ? '◐' : '○';
+        return `- ${conf} ${l.learning}`;
+      });
+    if (prefLines.length > 0) {
+      sections.push('## Preferences\n' + prefLines.join('\n'));
+    }
+  }
+
+  if (sections.length === 0) return '';
+  return '# Personal Context\nLearned from previous sessions:\n\n' + sections.join('\n\n');
+}
+
+// ─── Skills (procedural memory) ──────────────────────────────────────────
+//
+// Auto-extracted "skills" from sessions are now stored under
+// `~/.blockrun/skills/learned/<name>/SKILL.md` in the unified Anthropic
+// SKILL.md format. The skills/ directory layout looks like:
+//
+//   ~/.blockrun/skills/
+//   ├── my-handwritten/SKILL.md            (user-authored)
+//   └── learned/
+//       ├── refactor-step-flow/SKILL.md    (extracted by Franklin)
+//       └── pricing-quote-flow/SKILL.md
+//
+// The runtime registry (src/skills/bootstrap.loadAllSkills) discovers all
+// three sources (bundled / learned / user / project) in one pass and
+// trigger matching (src/skills/triggers.matchSkillTriggers) handles
+// auto-invoke. The legacy `loadSkills`/`matchSkills`/`formatSkillsForPrompt`
+// exports below are kept as compat shims (delegating to the new disk layout)
+// so older callers don't break; new code should import from src/skills/.
+
+const SKILLS_DIR = path.join(BLOCKRUN_DIR, 'skills');
+const LEARNED_SKILLS_DIR = path.join(SKILLS_DIR, 'learned');
+
+function ensureLearnedSkillsDir() {
+  if (!fs.existsSync(LEARNED_SKILLS_DIR)) {
+    fs.mkdirSync(LEARNED_SKILLS_DIR, { recursive: true });
+  }
+}
+
+/**
+ * One-time migration of legacy auto-extracted skills.
+ *
+ * Before the unified registry, learned skills were flat markdown files at
+ * `~/.blockrun/skills/<name>.md`. The new layout expects
+ * `~/.blockrun/skills/learned/<name>/SKILL.md`, and the user-source loader
+ * only reads `<dir>/SKILL.md` — so the old flat files would be silently
+ * orphaned on upgrade. This moves each one into the new layout (normalizing
+ * it through `saveSkill`, which adds `hidden`/`auto-generated`) and deletes
+ * the old file. Idempotent and cheap: returns immediately when there are no
+ * flat `.md` files left to migrate.
+ */
+export function migrateLegacyLearnedSkills(): number {
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(SKILLS_DIR);
+  } catch {
+    return 0; // no skills dir yet — nothing to migrate
+  }
+  const flatFiles = entries.filter((f) => f.endsWith('.md'));
+  if (flatFiles.length === 0) return 0;
+
+  let migrated = 0;
+  for (const file of flatFiles) {
+    const oldPath = path.join(SKILLS_DIR, file);
+    try {
+      if (!fs.statSync(oldPath).isFile()) continue;
+      const raw = fs.readFileSync(oldPath, 'utf-8');
+      const skill = parseSkillFile(raw, file.replace(/\.md$/, ''));
+      if (!skill) continue;
+      const destDir = path.join(LEARNED_SKILLS_DIR, safeDirName(skill.name));
+      // Don't clobber a skill already present in the new layout.
+      if (!fs.existsSync(path.join(destDir, 'SKILL.md'))) {
+        saveSkill(skill);
+      }
+      fs.rmSync(oldPath);
+      migrated++;
+    } catch { /* skip unreadable/locked file */ }
+  }
+  return migrated;
+}
+
+function safeDirName(name: string): string {
+  return name.replace(/[^a-z0-9-]/gi, '-').toLowerCase() || 'skill';
+}
+
+function escapeYamlValue(v: string): string {
+  if (/[:#'"\n]/.test(v)) {
+    return JSON.stringify(v);
+  }
+  return v;
+}
+
+/** Load all learned skills from `~/.blockrun/skills/learned/`. */
+export function loadSkills(): Skill[] {
+  ensureLearnedSkillsDir();
+  const skills: Skill[] = [];
+  try {
+    for (const entry of fs.readdirSync(LEARNED_SKILLS_DIR)) {
+      const dirPath = path.join(LEARNED_SKILLS_DIR, entry);
+      try {
+        if (!fs.statSync(dirPath).isDirectory()) continue;
+        const filePath = path.join(dirPath, 'SKILL.md');
+        if (!fs.existsSync(filePath)) continue;
+        const raw = fs.readFileSync(filePath, 'utf-8');
+        const skill = parseSkillFile(raw, entry);
+        if (skill) skills.push(skill);
+      } catch { /* skip corrupt */ }
+    }
+  } catch { /* dir doesn't exist yet */ }
+  return skills;
+}
+
+function parseSkillFile(raw: string, fallbackName: string): Skill | null {
+  const m = raw.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+  if (!m) return null;
+  const fm = m[1];
+  const name = fm.match(/^name:\s*(.+)$/m)?.[1]?.trim() || fallbackName;
+  const description = fm.match(/^description:\s*(.+)$/m)?.[1]?.trim() || '';
+  // Triggers may be a YAML list (- "foo") OR a legacy inline form ([a, b]).
+  let triggers: string[] = [];
+  const inline = fm.match(/^triggers:\s*\[([^\]]*)\]/m)?.[1];
+  if (inline !== undefined) {
+    triggers = inline.split(',').map(t => t.trim().replace(/^["']|["']$/g, '')).filter(Boolean);
+  } else {
+    const lines = fm.split('\n');
+    const triggersIdx = lines.findIndex(l => /^triggers:\s*$/.test(l));
+    if (triggersIdx >= 0) {
+      for (let i = triggersIdx + 1; i < lines.length; i++) {
+        const m = lines[i].match(/^\s+-\s+(.+)$/);
+        if (!m) break;
+        triggers.push(m[1].trim().replace(/^["']|["']$/g, ''));
+      }
+    }
+  }
+  const created = fm.match(/^created:\s*(.+)$/m)?.[1]?.trim() || '';
+  const uses = parseInt(fm.match(/^uses:\s*(\d+)$/m)?.[1] || '0');
+  const source = fm.match(/^source(?:[-_]session):\s*(.+)$/m)?.[1]?.trim() || '';
+  if (!name) return null;
+  return { name, description, triggers, steps: m[2].trim(), created, uses, source_session: source };
+}
+
+/** Save a new auto-extracted skill to disk in unified SKILL.md format. */
+export function saveSkill(skill: Skill): void {
+  ensureLearnedSkillsDir();
+  const dir = path.join(LEARNED_SKILLS_DIR, safeDirName(skill.name));
+  fs.mkdirSync(dir, { recursive: true });
+
+  const fmLines: string[] = ['---'];
+  fmLines.push(`name: ${escapeYamlValue(skill.name)}`);
+  fmLines.push(`description: ${escapeYamlValue(skill.description)}`);
+  if (skill.triggers.length > 0) {
+    fmLines.push(`triggers:`);
+    for (const t of skill.triggers) {
+      fmLines.push(`  - ${escapeYamlValue(t)}`);
+    }
+  }
+  fmLines.push(`hidden: true`);
+  fmLines.push(`auto-generated: true`);
+  if (skill.created) fmLines.push(`created: ${skill.created}`);
+  fmLines.push(`uses: ${skill.uses}`);
+  if (skill.source_session) {
+    fmLines.push(`source-session: ${escapeYamlValue(skill.source_session)}`);
+  }
+  fmLines.push('---');
+  fmLines.push('');
+  fmLines.push(skill.steps);
+
+  fs.writeFileSync(path.join(dir, 'SKILL.md'), fmLines.join('\n') + '\n');
+}
+
+/** Bump use count for a skill. */
+export function bumpSkillUse(skill: Skill): void {
+  const filePath = path.join(LEARNED_SKILLS_DIR, safeDirName(skill.name), 'SKILL.md');
+  try {
+    const raw = fs.readFileSync(filePath, 'utf-8');
+    fs.writeFileSync(filePath, raw.replace(/^uses:\s*\d+$/m, `uses: ${skill.uses + 1}`));
+  } catch { /* non-critical */ }
+}
+
+/**
+ * Compat shim retained so older callers keep working while the rest of the
+ * codebase migrates to `src/skills/triggers.ts`. New code should NOT depend
+ * on this — it ignores `hidden` and `disableModelInvocation` flags.
+ */
+export function matchSkills(input: string, skills: Skill[]): Skill[] {
+  const lower = input.toLowerCase();
+  const scored: Array<{ skill: Skill; score: number }> = [];
+  for (const s of skills) {
+    let score = 0;
+    for (const t of s.triggers) {
+      if (lower.includes(t.toLowerCase())) score += 2;
+    }
+    if (lower.includes(s.name.toLowerCase())) score += 3;
+    score += Math.min(s.uses * 0.5, 3);
+    if (score > 0) scored.push({ skill: s, score });
+  }
+  return scored.sort((a, b) => b.score - a.score).slice(0, 5).map(m => m.skill);
+}
+
+/**
+ * Compat shim. The new code path injects skills per-turn via
+ * `formatSkillHints` rather than baking them into the boot-time system
+ * prompt, so callers should not need this any more.
+ */
+export function formatSkillsForPrompt(skills: Skill[]): string {
+  if (skills.length === 0) return '';
+  const MAX_SKILL_CHARS = 1500;
+  const parts = ['# Learned Skills\nProcedures from previous experience — use when relevant:\n'];
+  for (const s of skills) {
+    const body = s.steps.length > MAX_SKILL_CHARS ? s.steps.slice(0, MAX_SKILL_CHARS) + '\n…' : s.steps;
+    parts.push(`## ${s.name}\n*${s.description}*\n\n${body}`);
+  }
+  return parts.join('\n\n');
+}

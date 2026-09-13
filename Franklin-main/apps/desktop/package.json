@@ -1,0 +1,120 @@
+{
+  "name": "@blockrun/franklin-desktop",
+  "version": "0.2.0-beta.3",
+  "author": "BlockRun <hello@blockrun.ai>",
+  "description": "Franklin Desktop — native desktop app for the Franklin agent (Electron). Same agent, wallet and tools as the CLI, in a polished window.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "concurrently -k -n server,cloud,vite -c green,yellow,cyan \"npm:dev:server\" \"npm:dev:cloud\" \"npm:dev:vite\"",
+    "dev:vite": "vite",
+    "dev:server": "node dev-server/mock.mjs",
+    "dev:cloud": "node cloud-server/server.mjs",
+    "dev:desktop-web": "concurrently -k -n server,vite -c green,cyan \"npm:dev:server\" \"npm:dev:vite\"",
+    "dev:desktop-real-web": "concurrently -k -n agent,vite -c green,cyan \"npm:dev:agent\" \"npm:dev:vite\"",
+    "test:cloud": "node cloud-server/test.mjs",
+    "test:team-proxy": "node cloud-server/team-proxy.test.mjs",
+    "test:security": "node --test test/*.test.cjs",
+    "test": "npm run test:unit && npm run test:security && npm run test:cloud && npm run test:team-proxy",
+    "cloud:build-sandbox": "docker build -f cloud-server/Dockerfile.sandbox -t franklin-cloud-sandbox:local cloud-server",
+    "test:cloud:docker": "npm run cloud:build-sandbox && FRANKLIN_CLOUD_SANDBOX_PROVIDER=docker npm run test:cloud",
+    "cloud:compose:up": "docker compose -f cloud-server/compose.yml up --build",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "lint": "eslint src",
+    "typecheck": "tsc -b --noEmit",
+    "dev:agent": "FRANKLIN_DESKTOP_WORKSPACE_BOUNDARY=1 node ../../dist/index.js serve --port 3737",
+    "dev:real": "concurrently -k -n agent,cloud,vite -c green,yellow,cyan \"npm run dev:agent\" \"npm run dev:cloud\" \"vite\"",
+    "desktop:dev": "concurrently -k -n web,electron -c green,magenta \"npm run dev:desktop-web\" \"ELECTRON_RUN_AS_NODE= FRANKLIN_DESKTOP_DEV_URL=http://localhost:5174 electron electron/main.cjs\"",
+    "desktop:real": "concurrently -k -n web,electron -c green,magenta \"npm run dev:desktop-real-web\" \"ELECTRON_RUN_AS_NODE= FRANKLIN_DESKTOP_DEV_URL=http://localhost:5174 electron electron/main.cjs\"",
+    "desktop": "npm run build && ELECTRON_RUN_AS_NODE= electron electron/main.cjs",
+    "prepare:runtime": "node scripts/prepare-runtime.mjs",
+    "dist:mac": "npm run build && npm run prepare:runtime && electron-builder --mac --arm64 --publish never",
+    "dist:win": "npm run build && npm run prepare:runtime && electron-builder --win --x64 --publish never",
+    "test:unit": "vitest run"
+  },
+  "dependencies": {
+    "@blockrun/franklin": "*",
+    "@blockrun/llm": "^3.13.1",
+    "@fontsource/poppins": "^5.2.7",
+    "@noble/curves": "^1.9.7",
+    "@noble/hashes": "^1.8.0",
+    "html-to-image": "^1.11.13",
+    "https-proxy-agent": "^9.1.0",
+    "lucide-react": "^0.469.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-markdown": "^9.0.3",
+    "remark-gfm": "^4.0.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.0",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.3",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/ws": "^8.5.13",
+    "@typescript-eslint/eslint-plugin": "^8.68.0",
+    "@typescript-eslint/parser": "^8.68.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "concurrently": "^9.2.4",
+    "electron": "44.0.0",
+    "electron-builder": "^26.15.3",
+    "eslint": "^9.17.0",
+    "eslint-plugin-react-hooks": "^5.1.0",
+    "jsdom": "^29.1.1",
+    "shadcn": "^4.8.3",
+    "tailwindcss": "^4.3.0",
+    "ts-api-utils": "2.4.0",
+    "tw-animate-css": "^1.4.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.5",
+    "vitest": "^4.1.11",
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=22.12"
+  },
+  "build": {
+    "appId": "ai.blockrun.franklin.desktop",
+    "productName": "Franklin",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "electron/**",
+      "franklin-agent/**",
+      "cloud-server/server.mjs",
+      "package.json",
+      "!node_modules/@blockrun/franklin",
+      "!node_modules/@blockrun/franklin/**",
+      "!node_modules/@colbymchenry/codegraph",
+      "!node_modules/@colbymchenry/codegraph/**",
+      "!node_modules/@colbymchenry/codegraph-*",
+      "!node_modules/@colbymchenry/codegraph-*/**"
+    ],
+    "asar": true,
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "icon": "build/icon.png",
+      "category": "public.app-category.developer-tools",
+      "identity": null
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false
+    }
+  }
+}

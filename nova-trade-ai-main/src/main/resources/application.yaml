@@ -1,0 +1,44 @@
+spring:
+  application:
+    name: nova-trade-ai
+
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:nova_trade}
+    username: ${POSTGRES_USER:nova}
+    password: ${POSTGRES_PASSWORD:nova_change_me}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      connection-timeout: 10000
+      validation-timeout: 3000
+
+  ai:
+    model:
+      chat: deepseek
+    deepseek:
+      base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+      api-key: ${DEEPSEEK_API_KEY:not-configured}
+      timeout: ${DEEPSEEK_TIMEOUT:60s}
+      chat:
+        # deepseek-v4-pro deepseek-v4-flash
+        model: ${DEEPSEEK_MODEL:deepseek-v4-flash}
+        temperature: ${DEEPSEEK_TEMPERATURE:0.7}
+        max-tokens: ${DEEPSEEK_MAX_TOKENS:2048}
+    retry:
+      max-attempts: 3
+      backoff:
+        initial-interval: 1s
+        multiplier: 2
+        max-interval: 10s
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    banner: false
+    db-config:
+      id-type: auto
+
+fuyao:
+  base-url: ${FUYAO_BASE_URL:https://fuyao.aicubes.cn}
+  timeout: ${FUYAO_TIMEOUT:30s}
+  api-key: ${FUYAO_API_KEY:not-configured}

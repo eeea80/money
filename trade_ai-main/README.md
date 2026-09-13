@@ -1,0 +1,1147 @@
+# ربات معاملاتی هوش مصنوعی 🤖💰
+
+یک ربات معاملاتی پیشرفته برای ارزهای دیجیتال که با استفاده از هوش مصنوعی و تحلیل تکنیکال، به صورت خودکار معامله می‌کند.
+
+![Trading Bot](https://img.shields.io/badge/Trading-Bot-blue)
+![AI Powered](https://img.shields.io/badge/AI-Powered-green)
+![React](https://img.shields.io/badge/React-18.3-61dafb)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.5-blue)
+
+## 📋 فهرست مطالب
+
+- [ویژگی‌ها](#ویژگیها)
+- [پیش‌نیازها](#پیشنیازها)
+- [نصب و راه‌اندازی](#نصب-و-راهاندازی)
+  - [نصب محلی (Local)](#نصب-محلی-local)
+  - [نصب روی سرور](#نصب-روی-سرور)
+- [پیکربندی](#پیکربندی)
+  - [تنظیمات هوش مصنوعی](#تنظیمات-هوش-مصنوعی)
+  - [تنظیمات صرافی](#تنظیمات-صرافی)
+  - [استراتژی‌های معاملاتی](#استراتژیهای-معاملاتی)
+- [نحوه استفاده](#نحوه-استفاده)
+- [ساختار پروژه](#ساختار-پروژه)
+- [API و سرویس‌ها](#api-و-سرویسها)
+- [عیب‌یابی](#عیبیابی)
+- [سوالات متداول](#سوالات-متداول)
+- [مشارکت](#مشارکت)
+- [مجوز](#مجوز)
+
+## ✨ ویژگی‌ها
+
+### 🎯 ویژگی‌های اصلی
+
+- **تحلیل هوش مصنوعی**: استفاده از مدل‌های پیشرفته AI برای تحلیل بازار
+- **تحلیل تکنیکال**: محاسبه اندیکاتورهای RSI، MACD، EMA و ...
+- **معامله خودکار**: اجرای خودکار معاملات بر اساس سیگنال‌های AI
+- **دو حالت معاملاتی**:
+  - **حالت آزمایشی (Demo)**: معامله با پول مجازی بدون ریسک
+  - **حالت واقعی (Live)**: اتصال به صرافی‌های معتبر
+- **پشتیبانی از صرافی‌ها**:
+  - بایننس (Binance)
+  - بای‌بیت (Bybit)
+  - او‌کی‌ایکس (OKX)
+  - کوکوین (KuCoin)
+
+### 📊 ویژگی‌های تحلیلی
+
+- نمایش قیمت لحظه‌ای ارزهای دیجیتال
+- نمودارهای قیمتی تعاملی
+- محاسبه سود/زیان لحظه‌ای
+- گزارش‌های جامع معاملاتی
+- تاریخچه کامل معاملات
+- نمایش فرآیند تفکر AI (Chain of Thought)
+
+### ⚙️ استراتژی‌های معاملاتی
+
+- **محافظه‌کارانه**: ریسک کم، مناسب مبتدیان
+- **متعادل**: ریسک متوسط، توصیه می‌شود
+- **تهاجمی**: ریسک بالا، برای حرفه‌ای‌ها
+- **اسکالپر**: معاملات سریع و کوتاه‌مدت
+- **سفارشی‌سازی کامل**: تنظیم دقیق تمام پارامترها
+
+### 🛡️ ویژگی‌های امنیتی
+
+- حد ضرر (Stop Loss) و حد سود (Take Profit)
+- حد ضرر متحرک (Trailing Stop)
+- مدیریت ریسک پیشرفته
+- تنوع‌بخشی پرتفوی
+- محدودیت تعداد پوزیشن‌های همزمان
+
+## 🔧 پیش‌نیازها
+
+قبل از نصب، مطمئن شوید که موارد زیر را نصب کرده‌اید:
+
+### نرم‌افزارهای مورد نیاز
+
+1. **Node.js** (نسخه 18 یا بالاتر)
+   ```bash
+   # بررسی نسخه نصب شده
+   node --version
+   ```
+   - دانلود از: https://nodejs.org/
+
+2. **npm** یا **yarn** (مدیر بسته‌ها)
+   ```bash
+   # بررسی نسخه npm
+   npm --version
+   
+   # یا بررسی نسخه yarn
+   yarn --version
+   ```
+
+3. **Git** (برای کلون کردن پروژه)
+   ```bash
+   git --version
+   ```
+   - دانلود از: https://git-scm.com/
+
+### اختیاری (برای استفاده از Ollama)
+
+4. **Ollama** (برای استفاده از AI محلی و رایگان)
+   - دانلود از: https://ollama.ai/
+   - نصب مدل:
+   ```bash
+   ollama pull llama2
+   # یا
+   ollama pull mistral
+   ```
+
+## 🚀 نصب و راه‌اندازی
+
+### نصب محلی (Local)
+
+#### مرحله 1: دانلود پروژه
+
+```bash
+# کلون کردن پروژه
+git clone https://github.com/your-username/crypto-trading-bot.git
+
+# ورود به پوشه پروژه
+cd crypto-trading-bot
+```
+
+#### مرحله 2: نصب وابستگی‌ها
+
+```bash
+# با استفاده از npm
+npm install
+
+# یا با استفاده از yarn
+yarn install
+```
+
+این فرآیند ممکن است چند دقیقه طول بکشد.
+
+#### مرحله 3: اجرای پروژه در حالت توسعه
+
+```bash
+# با npm
+npm run dev
+
+# یا با yarn
+yarn dev
+```
+
+پروژه روی آدرس زیر اجرا می‌شود:
+```
+http://localhost:8080
+```
+
+مرورگر خود را باز کنید و به آدرس بالا بروید.
+
+#### مرحله 4: ساخت نسخه نهایی (Production)
+
+```bash
+# ساخت فایل‌های بهینه شده
+npm run build
+
+# یا
+yarn build
+```
+
+فایل‌های ساخته شده در پوشه `dist` قرار می‌گیرند.
+
+#### مرحله 5: پیش‌نمایش نسخه Production
+
+```bash
+npm run preview
+
+# یا
+yarn preview
+```
+
+### نصب روی سرور
+
+#### روش 1: استفاده از Vercel (توصیه می‌شود)
+
+1. **ایجاد حساب کاربری**
+   - به https://vercel.com بروید
+   - با GitHub وارد شوید
+
+2. **اتصال به مخزن GitHub**
+   - روی "New Project" کلیک کنید
+   - مخزن پروژه را انتخاب کنید
+   - روی "Import" کلیک کنید
+
+3. **تنظیمات Deploy**
+   - Framework Preset: Vite
+   - Build Command: `npm run build`
+   - Output Directory: `dist`
+   - Install Command: `npm install`
+
+4. **Deploy**
+   - روی "Deploy" کلیک کنید
+   - منتظر بمانید تا فرآیند تکمیل شود
+   - لینک پروژه را دریافت کنید
+
+#### روش 2: استفاده از Netlify
+
+1. **ایجاد حساب کاربری**
+   - به https://netlify.com بروید
+   - با GitHub وارد شوید
+
+2. **Deploy از GitHub**
+   - "Add new site" > "Import an existing project"
+   - مخزن را انتخاب کنید
+
+3. **تنظیمات Build**
+   ```
+   Build command: npm run build
+   Publish directory: dist
+   ```
+
+4. **Deploy**
+   - روی "Deploy site" کلیک کنید
+
+#### روش 3: استفاده از VPS (سرور اختصاصی)
+
+##### الف) نصب Node.js روی سرور
+
+```bash
+# Ubuntu/Debian
+curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# CentOS/RHEL
+curl -fsSL https://rpm.nodesource.com/setup_18.x | sudo bash -
+sudo yum install -y nodejs
+```
+
+##### ب) کلون و نصب پروژه
+
+```bash
+# کلون پروژه
+git clone https://github.com/your-username/crypto-trading-bot.git
+cd crypto-trading-bot
+
+# نصب وابستگی‌ها
+npm install
+
+# ساخت نسخه production
+npm run build
+```
+
+##### ج) نصب و پیکربندی Nginx
+
+```bash
+# نصب Nginx
+sudo apt-get install nginx  # Ubuntu/Debian
+sudo yum install nginx      # CentOS/RHEL
+
+# ایجاد فایل پیکربندی
+sudo nano /etc/nginx/sites-available/trading-bot
+```
+
+محتوای فایل:
+```nginx
+server {
+    listen 80;
+    server_name your-domain.com;
+    
+    root /path/to/crypto-trading-bot/dist;
+    index index.html;
+    
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+    
+    # فشرده‌سازی
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
+}
+```
+
+فعال‌سازی سایت:
+```bash
+sudo ln -s /etc/nginx/sites-available/trading-bot /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl restart nginx
+```
+
+##### د) نصب SSL با Let's Encrypt
+
+```bash
+# نصب Certbot
+sudo apt-get install certbot python3-certbot-nginx
+
+# دریافت گواهی SSL
+sudo certbot --nginx -d your-domain.com
+
+# تنظیم تمدید خودکار
+sudo certbot renew --dry-run
+```
+
+##### ه) استفاده از PM2 (برای اجرای مداوم)
+
+```bash
+# نصب PM2
+npm install -g pm2
+
+# اجرای سرور
+pm2 serve dist 8080 --name trading-bot --spa
+
+# ذخیره تنظیمات
+pm2 save
+
+# راه‌اندازی خودکار با بوت سیستم
+pm2 startup
+```
+
+## ⚙️ پیکربندی
+
+### تنظیمات هوش مصنوعی
+
+پروژه از سه ارائه‌دهنده AI پشتیبانی می‌کند:
+
+#### 1. OpenAI (توصیه می‌شود)
+
+**مزایا:**
+- کیفیت بالای تحلیل
+- پاسخ‌دهی سریع
+- قابل اعتماد
+
+**نحوه دریافت API Key:**
+1. به https://platform.openai.com بروید
+2. ثبت‌نام کنید یا وارد شوید
+3. به بخش "API Keys" بروید
+4. روی "Create new secret key" کلیک کنید
+5. کلید را کپی کنید
+
+**تنظیمات در برنامه:**
+- Provider: OpenAI
+- API Key: کلید دریافتی
+- Model: `gpt-3.5-turbo` (توصیه می‌شود) یا `gpt-4`
+
+**هزینه:**
+- GPT-3.5-turbo: ~$0.002 به ازای هر 1000 توکن
+- GPT-4: ~$0.03 به ازای هر 1000 توکن
+
+#### 2. OpenRouter (ارزان‌تر)
+
+**مزایا:**
+- دسترسی به مدل‌های مختلف
+- قیمت مناسب‌تر
+- انعطاف‌پذیری بالا
+
+**نحوه دریافت API Key:**
+1. به https://openrouter.ai بروید
+2. ثبت‌نام کنید
+3. به بخش "Keys" بروید
+4. کلید جدید ایجاد کنید
+
+**تنظیمات:**
+- Provider: OpenRouter
+- API Key: کلید دریافتی
+- Model: `openai/gpt-3.5-turbo`
+
+#### 3. Ollama (رایگان و محلی)
+
+**مزایا:**
+- کاملاً رایگان
+- حریم خصوصی کامل
+- بدون نیاز به اینترنت
+
+**نصب و راه‌اندازی:**
+
+```bash
+# دانلود و نصب Ollama
+# از https://ollama.ai دانلود کنید
+
+# نصب مدل
+ollama pull llama2
+# یا
+ollama pull mistral
+
+# اجرای Ollama
+ollama serve
+```
+
+**تنظیمات:**
+- Provider: Ollama
+- Model: `llama2` یا `mistral`
+- Base URL: `http://localhost:11434`
+
+### تنظیمات صرافی
+
+#### حالت آزمایشی (Demo)
+
+**مناسب برای:**
+- یادگیری و تمرین
+- تست استراتژی‌ها
+- آشنایی با سیستم
+
+**تنظیمات:**
+1. به تب "صرافی" بروید
+2. "حالت آزمایشی" را انتخاب کنید
+3. موجودی اولیه را تنظیم کنید ($1,000 تا $100,000)
+4. صرافی مورد نظر را انتخاب کنید
+
+#### حالت واقعی (Live)
+
+**⚠️ هشدار:** در این حالت با پول واقعی معامله می‌کنید!
+
+**مراحل راه‌اندازی:**
+
+##### 1. دریافت API Key از بایننس
+
+1. به https://www.binance.com بروید
+2. وارد حساب خود شوید
+3. به "API Management" بروید
+4. "Create API" را کلیک کنید
+5. نام API را وارد کنید
+6. تأیید دو مرحله‌ای را انجام دهید
+7. API Key و Secret Key را کپی کنید
+
+**تنظیمات امنیتی مهم:**
+- ✅ Enable Reading را فعال کنید
+- ✅ Enable Spot & Margin Trading را فعال کنید
+- ❌ Enable Withdrawals را غیرفعال نگه دارید
+- ✅ IP Whitelist را تنظیم کنید
+
+##### 2. استفاده از Testnet (توصیه می‌شود)
+
+قبل از استفاده از پول واقعی، حتماً با Testnet تست کنید:
+
+**بایننس Testnet:**
+1. به https://testnet.binance.vision بروید
+2. API Key دریافت کنید
+3. در برنامه گزینه "Testnet" را فعال کنید
+
+##### 3. تنظیمات در برنامه
+
+1. حالت "واقعی" را انتخاب کنید
+2. صرافی را انتخاب کنید
+3. API Key را وارد کنید
+4. Secret Key را وارد کنید
+5. در ابتدا "Testnet" را فعال کنید
+6. پس از اطمینان، Testnet را غیرفعال کنید
+
+### استراتژی‌های معاملاتی
+
+#### استراتژی‌های از پیش تعریف شده
+
+##### 1. محافظه‌کارانه
+```
+ریسک هر معامله: 1%
+حداکثر پوزیشن: 3
+حداقل اطمینان: 75%
+حد ضرر متحرک: 2%
+لوریج: حداکثر 5x
+```
+
+**مناسب برای:**
+- مبتدیان
+- سرمایه‌های کوچک
+- افرادی که ریسک‌پذیری کمی دارند
+
+##### 2. متعادل (توصیه می‌شود)
+```
+ریسک هر معامله: 2%
+حداکثر پوزیشن: 5
+حداقل اطمینان: 65%
+حد ضرر متحرک: 3%
+DCA: فعال (2 سطح)
+لوریج: حداکثر 10x
+```
+
+**مناسب برای:**
+- اکثر کاربران
+- تعادل بین ریسک و سود
+- استفاده روزانه
+
+##### 3. تهاجمی
+```
+ریسک هر معامله: 3%
+حداکثر پوزیشن: 8
+حداقل اطمینان: 60%
+حد ضرر متحرک: 4%
+DCA: فعال (3 سطح)
+اسکالپینگ: فعال (1.5%)
+لوریج: حداکثر 20x
+```
+
+**مناسب برای:**
+- معامله‌گران حرفه‌ای
+- سرمایه‌های بزرگ
+- افرادی با تجربه بالا
+
+##### 4. اسکالپر
+```
+ریسک هر معامله: 1.5%
+حداکثر پوزیشن: 10
+حداقل اطمینان: 70%
+اسکالپینگ: فعال (0.8%)
+لوریج: حداکثر 15x
+```
+
+**مناسب برای:**
+- معاملات کوتاه‌مدت
+- سود‌های کوچک و مکرر
+- نظارت مداوم
+
+#### تنظیمات سفارشی
+
+می‌توانید تمام پارامترها را به دلخواه تنظیم کنید:
+
+**پارامترهای قابل تنظیم:**
+- ریسک هر معامله (0.5% - 5%)
+- حداکثر پوزیشن همزمان (1 - 10)
+- حداقل اطمینان (50% - 90%)
+- حداکثر لوریج (1x - 20x)
+- حد ضرر متحرک (فعال/غیرفعال)
+- درصد حد ضرر متحرک (1% - 10%)
+- DCA (فعال/غیرفعال)
+- تعداد سطوح DCA (1 - 5)
+- اسکالپینگ (فعال/غیرفعال)
+- هدف سود اسکالپینگ (0.5% - 3%)
+- تنوع‌بخشی پرتفوی (فعال/غیرفعال)
+- زمان‌بندی بازار (فعال/غیرفعال)
+- اجتناب از آخر هفته (فعال/غیرفعال)
+
+## 📖 نحوه استفاده
+
+### راه‌اندازی اولیه
+
+#### مرحله 1: تنظیم هوش مصنوعی
+
+1. به تب "تنظیمات AI" بروید
+2. ارائه‌دهنده را انتخاب کنید (OpenAI توصیه می‌شود)
+3. API Key را وارد کنید
+4. مدل را انتخاب کنید (`gpt-3.5-turbo`)
+
+#### مرحله 2: تنظیم صرافی
+
+1. به تب "صرافی" بروید
+2. حالت "آزمایشی" را انتخاب کنید
+3. موجودی اولیه را تنظیم کنید (مثلاً $10,000)
+4. صرافی را انتخاب کنید (مثلاً Binance)
+
+#### مرحله 3: انتخاب استراتژی
+
+1. به تب "استراتژی" بروید
+2. یک استراتژی از پیش تعریف شده انتخاب کنید
+3. یا پارامترها را به دلخواه تنظیم کنید
+
+#### مرحله 4: شروع معامله
+
+1. به تب "معاملات" بروید
+2. سوئیچ "فعال/غیرفعال" را روشن کنید
+3. منتظر بمانید تا AI بازار را تحلیل کند
+4. معاملات خودکار شروع می‌شود
+
+### نظارت بر معاملات
+
+#### داشبورد معاملات
+
+**اطلاعات نمایش داده شده:**
+- ارزش کل پرتفوی
+- موجودی نقد
+- بازدهی کل (درصد)
+- تعداد پوزیشن‌های باز
+
+**پوزیشن‌های باز:**
+- نماد ارز
+- مقدار
+- قیمت ورود
+- قیمت فعلی
+- سود/زیان
+
+**معاملات اخیر:**
+- نوع معامله (خرید/فروش)
+- قیمت
+- زمان
+- درصد اطمینان
+
+#### سیگنال‌های هوش مصنوعی
+
+**اطلاعات هر سیگنال:**
+- نماد ارز
+- تصمیم (خرید/فروش/نگهداری)
+- دلیل تصمیم
+- درصد اطمینان
+
+#### گزارش‌های تحلیل AI
+
+**شامل:**
+- فرآیند تفکر AI (Chain of Thought)
+- تحلیل دقیق بازار
+- شرایط باطل شدن تحلیل
+- زمان تحلیل
+
+### مشاهده گزارشات
+
+#### تب گزارشات
+
+**آمار کلی:**
+- کل معاملات
+- نرخ موفقیت
+- سود/زیان کل
+- بازدهی کل
+
+**تاریخچه معاملات:**
+- معاملات به تفکیک ارز
+- جزئیات هر معامله
+- زمان دقیق
+
+**تایم‌لاین تحلیل‌ها:**
+- تمام تحلیل‌های AI
+- فرآیند تفکر
+- تصمیمات گرفته شده
+
+**جزئیات پوزیشن‌ها:**
+- اطلاعات کامل هر پوزیشن
+- حد ضرر و حد سود
+- زمان ورود
+
+### مشاهده بازار
+
+#### تب بازار
+
+**کارت‌های قیمت:**
+- قیمت فعلی
+- تغییرات قیمت
+- درصد تغییرات
+- زمان به‌روزرسانی
+
+**نمودارهای قیمتی:**
+- نمودار خطی تعاملی
+- تاریخچه قیمت
+- به‌روزرسانی لحظه‌ای
+
+## 📁 ساختار پروژه
+
+```
+crypto-trading-bot/
+├── public/                      # فایل‌های استاتیک
+│   ├── favicon.ico
+│   └── placeholder.svg
+├── src/                         # کد منبع
+│   ├── components/              # کامپوننت‌های React
+│   │   ├── ui/                  # کامپوننت‌های UI (shadcn)
+│   │   ├── AIConfigPanel.tsx   # پنل تنظیمات AI
+│   │   ├── CryptoCard.tsx      # کارت نمایش ارز
+│   │   ├── CryptoChart.tsx     # نمودار قیمت
+│   │   ├── ExchangeConfigPanel.tsx  # پنل تنظیمات صرافی
+│   │   ├── StrategySelector.tsx     # انتخابگر استراتژی
+│   │   ├── TradingDashboard.tsx     # داشبورد معاملات
+│   │   └── TradingReports.tsx       # گزارشات
+│   ├── hooks/                   # React Hooks سفارشی
+│   │   ├── useCryptoPrices.ts  # دریافت قیمت‌ها
+│   │   ├── useTradingBot.ts    # منطق ربات
+│   │   └── use-mobile.tsx      # تشخیص موبایل
+│   ├── pages/                   # صفحات
+│   │   ├── Index.tsx           # صفحه اصلی
+│   │   └── NotFound.tsx        # صفحه 404
+│   ├── services/                # سرویس‌ها
+│   │   ├── aiService.ts        # سرویس AI
+│   │   ├── exchangeService.ts  # سرویس صرافی
+│   │   ├── portfolioManager.ts # مدیریت پرتفوی
+│   │   ├── technicalIndicators.ts  # اندیکاتورها
+│   │   └── tradingAI.ts        # منطق AI معاملاتی
+│   ├── types/                   # تعریف Type‌ها
+│   │   ├── crypto.ts           # تایپ‌های ارز
+│   │   ├── exchange.ts         # تایپ‌های صرافی
+│   │   └── trading.ts          # تایپ‌های معاملاتی
+│   ├── utils/                   # توابع کمکی
+│   │   └── toast.ts            # نوتیفیکیشن‌ها
+│   ├── App.tsx                  # کامپوننت اصلی
+│   ├── main.tsx                # نقطه ورود
+│   └── globals.css             # استایل‌های سراسری
+├── .gitignore                   # فایل‌های نادیده گرفته شده
+├── package.json                 # وابستگی‌ها
+├── tsconfig.json               # تنظیمات TypeScript
+├── vite.config.ts              # تنظیمات Vite
+├── tailwind.config.ts          # تنظیمات Tailwind
+└── README.md                    # این فایل
+```
+
+## 🔌 API و سرویس‌ها
+
+### API قیمت ارزها
+
+**آدرس:**
+```
+https://nof1.ai/api/crypto-prices
+```
+
+**پاسخ:**
+```json
+{
+  "prices": {
+    "BTC": {
+      "symbol": "BTC",
+      "price": 45000.50,
+      "timestamp": 1234567890
+    },
+    "ETH": {
+      "symbol": "ETH",
+      "price": 2500.25,
+      "timestamp": 1234567890
+    }
+  },
+  "serverTime": 1234567890
+}
+```
+
+**به‌روزرسانی:** هر 5 ثانیه
+
+### سرویس‌های AI
+
+#### OpenAI API
+
+**Endpoint:**
+```
+https://api.openai.com/v1/chat/completions
+```
+
+**نمونه درخواست:**
+```javascript
+{
+  "model": "gpt-3.5-turbo",
+  "messages": [
+    {
+      "role": "system",
+      "content": "شما یک تحلیلگر حرفه‌ای..."
+    },
+    {
+      "role": "user",
+      "content": "تحلیل BTC..."
+    }
+  ],
+  "temperature": 0.7
+}
+```
+
+#### OpenRouter API
+
+**Endpoint:**
+```
+https://openrouter.ai/api/v1/chat/completions
+```
+
+**Headers اضافی:**
+```javascript
+{
+  "HTTP-Referer": "your-app-url",
+  "X-Title": "Crypto Trading Bot"
+}
+```
+
+#### Ollama API
+
+**Endpoint:**
+```
+http://localhost:11434/api/generate
+```
+
+**نمونه درخواست:**
+```javascript
+{
+  "model": "llama2",
+  "prompt": "تحلیل بازار...",
+  "stream": false
+}
+```
+
+### اندیکاتورهای تکنیکال
+
+#### RSI (Relative Strength Index)
+
+```typescript
+calculateRSI(prices: number[], period: number = 14): number
+```
+
+**محاسبه:**
+- میانگین سودها و زیان‌ها
+- RS = میانگین سود / میانگین زیان
+- RSI = 100 - (100 / (1 + RS))
+
+**تفسیر:**
+- RSI < 30: اشباع فروش (سیگنال خرید)
+- RSI > 70: اشباع خرید (سیگنال فروش)
+
+#### EMA (Exponential Moving Average)
+
+```typescript
+calculateEMA(data: number[], period: number): number
+```
+
+**محاسبه:**
+- Multiplier = 2 / (period + 1)
+- EMA = (Price - EMA_prev) × Multiplier + EMA_prev
+
+**استفاده:**
+- تشخیص روند
+- سطوح حمایت و مقاومت
+
+#### MACD (Moving Average Convergence Divergence)
+
+```typescript
+calculateMACD(prices: number[]): {
+  macd: number;
+  signal: number;
+  histogram: number;
+}
+```
+
+**محاسبه:**
+- MACD = EMA(12) - EMA(26)
+- Signal = EMA(9) of MACD
+- Histogram = MACD - Signal
+
+**تفسیر:**
+- MACD > 0: مومنتوم صعودی
+- MACD < 0: مومنتوم نزولی
+
+## 🐛 عیب‌یابی
+
+### مشکلات رایج و راه‌حل‌ها
+
+#### 1. خطای نصب وابستگی‌ها
+
+**علت:** نسخه قدیمی Node.js
+
+**راه‌حل:**
+```bash
+# بررسی نسخه
+node --version
+
+# باید 18 یا بالاتر باشد
+# در غیر این صورت Node.js را به‌روزرسانی کنید
+```
+
+#### 2. خطای "API Key Invalid"
+
+**علت:** کلید API اشتباه یا منقضی شده
+
+**راه‌حل:**
+- کلید API را دوباره بررسی کنید
+- مطمئن شوید فضای خالی اضافی ندارد
+- کلید جدید دریافت کنید
+
+#### 3. خطای "Rate Limit"
+
+**علت:** تعداد درخواست‌ها زیاد است
+
+**راه‌حل:**
+- چند دقیقه صبر کنید
+- تعداد ارزهای تحلیل شده را کاهش دهید
+- از پلن پولی API استفاده کنید
+
+#### 4. ربات معامله نمی‌کند
+
+**بررسی‌های لازم:**
+- ✅ ربات فعال است؟
+- ✅ API Key وارد شده؟
+- ✅ موجودی کافی است؟
+- ✅ استراتژی تنظیم شده؟
+- ✅ حداقل اطمینان مناسب است؟
+
+#### 5. خطای Ollama Connection
+
+**راه‌حل:**
+```bash
+# مطمئن شوید Ollama در حال اجرا است
+ollama serve
+
+# بررسی دسترسی
+curl http://localhost:11434/api/tags
+```
+
+#### 6. نمودارها نمایش داده نمی‌شوند
+
+**راه‌حل:**
+- صفحه را رفرش کنید
+- Cache مرورگر را پاک کنید
+- مرورگر دیگری امتحان کنید
+
+#### 7. خطای CORS
+
+**راه‌حل:**
+```bash
+# در حالت توسعه
+npm run dev
+
+# اگر مشکل ادامه داشت، پروکسی را بررسی کنید
+# در vite.config.ts
+```
+
+### لاگ‌ها و دیباگ
+
+#### مشاهده لاگ‌های مرورگر
+
+```javascript
+// باز کردن Console
+// Chrome/Edge: F12 یا Ctrl+Shift+I
+// Firefox: F12 یا Ctrl+Shift+K
+// Safari: Cmd+Option+I
+```
+
+#### فعال‌سازی لاگ‌های بیشتر
+
+در `src/hooks/useTradingBot.ts`:
+```typescript
+// خط 50 تقریباً
+console.log('تحلیل شروع شد:', symbol);
+console.log('قیمت فعلی:', price);
+console.log('اندیکاتورها:', indicators);
+```
+
+## ❓ سوالات متداول
+
+### سوالات عمومی
+
+**س: آیا این ربات واقعاً سودآور است؟**
+
+ج: عملکرد ربات به عوامل زیادی بستگی دارد:
+- کیفیت تنظیمات
+- شرایط بازار
+- استراتژی انتخابی
+- مدیریت ریسک
+
+توصیه می‌شود ابتدا در حالت Demo تست کنید.
+
+**س: چقدر سرمایه نیاز است؟**
+
+ج: 
+- حالت Demo: هر مقداری (مجازی)
+- حالت Live: حداقل $100 توصیه می‌شود
+- برای نتایج بهتر: $1000 یا بیشتر
+
+**س: آیا نیاز به نظارت مداوم دارد؟**
+
+ج: خیر، ربات به صورت خودکار کار می‌کند. اما توصیه می‌شود:
+- روزی یک بار بررسی کنید
+- گزارشات را مطالعه کنید
+- در صورت نیاز تنظیمات را اصلاح کنید
+
+**س: آیا امن است؟**
+
+ج: 
+- در حالت Demo: کاملاً امن (پول مجازی)
+- در حالت Live: با رعایت نکات امنیتی، امن است
+- هرگز کلیدهای API را به اشتراک نگذارید
+- از IP Whitelist استفاده کنید
+- مجوز Withdrawal را غیرفعال کنید
+
+### سوالات فنی
+
+**س: چرا باید از TypeScript استفاده کنم؟**
+
+ج: TypeScript مزایای زیادی دارد:
+- کاهش خطاها
+- IntelliSense بهتر
+- کد تمیزتر و قابل نگهداری‌تر
+
+**س: چگونه می‌توانم استراتژی خودم را اضافه کنم؟**
+
+ج: در فایل `src/types/trading.ts`:
+```typescript
+export const DEFAULT_STRATEGIES: Record<string, TradingStrategy> = {
+  // استراتژی‌های موجود...
+  
+  myStrategy: {
+    name: 'استراتژی من',
+    riskPerTrade: 2.5,
+    maxPositions: 6,
+    // ... سایر تنظیمات
+  }
+};
+```
+
+**س: چگونه ارز جدید اضافه کنم؟**
+
+ج: قیمت‌ها از API دریافت می‌شوند. برای افزودن ارز:
+1. API باید آن ارز را پشتیبانی کند
+2. یا API خودتان را پیاده‌سازی کنید
+
+**س: چگونه می‌توانم زمان تحلیل را تغییر دهم؟**
+
+ج: در `src/hooks/useTradingBot.ts`:
+```typescript
+const ANALYSIS_COOLDOWN = 10000; // 10 ثانیه
+// به مقدار دلخواه تغییر دهید (میلی‌ثانیه)
+```
+
+### سوالات مربوط به صرافی‌ها
+
+**س: کدام صرافی بهتر است؟**
+
+ج: 
+- **Binance**: بزرگترین، نقدینگی بالا
+- **Bybit**: مناسب فیوچرز
+- **OKX**: کارمزد کمتر
+- **KuCoin**: ارزهای بیشتر
+
+**س: آیا می‌توانم از چند صرافی همزمان استفاده کنم؟**
+
+ج: در نسخه فعلی خیر. اما می‌توانید:
+- چند نمونه از برنامه اجرا کنید
+- یا این قابلیت را خودتان اضافه کنید
+
+**س: Testnet چیست؟**
+
+ج: Testnet یک شبکه آزمایشی است که:
+- با پول مجازی کار می‌کند
+- دقیقاً مثل شبکه اصلی است
+- برای تست ایده‌آل است
+
+## 🤝 مشارکت
+
+ما از مشارکت شما استقبال می‌کنیم!
+
+### نحوه مشارکت
+
+1. **Fork کردن پروژه**
+   ```bash
+   # روی دکمه Fork در GitHub کلیک کنید
+   ```
+
+2. **کلون کردن Fork**
+   ```bash
+   git clone https://github.com/your-username/crypto-trading-bot.git
+   cd crypto-trading-bot
+   ```
+
+3. **ایجاد Branch جدید**
+   ```bash
+   git checkout -b feature/amazing-feature
+   ```
+
+4. **انجام تغییرات**
+   - کد بنویسید
+   - تست کنید
+   - Commit کنید
+
+5. **Push کردن**
+   ```bash
+   git push origin feature/amazing-feature
+   ```
+
+6. **ایجاد Pull Request**
+   - به GitHub بروید
+   - روی "New Pull Request" کلیک کنید
+   - توضیحات کامل بدهید
+
+### راهنمای کدنویسی
+
+- از TypeScript استفاده کنید
+- کد را تمیز و خوانا بنویسید
+- کامنت‌های فارسی اضافه کنید
+- از Prettier برای فرمت کد استفاده کنید
+- تست‌های لازم را بنویسید
+
+### ایده‌هایی برای مشارکت
+
+- 🐛 رفع باگ‌ها
+- ✨ افزودن ویژگی جدید
+- 📝 بهبود مستندات
+- 🎨 بهبود UI/UX
+- 🌐 ترجمه به زبان‌های دیگر
+- ⚡ بهینه‌سازی عملکرد
+
+## 📄 مجوز
+
+این پروژه تحت مجوز MIT منتشر شده است.
+
+```
+MIT License
+
+Copyright (c) 2024 Crypto Trading Bot
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+## 📞 پشتیبانی و ارتباط
+
+### گزارش مشکلات
+
+اگر مشکلی پیدا کردید:
+1. به بخش [Issues](https://github.com/your-username/crypto-trading-bot/issues) بروید
+2. روی "New Issue" کلیک کنید
+3. مشکل را با جزئیات شرح دهید
+
+### درخواست ویژگی جدید
+
+برای پیشنهاد ویژگی جدید:
+1. یک Issue با برچسب "enhancement" ایجاد کنید
+2. ویژگی مورد نظر را توضیح دهید
+3. دلیل نیاز به آن را بنویسید
+
+### ارتباط با توسعه‌دهنده
+
+- 🌐 وبسایت: [jahaniwww.com](https://jahaniwww.com)
+- 📧 ایمیل: satreyek@gmail.com
+- 💬 تلگرام: https://t.me/satreyek
+
+## 🙏 تشکر و قدردانی
+
+این پروژه با استفاده از ابزارها و کتابخانه‌های زیر ساخته شده:
+
+- [React](https://react.dev/) - کتابخانه UI
+- [TypeScript](https://www.typescriptlang.org/) - زبان برنامه‌نویسی
+- [Vite](https://vitejs.dev/) - Build Tool
+- [Tailwind CSS](https://tailwindcss.com/) - فریمورک CSS
+- [shadcn/ui](https://ui.shadcn.com/) - کامپوننت‌های UI
+- [Recharts](https://recharts.org/) - کتابخانه نمودار
+- [React Query](https://tanstack.com/query) - مدیریت State
+- [OpenAI](https://openai.com/) - هوش مصنوعی
+- [Lucide Icons](https://lucide.dev/) - آیکون‌ها
+
+تشکر ویژه از تمام کسانی که در توسعه این پروژه مشارکت کرده‌اند! 🎉
+
+---
+
+**⚠️ هشدار مهم:**
+
+این نرم‌افزار صرفاً برای اهداف آموزشی و تحقیقاتی ارائه شده است. معامله در بازارهای مالی ریسک بالایی دارد و ممکن است منجر به از دست دادن سرمایه شود. قبل از استفاده از این ربات با پول واقعی:
+
+1. ✅ حتماً در حالت Demo تست کنید
+2. ✅ با ریسک‌های معاملات آشنا شوید
+3. ✅ فقط با پولی سرمایه‌گذاری کنید که توان از دست دادن آن را دارید
+4. ✅ از مشاور مالی مشورت بگیرید
+
+**توسعه‌دهندگان این نرم‌افزار هیچ مسئولیتی در قبال ضرر و زیان احتمالی ندارند.**
+
+---
+
+**ساخته شده با ❤️ توسط [Ali Jahani](https://jahaniwww.com)**
+
+**نسخه:** 1.0.0  
+**آخرین به‌روزرسانی:** 2024

@@ -1,0 +1,120 @@
+name: Publish backend image to GHCR
+
+# Build and publish the backend image to GitHub Container Registry, then
+# (for v* tags only) cut a GitHub Release with the auto-generated changelog.
+# The frontend image is built and released independently by the private
+# QuantDinger-Vue repo (see its release-frontend.yml).
+#
+# Triggers:
+#   - push of a version tag matching `v*` (e.g. v5.0.1) → publishes
+#     semver + latest tags AND a GitHub Release
+#   - manual workflow_dispatch → publishes only a short-SHA tag, no Release
+#
+# Multi-arch (linux/amd64 + linux/arm64) via QEMU + buildx. BUILD_REGION=global
+# keeps the GitHub-hosted runner off the Aliyun mirror detour.
+#
+# First-time setup: after the first successful run, visit
+#   https://github.com/orgs/<owner>/packages/container/quantdinger-backend/settings
+# and set package visibility to public if anonymous `docker pull` is desired.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+# Cancel an in-flight build when a newer tag/dispatch lands on the same ref.
+# Avoids two workflows racing for the same GHA cache scope.
+concurrency:
+  group: docker-publish-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write   # needed to create a GitHub Release
+  packages: write   # needed to push to GHCR
+
+jobs:
+  backend:
+    name: Build & push backend image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4.5.2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/quantdinger-backend
+          tags: |
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=sha,format=short
+
+      - name: Resolve application version
+        id: app_version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            app_version="${GITHUB_REF_NAME#v}"
+            git_tag="${GITHUB_REF_NAME}"
+          else
+            app_version="0.0.0-${GITHUB_SHA::7}"
+            git_tag=""
+          fi
+          echo "app_version=${app_version}" >> "$GITHUB_OUTPUT"
+          echo "git_tag=${git_tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push backend
+        uses: docker/build-push-action@v7
+        with:
+          context: ./backend_api_python
+          file: ./backend_api_python/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            BUILD_REGION=global
+            APP_VERSION=${{ steps.app_version.outputs.app_version }}
+            GIT_TAG=${{ steps.app_version.outputs.git_tag }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+          provenance: mode=max
+          sbom: true
+
+      # ----- Release-only step (skipped on workflow_dispatch) -----
+
+      - name: Create or update GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v3
+        with:
+          generate_release_notes: true
+          append_body: true   # preserve UI-authored notes; append our snippet
+          body: |
+            ## Backend ${{ github.ref_name }}
+
+            **Docker image (multi-arch, amd64 + arm64):**
+
+            ```bash
+            docker pull ghcr.io/${{ github.repository_owner }}/quantdinger-backend:${{ github.ref_name }}
+            ```
+
+            Pin in `docker-compose.ghcr.yml` via `IMAGE_TAG=${{ github.ref_name }}` in a project-root `.env`.
+
+            ---

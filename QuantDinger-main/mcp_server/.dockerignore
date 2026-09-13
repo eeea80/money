@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.pytest_cache/
+.tox/
+.venv/
+venv/
+.env
+tests/
+.git
+.DS_Store

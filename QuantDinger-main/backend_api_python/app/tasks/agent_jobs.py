@@ -1,0 +1,84 @@
+"""Celery execution for persistent Agent Gateway jobs."""
+
+from __future__ import annotations
+
+import copy
+import json
+import time
+from datetime import datetime
+
+from app.celery_app import celery_app
+
+
+SUPPORTED_KINDS = frozenset(
+    {
+        "backtest",
+    }
+)
+
+
+def supports_kind(kind: str) -> bool:
+    return str(kind or "") in SUPPORTED_KINDS
+
+
+def _execute(kind: str, payload: dict, on_progress):
+    request_payload = copy.deepcopy(payload)
+    if kind == "backtest":
+        from app.routes.agent_v1.backtests import _run_backtest
+
+        return _run_backtest(request_payload, on_progress)
+
+    raise ValueError(f"Unsupported durable agent job kind: {kind}")
+
+
+@celery_app.task(name="quantdinger.tasks.agent_job", acks_late=True)
+def execute_agent_job(job_id: str) -> None:
+    from app.utils import agent_jobs
+
+    row = agent_jobs.get_job_for_worker(job_id)
+    if row is None:
+        raise ValueError(f"Agent job does not exist: {job_id}")
+    if row.get("status") in {"succeeded", "failed", "cancelled"}:
+        return
+
+    kind = str(row.get("kind") or "")
+    if not supports_kind(kind):
+        raise ValueError(f"Unsupported durable agent job kind: {kind}")
+
+    if not agent_jobs._set_status(job_id, "running", started_at=datetime.utcnow()):
+        return
+    agent_jobs._publish_progress(job_id, {"phase": "running", "ts": time.time()})
+    try:
+        request_payload = row.get("request") or {}
+        if isinstance(request_payload, str):
+            request_payload = json.loads(request_payload)
+        result = _execute(
+            kind,
+            dict(request_payload),
+            lambda event: agent_jobs._publish_progress(job_id, event),
+        )
+        if agent_jobs._set_result(job_id, result):
+            agent_jobs._publish_progress(
+                job_id,
+                {"phase": "succeeded", "ts": time.time()},
+                terminal=True,
+            )
+        else:
+            agent_jobs._publish_terminal_state(job_id)
+    except Exception as exc:
+        if agent_jobs._set_failure(job_id, str(exc)):
+            agent_jobs._publish_progress(
+                job_id,
+                {"phase": "failed", "error": str(exc)[:500], "ts": time.time()},
+                terminal=True,
+            )
+        else:
+            agent_jobs._publish_terminal_state(job_id)
+        raise
+
+
+@celery_app.task(name="quantdinger.tasks.expire_agent_jobs")
+def expire_agent_jobs() -> int:
+    from app.utils.agent_jobs import expire_billed_jobs
+
+    return expire_billed_jobs()

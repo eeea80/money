@@ -1,0 +1,25 @@
+{
+  "runId": 37,
+  "strategy": "MACD and KDJ Confirmation",
+  "dataKind": "market",
+  "marketData": {
+    "instrument": "Crypto:BTC/USDT@spot",
+    "bars": 5968,
+    "firstBar": "2023-10-24 00:00:00",
+    "lastBar": "2026-07-14 12:00:00",
+    "contentHash": "9b35d13146128a7f2444cfa9801b48e55614d612e6db3f64c7862e323c0698ba",
+    "snapshotId": "9b35d13146128a7f2444cfa9801b48e55614d612e6db3f64c7862e323c0698ba",
+    "snapshotFormat": "strategy-v2-ohlcv-json-gzip-v1"
+  },
+  "replayContentHash": "9b35d13146128a7f2444cfa9801b48e55614d612e6db3f64c7862e323c0698ba",
+  "replayHashMatches": true,
+  "replaySource": "persisted_content_addressed_snapshot",
+  "indicatorImplementation": "TA-Lib direct recomputation",
+  "expectedSignals": 338,
+  "actualExecutions": 338,
+  "missingExecutions": [],
+  "unexpectedExecutions": [],
+  "signalAuditPassed": true,
+  "exactInputReplayPassed": true,
+  "ledgerAuditPassed": true
+}

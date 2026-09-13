@@ -1,0 +1,118 @@
+x-monitor-runtime: &monitor-runtime
+  init: true
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options:
+      max-size: ${CONTAINER_LOG_MAX_SIZE:-20m}
+      max-file: ${CONTAINER_LOG_MAX_FILES:-5}
+
+services:
+  prometheus:
+    <<: *monitor-runtime
+    image: prom/prometheus:v3.12.0-distroless
+    container_name: quantdinger-prometheus
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-30d}
+      - --web.enable-lifecycle
+    volumes:
+      - ./ops/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./ops/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-127.0.0.1:9090}:9090"
+    depends_on:
+      backend:
+        condition: service_healthy
+      alertmanager:
+        condition: service_started
+    networks:
+      - quantdinger-network
+
+  alertmanager:
+    <<: *monitor-runtime
+    image: prom/alertmanager:v0.32.1
+    container_name: quantdinger-alertmanager
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      - ./ops/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    ports:
+      - "${ALERTMANAGER_PORT:-127.0.0.1:9093}:9093"
+    networks:
+      - quantdinger-network
+
+  grafana:
+    <<: *monitor-runtime
+    image: grafana/grafana:13.0.2
+    container_name: quantdinger-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change-me-before-production}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./ops/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./ops/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "${GRAFANA_PORT:-127.0.0.1:3000}:3000"
+    depends_on:
+      prometheus:
+        condition: service_started
+    networks:
+      - quantdinger-network
+
+  postgres-exporter:
+    <<: *monitor-runtime
+    image: prometheuscommunity/postgres-exporter:v0.19.1
+    container_name: quantdinger-postgres-exporter
+    restart: unless-stopped
+    environment:
+      DATA_SOURCE_NAME: postgresql://${POSTGRES_USER:-quantdinger}:${POSTGRES_PASSWORD:-quantdinger123}@postgres:5432/${POSTGRES_DB:-quantdinger}?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - quantdinger-network
+
+  redis-cache-exporter:
+    <<: *monitor-runtime
+    image: oliver006/redis_exporter:v1.84.0
+    container_name: quantdinger-redis-cache-exporter
+    restart: unless-stopped
+    environment:
+      REDIS_ADDR: redis://redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - quantdinger-network
+
+  redis-jobs-exporter:
+    <<: *monitor-runtime
+    image: oliver006/redis_exporter:v1.84.0
+    container_name: quantdinger-redis-jobs-exporter
+    restart: unless-stopped
+    environment:
+      REDIS_ADDR: redis://redis-jobs:6379
+      REDIS_PASSWORD: ${CELERY_REDIS_PASSWORD:-}
+    depends_on:
+      redis-jobs:
+        condition: service_healthy
+    networks:
+      - quantdinger-network
+
+volumes:
+  prometheus_data:
+  alertmanager_data:
+  grafana_data:

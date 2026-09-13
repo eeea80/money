@@ -1,0 +1,2240 @@
+{
+  "baseline_revision": "2124b822b9b70d2aed6ec267890d1091306d0f90",
+  "cases": [
+    {
+      "kind": "normal",
+      "factor": "ema",
+      "params": {},
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "value": 103.19680093170392
+        },
+        "60": {
+          "value": 104.22143282529713
+        },
+        "96": {
+          "value": 105.12565678355632
+        }
+      }
+    },
+    {
+      "kind": "normal",
+      "factor": "ema_slope",
+      "params": {},
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "value": -0.007841423260690261
+        },
+        "60": {
+          "value": 0.0012507865848887523
+        },
+        "96": {
+          "value": -0.010210330134574064
+        }
+      }
+    },
+    {
+      "kind": "normal",
+      "factor": "rsi",
+      "params": {},
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "value": 50.81936720692954
+        },
+        "60": {
+          "value": 54.18905479324351
+        },
+        "96": {
+          "value": 46.28516952351764
+        }
+      }
+    },
+    {
+      "kind": "normal",
+      "factor": "macd",
+      "params": {
+        "output": "line"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "error": "factor.insufficientHistory"
+        },
+        "60": {
+          "value": 0.1428076383518544
+        },
+        "96": {
+          "value": -0.21307652225938511
+        }
+      }
+    },
+    {
+      "kind": "normal",
+      "factor": "macd",
+      "params": {
+        "output": "signal"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "error": "factor.insufficientHistory"
+        },
+        "60": {
+          "value": 0.11650801453931527
+        },
+        "96": {
+          "value": 0.13465921507606338
+        }
+      }
+    },
+    {
+      "kind": "normal",
+      "factor": "macd",
+      "params": {
+        "output": "histogram"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "error": "factor.insufficientHistory"
+        },
+        "60": {
+          "value": 0.026299623812539127
+        },
+        "96": {
+          "value": -0.3477357373354485
+        }
+      }
+    },
+    {
+      "kind": "normal",
+      "factor": "kdj",
+      "params": {
+        "output": "k"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "value": 57.591528667651666
+        },
+        "30": {
+          "value": 43.02809700366143
+        },
+        "60": {
+          "value": 48.6772608764284
+        },
+        "96": {
+          "value": 31.442146327210736
+        }
+      }
+    },
+    {
+      "kind": "normal",
+      "factor": "kdj",
+      "params": {
+        "output": "d"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "value": 68.34438529276507
+        },
+        "30": {
+          "value": 50.567245526433986
+        },
+        "60": {
+          "value": 44.171812857868154
+        },
+        "96": {
+          "value": 40.56725361293612
+        }
+      }
+    },
+    {
+      "kind": "normal",
+      "factor": "kdj",
+      "params": {
+        "output": "j"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "value": 36.08581541742487
+        },
+        "30": {
+          "value": 27.949799958116316
+        },
+        "60": {
+          "value": 57.688156913548895
+        },
+        "96": {
+          "value": 13.191931755759967
+        }
+      }
+    },
+    {
+      "kind": "normal",
+      "factor": "adx",
+      "params": {
+        "output": "adx"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "value": 15.157696657380756
+        },
+        "60": {
+          "value": 13.341513949210329
+        },
+        "96": {
+          "value": 13.476312537526608
+        }
+      }
+    },
+    {
+      "kind": "normal",
+      "factor": "adx",
+      "params": {
+        "output": "plus_di"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "value": 24.76728434312502
+        },
+        "60": {
+          "value": 24.799364894417742
+        },
+        "96": {
+          "value": 19.37923017834614
+        }
+      }
+    },
+    {
+      "kind": "normal",
+      "factor": "adx",
+      "params": {
+        "output": "minus_di"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "value": 23.968632108325476
+        },
+        "60": {
+          "value": 20.965162626940348
+        },
+        "96": {
+          "value": 22.489969778887463
+        }
+      }
+    },
+    {
+      "kind": "normal",
+      "factor": "supertrend",
+      "params": {
+        "output": "direction"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "value": -1.0
+        },
+        "30": {
+          "value": -1.0
+        },
+        "60": {
+          "value": -1.0
+        },
+        "96": {
+          "value": -1.0
+        }
+      }
+    },
+    {
+      "kind": "normal",
+      "factor": "supertrend",
+      "params": {
+        "output": "line"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "value": 106.7402479
+        },
+        "30": {
+          "value": 108.33908452951015
+        },
+        "60": {
+          "value": 109.35883699144152
+        },
+        "96": {
+          "value": 111.13858037604189
+        }
+      }
+    },
+    {
+      "kind": "normal",
+      "factor": "dema",
+      "params": {},
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "error": "factor.insufficientHistory"
+        },
+        "60": {
+          "value": 104.36439360661784
+        },
+        "96": {
+          "value": 104.95913259138653
+        }
+      }
+    },
+    {
+      "kind": "normal",
+      "factor": "tema",
+      "params": {},
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "error": "factor.insufficientHistory"
+        },
+        "60": {
+          "value": 104.28361405144489
+        },
+        "96": {
+          "value": 104.514232801075
+        }
+      }
+    },
+    {
+      "kind": "normal",
+      "factor": "trix",
+      "params": {},
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "error": "factor.insufficientHistory"
+        },
+        "60": {
+          "value": 0.00012385724392038888
+        },
+        "96": {
+          "value": 0.0002165575409702747
+        }
+      }
+    },
+    {
+      "kind": "flat",
+      "factor": "ema",
+      "params": {},
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "value": 100.0
+        },
+        "60": {
+          "value": 100.0
+        },
+        "96": {
+          "value": 100.0
+        }
+      }
+    },
+    {
+      "kind": "flat",
+      "factor": "ema_slope",
+      "params": {},
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "value": 0.0
+        },
+        "60": {
+          "value": 0.0
+        },
+        "96": {
+          "value": 0.0
+        }
+      }
+    },
+    {
+      "kind": "flat",
+      "factor": "rsi",
+      "params": {},
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "value": 100.0
+        },
+        "60": {
+          "value": 100.0
+        },
+        "96": {
+          "value": 100.0
+        }
+      }
+    },
+    {
+      "kind": "flat",
+      "factor": "macd",
+      "params": {
+        "output": "line"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "error": "factor.insufficientHistory"
+        },
+        "60": {
+          "value": 0.0
+        },
+        "96": {
+          "value": 0.0
+        }
+      }
+    },
+    {
+      "kind": "flat",
+      "factor": "macd",
+      "params": {
+        "output": "signal"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "error": "factor.insufficientHistory"
+        },
+        "60": {
+          "value": 0.0
+        },
+        "96": {
+          "value": 0.0
+        }
+      }
+    },
+    {
+      "kind": "flat",
+      "factor": "macd",
+      "params": {
+        "output": "histogram"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "error": "factor.insufficientHistory"
+        },
+        "60": {
+          "value": 0.0
+        },
+        "96": {
+          "value": 0.0
+        }
+      }
+    },
+    {
+      "kind": "flat",
+      "factor": "kdj",
+      "params": {
+        "output": "k"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "value": 50.0
+        },
+        "30": {
+          "value": 50.0
+        },
+        "60": {
+          "value": 50.0
+        },
+        "96": {
+          "value": 50.0
+        }
+      }
+    },
+    {
+      "kind": "flat",
+      "factor": "kdj",
+      "params": {
+        "output": "d"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "value": 50.0
+        },
+        "30": {
+          "value": 50.0
+        },
+        "60": {
+          "value": 50.0
+        },
+        "96": {
+          "value": 50.0
+        }
+      }
+    },
+    {
+      "kind": "flat",
+      "factor": "kdj",
+      "params": {
+        "output": "j"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "value": 50.0
+        },
+        "30": {
+          "value": 50.0
+        },
+        "60": {
+          "value": 50.0
+        },
+        "96": {
+          "value": 50.0
+        }
+      }
+    },
+    {
+      "kind": "flat",
+      "factor": "adx",
+      "params": {
+        "output": "adx"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "value": 0.0
+        },
+        "60": {
+          "value": 0.0
+        },
+        "96": {
+          "value": 0.0
+        }
+      }
+    },
+    {
+      "kind": "flat",
+      "factor": "adx",
+      "params": {
+        "output": "plus_di"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "value": 0.0
+        },
+        "60": {
+          "value": 0.0
+        },
+        "96": {
+          "value": 0.0
+        }
+      }
+    },
+    {
+      "kind": "flat",
+      "factor": "adx",
+      "params": {
+        "output": "minus_di"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "value": 0.0
+        },
+        "60": {
+          "value": 0.0
+        },
+        "96": {
+          "value": 0.0
+        }
+      }
+    },
+    {
+      "kind": "flat",
+      "factor": "supertrend",
+      "params": {
+        "output": "direction"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "value": 1.0
+        },
+        "30": {
+          "value": 1.0
+        },
+        "60": {
+          "value": 1.0
+        },
+        "96": {
+          "value": 1.0
+        }
+      }
+    },
+    {
+      "kind": "flat",
+      "factor": "supertrend",
+      "params": {
+        "output": "line"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "value": 94.0
+        },
+        "30": {
+          "value": 94.0
+        },
+        "60": {
+          "value": 94.0
+        },
+        "96": {
+          "value": 94.0
+        }
+      }
+    },
+    {
+      "kind": "flat",
+      "factor": "dema",
+      "params": {},
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "error": "factor.insufficientHistory"
+        },
+        "60": {
+          "value": 100.0
+        },
+        "96": {
+          "value": 100.0
+        }
+      }
+    },
+    {
+      "kind": "flat",
+      "factor": "tema",
+      "params": {},
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "error": "factor.insufficientHistory"
+        },
+        "60": {
+          "value": 100.0
+        },
+        "96": {
+          "value": 100.0
+        }
+      }
+    },
+    {
+      "kind": "flat",
+      "factor": "trix",
+      "params": {},
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "error": "factor.insufficientHistory"
+        },
+        "60": {
+          "value": 0.0
+        },
+        "96": {
+          "value": 0.0
+        }
+      }
+    },
+    {
+      "kind": "gaps",
+      "factor": "ema",
+      "params": {},
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "value": 99.60911836530848
+        },
+        "60": {
+          "value": 102.7169216877915
+        },
+        "96": {
+          "value": 100.59506871853038
+        }
+      }
+    },
+    {
+      "kind": "gaps",
+      "factor": "ema_slope",
+      "params": {},
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "value": -0.03563753853518847
+        },
+        "60": {
+          "value": 0.04547653485784364
+        },
+        "96": {
+          "value": -0.0019424056482528762
+        }
+      }
+    },
+    {
+      "kind": "gaps",
+      "factor": "rsi",
+      "params": {},
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "value": 40.152960976015116
+        },
+        "60": {
+          "value": 67.45451562553734
+        },
+        "96": {
+          "value": 66.38512784995947
+        }
+      }
+    },
+    {
+      "kind": "gaps",
+      "factor": "macd",
+      "params": {
+        "output": "line"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "error": "factor.insufficientHistory"
+        },
+        "60": {
+          "value": 2.631536379362501
+        },
+        "96": {
+          "value": 0.06839660680064696
+        }
+      }
+    },
+    {
+      "kind": "gaps",
+      "factor": "macd",
+      "params": {
+        "output": "signal"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "error": "factor.insufficientHistory"
+        },
+        "60": {
+          "value": 0.28860938764588273
+        },
+        "96": {
+          "value": -0.6763864571476959
+        }
+      }
+    },
+    {
+      "kind": "gaps",
+      "factor": "macd",
+      "params": {
+        "output": "histogram"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "error": "factor.insufficientHistory"
+        },
+        "60": {
+          "value": 2.3429269917166184
+        },
+        "96": {
+          "value": 0.7447830639483428
+        }
+      }
+    },
+    {
+      "kind": "gaps",
+      "factor": "kdj",
+      "params": {
+        "output": "k"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "value": 36.22454015266257
+        },
+        "30": {
+          "value": 18.09078371205648
+        },
+        "60": {
+          "value": 77.12177554486254
+        },
+        "96": {
+          "value": 51.94889257123754
+        }
+      }
+    },
+    {
+      "kind": "gaps",
+      "factor": "kdj",
+      "params": {
+        "output": "d"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "value": 39.54778213765406
+        },
+        "30": {
+          "value": 27.535834721356764
+        },
+        "60": {
+          "value": 57.6442528412594
+        },
+        "96": {
+          "value": 42.395513861257314
+        }
+      }
+    },
+    {
+      "kind": "gaps",
+      "factor": "kdj",
+      "params": {
+        "output": "j"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "value": 29.57805618267959
+        },
+        "30": {
+          "value": -0.7993183065440803
+        },
+        "60": {
+          "value": 116.07682095206883
+        },
+        "96": {
+          "value": 71.05564999119801
+        }
+      }
+    },
+    {
+      "kind": "gaps",
+      "factor": "adx",
+      "params": {
+        "output": "adx"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "value": 33.45197513572482
+        },
+        "60": {
+          "value": 19.13439315957757
+        },
+        "96": {
+          "value": 12.943829840700245
+        }
+      }
+    },
+    {
+      "kind": "gaps",
+      "factor": "adx",
+      "params": {
+        "output": "plus_di"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "value": 28.3275894908612
+        },
+        "60": {
+          "value": 46.7424394938074
+        },
+        "96": {
+          "value": 47.10432426499807
+        }
+      }
+    },
+    {
+      "kind": "gaps",
+      "factor": "adx",
+      "params": {
+        "output": "minus_di"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "value": 42.221602405054874
+        },
+        "60": {
+          "value": 22.55231277050412
+        },
+        "96": {
+          "value": 23.85181574795938
+        }
+      }
+    },
+    {
+      "kind": "gaps",
+      "factor": "supertrend",
+      "params": {
+        "output": "direction"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "value": 1.0
+        },
+        "30": {
+          "value": -1.0
+        },
+        "60": {
+          "value": 1.0
+        },
+        "96": {
+          "value": 1.0
+        }
+      }
+    },
+    {
+      "kind": "gaps",
+      "factor": "supertrend",
+      "params": {
+        "output": "line"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "value": 88.21104000000001
+        },
+        "30": {
+          "value": 107.35086003259863
+        },
+        "60": {
+          "value": 102.83035821608237
+        },
+        "96": {
+          "value": 100.1339734858584
+        }
+      }
+    },
+    {
+      "kind": "gaps",
+      "factor": "dema",
+      "params": {},
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "error": "factor.insufficientHistory"
+        },
+        "60": {
+          "value": 105.27572960631645
+        },
+        "96": {
+          "value": 100.47395630514421
+        }
+      }
+    },
+    {
+      "kind": "gaps",
+      "factor": "tema",
+      "params": {},
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "error": "factor.insufficientHistory"
+        },
+        "60": {
+          "value": 108.2554307162625
+        },
+        "96": {
+          "value": 100.74833905481127
+        }
+      }
+    },
+    {
+      "kind": "gaps",
+      "factor": "trix",
+      "params": {},
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "error": "factor.insufficientHistory"
+        },
+        "60": {
+          "value": 7.938412621255608e-05
+        },
+        "96": {
+          "value": -0.0009619024801650333
+        }
+      }
+    },
+    {
+      "kind": "nan",
+      "factor": "ema",
+      "params": {},
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "value": 103.19108154079062
+        },
+        "60": {
+          "value": 104.1753429435763
+        },
+        "96": {
+          "value": 105.12440121446073
+        }
+      }
+    },
+    {
+      "kind": "nan",
+      "factor": "ema_slope",
+      "params": {},
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "value": -0.0030296661755661036
+        },
+        "60": {
+          "value": 0.0015394586698864732
+        },
+        "96": {
+          "value": -0.010202852043108224
+        }
+      }
+    },
+    {
+      "kind": "nan",
+      "factor": "rsi",
+      "params": {},
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "value": 50.82244842767359
+        },
+        "60": {
+          "value": 54.19347133701328
+        },
+        "96": {
+          "value": 46.31122105281473
+        }
+      }
+    },
+    {
+      "kind": "nan",
+      "factor": "macd",
+      "params": {
+        "output": "line"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "error": "factor.insufficientHistory"
+        },
+        "60": {
+          "value": 0.154020360426685
+        },
+        "96": {
+          "value": -0.21042361508408192
+        }
+      }
+    },
+    {
+      "kind": "nan",
+      "factor": "macd",
+      "params": {
+        "output": "signal"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "error": "factor.insufficientHistory"
+        },
+        "60": {
+          "value": 0.10933090598484366
+        },
+        "96": {
+          "value": 0.13840196375159414
+        }
+      }
+    },
+    {
+      "kind": "nan",
+      "factor": "macd",
+      "params": {
+        "output": "histogram"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "error": "factor.insufficientHistory"
+        },
+        "60": {
+          "value": 0.04468945444184133
+        },
+        "96": {
+          "value": -0.34882557883567605
+        }
+      }
+    },
+    {
+      "kind": "nan",
+      "factor": "kdj",
+      "params": {
+        "output": "k"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "value": null
+        },
+        "30": {
+          "value": null
+        },
+        "60": {
+          "value": null
+        },
+        "96": {
+          "value": null
+        }
+      }
+    },
+    {
+      "kind": "nan",
+      "factor": "kdj",
+      "params": {
+        "output": "d"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "value": null
+        },
+        "30": {
+          "value": null
+        },
+        "60": {
+          "value": null
+        },
+        "96": {
+          "value": null
+        }
+      }
+    },
+    {
+      "kind": "nan",
+      "factor": "kdj",
+      "params": {
+        "output": "j"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "value": null
+        },
+        "30": {
+          "value": null
+        },
+        "60": {
+          "value": null
+        },
+        "96": {
+          "value": null
+        }
+      }
+    },
+    {
+      "kind": "nan",
+      "factor": "adx",
+      "params": {
+        "output": "adx"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "value": null
+        },
+        "60": {
+          "value": null
+        },
+        "96": {
+          "value": null
+        }
+      }
+    },
+    {
+      "kind": "nan",
+      "factor": "adx",
+      "params": {
+        "output": "plus_di"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "value": null
+        },
+        "60": {
+          "value": null
+        },
+        "96": {
+          "value": null
+        }
+      }
+    },
+    {
+      "kind": "nan",
+      "factor": "adx",
+      "params": {
+        "output": "minus_di"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "value": null
+        },
+        "60": {
+          "value": null
+        },
+        "96": {
+          "value": null
+        }
+      }
+    },
+    {
+      "kind": "nan",
+      "factor": "supertrend",
+      "params": {
+        "output": "direction"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "value": 1.0
+        },
+        "30": {
+          "value": 1.0
+        },
+        "60": {
+          "value": 1.0
+        },
+        "96": {
+          "value": 1.0
+        }
+      }
+    },
+    {
+      "kind": "nan",
+      "factor": "supertrend",
+      "params": {
+        "output": "line"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "value": null
+        },
+        "30": {
+          "value": null
+        },
+        "60": {
+          "value": null
+        },
+        "96": {
+          "value": null
+        }
+      }
+    },
+    {
+      "kind": "nan",
+      "factor": "dema",
+      "params": {},
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "error": "factor.insufficientHistory"
+        },
+        "60": {
+          "value": 104.34157813458394
+        },
+        "96": {
+          "value": 104.96281586629912
+        }
+      }
+    },
+    {
+      "kind": "nan",
+      "factor": "tema",
+      "params": {},
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "error": "factor.insufficientHistory"
+        },
+        "60": {
+          "error": "factor.insufficientHistory"
+        },
+        "96": {
+          "value": 104.51328624474064
+        }
+      }
+    },
+    {
+      "kind": "nan",
+      "factor": "trix",
+      "params": {},
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "error": "factor.insufficientHistory"
+        },
+        "60": {
+          "value": 0.00011448974658212485
+        },
+        "96": {
+          "value": 0.0002219747930420901
+        }
+      }
+    },
+    {
+      "kind": "inf",
+      "factor": "ema",
+      "params": {},
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "value": 103.19680093170392
+        },
+        "60": {
+          "value": 104.22143282529713
+        },
+        "96": {
+          "value": 105.12565678355632
+        }
+      }
+    },
+    {
+      "kind": "inf",
+      "factor": "ema_slope",
+      "params": {},
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "value": -0.007841423260690261
+        },
+        "60": {
+          "value": 0.0012507865848887523
+        },
+        "96": {
+          "value": -0.010210330134574064
+        }
+      }
+    },
+    {
+      "kind": "inf",
+      "factor": "rsi",
+      "params": {},
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "value": 50.81936720692954
+        },
+        "60": {
+          "value": 54.18905479324351
+        },
+        "96": {
+          "value": 46.28516952351764
+        }
+      }
+    },
+    {
+      "kind": "inf",
+      "factor": "macd",
+      "params": {
+        "output": "line"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "error": "factor.insufficientHistory"
+        },
+        "60": {
+          "value": 0.1428076383518544
+        },
+        "96": {
+          "value": -0.21307652225938511
+        }
+      }
+    },
+    {
+      "kind": "inf",
+      "factor": "macd",
+      "params": {
+        "output": "signal"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "error": "factor.insufficientHistory"
+        },
+        "60": {
+          "value": 0.11650801453931527
+        },
+        "96": {
+          "value": 0.13465921507606338
+        }
+      }
+    },
+    {
+      "kind": "inf",
+      "factor": "macd",
+      "params": {
+        "output": "histogram"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "error": "factor.insufficientHistory"
+        },
+        "60": {
+          "value": 0.026299623812539127
+        },
+        "96": {
+          "value": -0.3477357373354485
+        }
+      }
+    },
+    {
+      "kind": "inf",
+      "factor": "kdj",
+      "params": {
+        "output": "k"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "value": 57.591528667651666
+        },
+        "30": {
+          "value": 10.554539924386258
+        },
+        "60": {
+          "value": null
+        },
+        "96": {
+          "value": null
+        }
+      }
+    },
+    {
+      "kind": "inf",
+      "factor": "kdj",
+      "params": {
+        "output": "d"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "value": 68.34438529276507
+        },
+        "30": {
+          "value": 26.939356386796558
+        },
+        "60": {
+          "value": null
+        },
+        "96": {
+          "value": null
+        }
+      }
+    },
+    {
+      "kind": "inf",
+      "factor": "kdj",
+      "params": {
+        "output": "j"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "value": 36.08581541742487
+        },
+        "30": {
+          "value": -22.21509300043434
+        },
+        "60": {
+          "value": null
+        },
+        "96": {
+          "value": null
+        }
+      }
+    },
+    {
+      "kind": "inf",
+      "factor": "adx",
+      "params": {
+        "output": "adx"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "value": null
+        },
+        "60": {
+          "value": null
+        },
+        "96": {
+          "value": null
+        }
+      }
+    },
+    {
+      "kind": "inf",
+      "factor": "adx",
+      "params": {
+        "output": "plus_di"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "value": null
+        },
+        "60": {
+          "value": null
+        },
+        "96": {
+          "value": null
+        }
+      }
+    },
+    {
+      "kind": "inf",
+      "factor": "adx",
+      "params": {
+        "output": "minus_di"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "value": null
+        },
+        "60": {
+          "value": null
+        },
+        "96": {
+          "value": null
+        }
+      }
+    },
+    {
+      "kind": "inf",
+      "factor": "supertrend",
+      "params": {
+        "output": "direction"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "value": -1.0
+        },
+        "30": {
+          "value": -1.0
+        },
+        "60": {
+          "value": -1.0
+        },
+        "96": {
+          "value": -1.0
+        }
+      }
+    },
+    {
+      "kind": "inf",
+      "factor": "supertrend",
+      "params": {
+        "output": "line"
+      },
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "value": 106.7402479
+        },
+        "30": {
+          "value": 114.77169345611817
+        },
+        "60": {
+          "value": 114.77169345611817
+        },
+        "96": {
+          "value": 114.77169345611817
+        }
+      }
+    },
+    {
+      "kind": "inf",
+      "factor": "dema",
+      "params": {},
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "error": "factor.insufficientHistory"
+        },
+        "60": {
+          "value": 104.36439360661784
+        },
+        "96": {
+          "value": 104.95913259138653
+        }
+      }
+    },
+    {
+      "kind": "inf",
+      "factor": "tema",
+      "params": {},
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "error": "factor.insufficientHistory"
+        },
+        "60": {
+          "value": 104.28361405144489
+        },
+        "96": {
+          "value": 104.514232801075
+        }
+      }
+    },
+    {
+      "kind": "inf",
+      "factor": "trix",
+      "params": {},
+      "prefixes": {
+        "1": {
+          "error": "factor.insufficientHistory"
+        },
+        "8": {
+          "error": "factor.insufficientHistory"
+        },
+        "14": {
+          "error": "factor.insufficientHistory"
+        },
+        "30": {
+          "error": "factor.insufficientHistory"
+        },
+        "60": {
+          "value": 0.00012385724392038888
+        },
+        "96": {
+          "value": 0.0002165575409702747
+        }
+      }
+    }
+  ]
+}

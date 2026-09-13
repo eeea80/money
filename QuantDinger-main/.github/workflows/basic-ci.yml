@@ -1,0 +1,184 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main, master, v5.0.1-bate]
+  pull_request:
+    branches: [main, master]
+
+concurrency:
+  group: backend-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Lint and structure guardrails
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Documentation structure and links
+        run: python scripts/check_docs.py
+
+      - name: Install lint dependency
+        working-directory: ./backend_api_python
+        run: python -m pip install --disable-pip-version-check "ruff>=0.16.0,<0.17" "packaging>=24,<27"
+
+      - name: Python syntax check
+        working-directory: ./backend_api_python
+        run: |
+          python -m py_compile run.py
+          python -m compileall -q app scripts tests
+
+      - name: Ruff critical lint
+        working-directory: ./backend_api_python
+        run: ruff check app scripts tests
+
+      - name: Backend structure guardrail
+        working-directory: ./backend_api_python
+        run: python scripts/backend_quality_check.py
+
+      - name: Production dependency lock guardrail
+        working-directory: ./backend_api_python
+        run: python scripts/check_requirements_lock.py
+
+  tests:
+    name: Backend tests (${{ matrix.shard_label }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard_index: 0
+            shard_label: 1/2
+          - shard_index: 1
+            shard_label: 2/2
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: quantdinger_test
+          POSTGRES_PASSWORD: quantdinger_test
+          POSTGRES_DB: quantdinger_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U quantdinger_test -d quantdinger_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://quantdinger_test:quantdinger_test@127.0.0.1:5432/quantdinger_test
+      DB_TYPE: postgresql
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: 6379
+      CACHE_ENABLED: 'false'
+      SKIP_STARTUP_HOOKS: '1'
+      SECRET_KEY: ci-secret-key-with-at-least-thirty-two-bytes
+      ADMIN_USER: testadmin
+      ADMIN_PASSWORD: testpass123
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            backend_api_python/requirements-dev.txt
+            backend_api_python/requirements.lock
+
+      - name: Install development dependencies
+        working-directory: ./backend_api_python
+        run: python -m pip install --disable-pip-version-check -r requirements.lock -r requirements-dev.txt
+
+      - name: Python import check
+        if: matrix.shard_index == 0
+        working-directory: ./backend_api_python
+        run: python -c "from app import create_app; from app.config import settings; from app.openapi import init_openapi; print('Core modules imported successfully')"
+
+      - name: Run database migrations
+        working-directory: ./backend_api_python
+        env:
+          QD_PROCESS_ROLE: migration
+        run: python -m app.commands.migrate
+
+      - name: Run backend test shard
+        working-directory: ./backend_api_python
+        shell: bash
+        run: |
+          mapfile -t test_files < <(find tests -maxdepth 1 -type f -name 'test_*.py' | sort)
+          selected=()
+          for index in "${!test_files[@]}"; do
+            if (( index % 2 == ${{ matrix.shard_index }} )); then
+              selected+=("${test_files[$index]}")
+            fi
+          done
+          if (( ${#selected[@]} == 0 )); then
+            echo "::error::No tests selected for shard ${{ matrix.shard_label }}"
+            exit 1
+          fi
+          python -m pytest "${selected[@]}" -m "not integration and not stress" -q
+
+      - name: Run release gates independently
+        if: matrix.shard_index == 0
+        working-directory: ./backend_api_python
+        run: python -m pytest tests/release_gate -q
+
+  compose-check:
+    name: Docker Compose validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Validate local compose
+        run: docker compose -f docker-compose.yml config -q
+
+      - name: Validate GHCR compose
+        run: docker compose -f docker-compose.ghcr.yml config -q
+
+      - name: Validate local build override
+        run: docker compose -f docker-compose.yml -f docker-compose.build.yml config -q
+
+      - name: Validate observability override
+        run: docker compose -f docker-compose.yml -f docker-compose.observability.yml config -q
+
+      - name: Validate production hardening override
+        run: docker compose -f docker-compose.yml -f docker-compose.production.yml -f docker-compose.observability.yml config -q
+
+  version-check:
+    name: Repository consistency
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Verify version declarations
+        run: python scripts/check_version.py
+
+      - name: Check tracked text encoding
+        run: python scripts/check_mojibake.py

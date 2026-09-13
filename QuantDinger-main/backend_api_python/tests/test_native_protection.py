@@ -1,0 +1,179 @@
+from decimal import Decimal
+
+import pytest
+
+from app.services.live_trading.native_protection import (
+    NativeProtectionRequest,
+    place_native_protection_orders,
+    protection_prices_from_payload,
+)
+
+
+def _request(**overrides):
+    values = {
+        "symbol": "BTC/USDT",
+        "pos_side": "long",
+        "quantity": 0.01,
+        "entry_price": 100.0,
+        "stop_loss_price": 90.0,
+        "take_profit_price": 120.0,
+        "margin_mode": "cross",
+        "client_order_id": "qdprot1",
+    }
+    values.update(overrides)
+    return NativeProtectionRequest(**values)
+
+
+def test_resolves_strategy_protection_percentages():
+    stop, take, trailing, activation = protection_prices_from_payload(
+        {
+            "protection": {
+                "stop_loss_pct": 0.1,
+                "take_profit_pct": 0.2,
+                "trailing_stop_pct": 0.03,
+                "trailing_activation_pct": 0.04,
+            }
+        },
+        entry_price=100,
+        pos_side="long",
+    )
+    assert stop == pytest.approx(90)
+    assert take == pytest.approx(120)
+    assert trailing == pytest.approx(0.03)
+    assert activation == pytest.approx(0.04)
+
+
+def test_binance_uses_current_algo_order_endpoint():
+    from app.services.live_trading.binance import BinanceFuturesClient
+
+    client = BinanceFuturesClient.__new__(BinanceFuturesClient)
+    client.get_dual_side_position = lambda: False
+    calls = []
+    client._signed_request = lambda method, path, params: calls.append((method, path, params)) or {"algoId": 1}
+
+    result = place_native_protection_orders(client, _request())
+
+    assert len(result) == 2
+    assert {call[2]["type"] for call in calls} == {"STOP_MARKET", "TAKE_PROFIT_MARKET"}
+    assert all(call[1] == "/fapi/v1/algoOrder" for call in calls)
+    assert all(call[2]["reduceOnly"] == "true" for call in calls)
+
+
+def test_okx_hedge_protection_uses_position_side_without_net_only_reduce_flag():
+    from app.services.live_trading.okx import OkxClient
+
+    client = OkxClient.__new__(OkxClient)
+    client.broker_code = "broker"
+    client._normalize_order_size = lambda **_kwargs: (Decimal("2"), 0)
+    client._resolve_pos_side = lambda **_kwargs: "long"
+    calls = []
+    client._signed_request = lambda method, path, json_body=None, params=None: calls.append(json_body) or {"data": [{"algoId": "1"}]}
+
+    result = place_native_protection_orders(client, _request())
+
+    assert len(result) == 2
+    assert all("reduceOnly" not in body for body in calls)
+    assert calls[0]["tag"] == "broker"
+    assert any("slTriggerPx" in body for body in calls)
+    assert any("tpTriggerPx" in body for body in calls)
+
+
+def test_okx_net_protection_sets_reduce_only():
+    from app.services.live_trading.okx import OkxClient
+
+    client = OkxClient.__new__(OkxClient)
+    client.broker_code = ""
+    client._normalize_order_size = lambda **_kwargs: (Decimal("2"), 0)
+    client._resolve_pos_side = lambda **_kwargs: "net"
+    calls = []
+    client._signed_request = (
+        lambda method, path, json_body=None, params=None: calls.append(json_body)
+        or {"data": [{"algoId": "1"}]}
+    )
+
+    place_native_protection_orders(client, _request())
+
+    assert calls
+    assert all(body["reduceOnly"] == "true" for body in calls)
+
+
+def test_bitget_keeps_channel_header_path_and_position_side():
+    from app.services.live_trading.bitget import BitgetMixClient
+
+    client = BitgetMixClient.__new__(BitgetMixClient)
+    client._normalize_size = lambda **_kwargs: (Decimal("0.01"), 2)
+    calls = []
+    client._signed_request = lambda method, path, json_body=None, params=None: calls.append((path, json_body)) or {"code": "00000"}
+
+    place_native_protection_orders(client, _request())
+
+    assert len(calls) == 2
+    assert all(path == "/api/v2/mix/order/place-tpsl-order" for path, _ in calls)
+    assert all(body["holdSide"] == "long" for _, body in calls)
+    assert {body["planType"] for _, body in calls} == {"loss_plan", "profit_plan"}
+
+
+def test_bybit_conditional_orders_are_reduce_only():
+    from app.services.live_trading.bybit import BybitClient
+
+    client = BybitClient.__new__(BybitClient)
+    client._normalize_qty = lambda **_kwargs: (Decimal("0.01"), 2)
+    client._resolve_position_idx = lambda *_args, **_kwargs: 1
+    calls = []
+    client._signed_request = lambda method, path, json_body=None, params=None: calls.append(json_body) or {"retCode": 0}
+
+    place_native_protection_orders(client, _request())
+
+    assert len(calls) == 2
+    assert all(body["reduceOnly"] is True for body in calls)
+    assert all(body["closeOnTrigger"] is True for body in calls)
+    assert {body["triggerDirection"] for body in calls} == {1, 2}
+
+
+def test_gate_price_orders_use_reduce_only_signed_contract_size():
+    from app.services.live_trading.gate import GateUsdtFuturesClient
+
+    client = GateUsdtFuturesClient.__new__(GateUsdtFuturesClient)
+    client._resolve_order_size = lambda **_kwargs: ("-2", None)
+    calls = []
+    client._signed_request = lambda method, path, **kwargs: calls.append((path, kwargs)) or {"id": 1}
+
+    place_native_protection_orders(client, _request())
+
+    assert len(calls) == 2
+    assert all(kwargs["json_body"]["initial"]["reduce_only"] is True for _, kwargs in calls)
+    assert all(kwargs["json_body"]["initial"]["size"] == -2 for _, kwargs in calls)
+
+
+def test_gate_decimal_price_orders_use_string_amount():
+    from app.services.live_trading.gate import GateUsdtFuturesClient
+
+    client = GateUsdtFuturesClient.__new__(GateUsdtFuturesClient)
+    client._resolve_order_size = lambda **_kwargs: (
+        "-0.2",
+        {"X-Gate-Size-Decimal": "1"},
+    )
+    calls = []
+    client._signed_request = lambda method, path, **kwargs: calls.append((path, kwargs)) or {"id": 1}
+
+    place_native_protection_orders(client, _request())
+
+    assert len(calls) == 2
+    assert all(kwargs["json_body"]["initial"]["amount"] == "-0.2" for _, kwargs in calls)
+    assert all("size" not in kwargs["json_body"]["initial"] for _, kwargs in calls)
+
+
+def test_htx_uses_margin_mode_specific_position_tpsl_endpoint():
+    from app.services.live_trading.htx import HtxClient
+
+    client = HtxClient.__new__(HtxClient)
+    client._base_to_contracts = lambda **_kwargs: 3
+    calls = []
+    client._swap_private_request_raw = lambda method, path, **kwargs: calls.append((path, kwargs["json_body"])) or {"status": "ok"}
+
+    result = place_native_protection_orders(client, _request(margin_mode="isolated"))
+
+    assert len(result) == 1
+    assert calls[0][0] == "/linear-swap-api/v1/swap_tpsl_order"
+    assert calls[0][1]["volume"] == 3
+    assert calls[0][1]["direction"] == "sell"

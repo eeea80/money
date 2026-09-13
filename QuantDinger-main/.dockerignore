@@ -1,0 +1,14 @@
+# Backend build context lives at backend_api_python/ and has its own
+# .dockerignore. This file applies to any image built from the repo root
+# (none today — kept for hygiene if future tooling adds one).
+
+.git
+**/.git
+.DS_Store
+
+# Optional local clone of the private Vue repo (never required)
+QuantDinger-Vue-src/
+
+# Backend tree not needed for any root-context image
+backend_api_python
+docker-compose.override.yml

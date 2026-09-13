@@ -1,0 +1,40 @@
+services:
+  migration: &locked-backend
+    user: "10001:10001"
+    read_only: true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+      - /home/quantdinger:rw,noexec,nosuid,nodev,size=16m
+    volumes:
+      - backend_logs:/app/logs
+      - backend_data:/app/data
+      - ./backend_api_python/.env:/app/.env:ro
+    mem_limit: ${MIGRATION_MEMORY_LIMIT:-512m}
+    cpus: ${MIGRATION_CPU_LIMIT:-1.0}
+
+  backend:
+    <<: *locked-backend
+    mem_limit: ${BACKEND_MEMORY_LIMIT:-2g}
+    cpus: ${BACKEND_CPU_LIMIT:-2.0}
+
+  trading-worker:
+    <<: *locked-backend
+    mem_limit: ${TRADING_WORKER_MEMORY_LIMIT:-2g}
+    cpus: ${TRADING_WORKER_CPU_LIMIT:-2.0}
+
+  scheduler-worker:
+    <<: *locked-backend
+    mem_limit: ${SCHEDULER_WORKER_MEMORY_LIMIT:-1g}
+    cpus: ${SCHEDULER_WORKER_CPU_LIMIT:-1.0}
+
+  celery-worker:
+    <<: *locked-backend
+    mem_limit: ${CELERY_WORKER_MEMORY_LIMIT:-2g}
+    cpus: ${CELERY_WORKER_CPU_LIMIT:-2.0}
+
+  celery-beat:
+    <<: *locked-backend
+    mem_limit: ${CELERY_BEAT_MEMORY_LIMIT:-512m}
+    cpus: ${CELERY_BEAT_CPU_LIMIT:-0.5}

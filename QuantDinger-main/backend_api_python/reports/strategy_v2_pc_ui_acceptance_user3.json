@@ -1,0 +1,54 @@
+{
+  "generatedAt": "2026-07-15T02:55:00+08:00",
+  "userId": 3,
+  "scope": {
+    "cta": 8,
+    "portfolio": 4,
+    "robot": 4,
+    "sources": 16,
+    "backtestRuns": 16,
+    "liveDeployments": 16
+  },
+  "backtests": [
+    {"runId": 41, "template": "strategy_v2_macd_kdj", "returnPct": -43.29, "benchmarkPct": -44.73, "executions": 338, "closedTrades": 169, "symbols": 1, "ledgerPassed": true},
+    {"runId": 46, "template": "robot_v2_grid", "returnPct": 0.03, "benchmarkPct": 3.49, "executions": 15, "closedTrades": 7, "symbols": 1, "ledgerPassed": true},
+    {"runId": 47, "template": "robot_v2_dca", "returnPct": 0.03, "benchmarkPct": 3.49, "executions": 11, "closedTrades": 5, "symbols": 1, "ledgerPassed": true},
+    {"runId": 48, "template": "robot_v2_martingale", "returnPct": 0.02, "benchmarkPct": 3.44, "executions": 11, "closedTrades": 5, "symbols": 1, "ledgerPassed": true},
+    {"runId": 49, "template": "robot_v2_layered_martingale", "returnPct": 0.03, "benchmarkPct": 3.44, "executions": 12, "closedTrades": 5, "symbols": 1, "ledgerPassed": true},
+    {"runId": 50, "template": "strategy_v2_single_ma", "returnPct": 9.14, "benchmarkPct": 20.42, "executions": 17, "closedTrades": 8, "symbols": 1, "ledgerPassed": true},
+    {"runId": 51, "template": "strategy_v2_double_ma", "returnPct": 50.37, "benchmarkPct": -44.73, "executions": 43, "closedTrades": 42, "symbols": 1, "ledgerPassed": true},
+    {"runId": 52, "template": "strategy_v2_bullish_three_lines", "returnPct": -2.51, "benchmarkPct": -10.61, "executions": 4, "closedTrades": 2, "symbols": 1, "ledgerPassed": true},
+    {"runId": 53, "template": "strategy_v2_bullish_three_lines_trend", "returnPct": 0.0, "benchmarkPct": -10.61, "executions": 0, "closedTrades": 0, "symbols": 1, "ledgerPassed": true, "resultStatus": "no_signals"},
+    {"runId": 54, "template": "strategy_v2_turtle", "returnPct": 3.35, "benchmarkPct": 20.42, "executions": 11, "closedTrades": 5, "symbols": 1, "ledgerPassed": true},
+    {"runId": 55, "template": "strategy_v2_indicator_resonance", "returnPct": 9.11, "benchmarkPct": 27.85, "executions": 10, "closedTrades": 5, "symbols": 1, "ledgerPassed": true},
+    {"runId": 56, "template": "strategy_v2_supertrend", "returnPct": 4.40, "benchmarkPct": 20.42, "executions": 10, "closedTrades": 5, "symbols": 1, "ledgerPassed": true},
+    {"runId": 57, "template": "strategy_v2_market_cap_barbell", "returnPct": 21.25, "benchmarkPct": 20.42, "executions": 258, "closedTrades": 123, "symbols": 10, "ledgerPassed": true},
+    {"runId": 58, "template": "strategy_v2_momentum_top_n", "returnPct": 16.67, "benchmarkPct": 20.42, "executions": 187, "closedTrades": 97, "symbols": 10, "ledgerPassed": true},
+    {"runId": 59, "template": "strategy_v2_low_volatility", "returnPct": 16.94, "benchmarkPct": 20.42, "executions": 182, "closedTrades": 97, "symbols": 10, "ledgerPassed": true},
+    {"runId": 60, "template": "strategy_v2_quality_growth", "returnPct": 0.98, "benchmarkPct": 20.42, "executions": 46, "closedTrades": 20, "symbols": 10, "ledgerPassed": true}
+  ],
+  "liveSignalOnly": {
+    "uiStartStopPassed": 16,
+    "executionMode": "signal",
+    "finalStopped": 16,
+    "runtimeErrorsAfterFix": 0,
+    "browserNotifications": 20,
+    "sentQueueRecords": 20,
+    "exchangeLinkedOrders": 0,
+    "liveTrades": 0,
+    "orphanIntents": 0
+  },
+  "ui": {
+    "backtest": {"page": "#080808", "panel": "#111111", "chartCanvas": true, "benchmarkOverlay": true},
+    "live": {"page": "#080808", "workspace": "#111111", "master": "#0d0d0d"},
+    "account": {"page": "#080808", "workspace": "#111111"}
+  },
+  "verification": {
+    "backendTargetedTestsPassed": 21,
+    "frontendUnitTestsPassed": 5,
+    "frontendLint": "passed",
+    "encodingAudit": "passed",
+    "frontendProductionBuild": "passed",
+    "containersHealthy": ["quantdinger-backend", "quantdinger-trading-worker", "quantdinger-scheduler-worker"]
+  }
+}

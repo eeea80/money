@@ -1,0 +1,33 @@
+# Override file for local frontend builds.
+# Usage:
+#   git clone <QuantDinger-Vue> ./QuantDinger-Vue
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
+#
+# Without this override, the main compose file only pulls the prebuilt
+# frontend image from GHCR and never touches ./QuantDinger-Vue/.
+#
+# Tip: set `COMPOSE_FILE=docker-compose.yml:docker-compose.build.yml` in your
+# root `.env` to make `docker compose up --build` pick this up automatically.
+
+services:
+  frontend:
+    # Disable the `pull_policy: always` inherited from docker-compose.yml.
+    # Without this, a plain `docker compose up` (or `pull frontend`) would
+    # silently overwrite the locally-built image with the GHCR `:latest`,
+    # discarding the user's local Vue edits.
+    pull_policy: build
+    build:
+      context: ${FRONTEND_SRC_PATH:-./QuantDinger-Vue}
+      dockerfile: Dockerfile
+      args:
+        APP_VERSION: ${APP_VERSION:-}
+        GIT_TAG: ${GIT_TAG:-${FRONTEND_TAG:-${IMAGE_TAG:-}}}
+
+  mobile:
+    pull_policy: build
+    build:
+      context: ${MOBILE_SRC_PATH:-./QuantDinger-Mobile}
+      dockerfile: Dockerfile
+      args:
+        APP_VERSION: ${APP_VERSION:-}
+        GIT_TAG: ${GIT_TAG:-${MOBILE_TAG:-${IMAGE_TAG:-}}}

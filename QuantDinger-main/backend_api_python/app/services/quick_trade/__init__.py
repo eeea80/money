@@ -1,0 +1,1 @@
+"""Quick trade service package."""

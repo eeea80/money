@@ -1,0 +1,13 @@
+{
+  "_comment": "Copy this file as `.cursor/mcp.json` (Cursor) or merge into your client's MCP config. The package is on PyPI (https://pypi.org/project/quantdinger-mcp/); `uvx` will download and cache it on first run. Replace the agent token. See README and docs/agent/AGENT_QUICKSTART.md for how to issue the token.",
+  "mcpServers": {
+    "quantdinger": {
+      "command": "uvx",
+      "args": ["quantdinger-mcp"],
+      "env": {
+        "QUANTDINGER_BASE_URL": "http://localhost:8888",
+        "QUANTDINGER_AGENT_TOKEN": "qd_agent_REPLACE_ME"
+      }
+    }
+  }
+}

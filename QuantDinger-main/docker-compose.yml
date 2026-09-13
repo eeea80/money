@@ -1,0 +1,497 @@
+# QuantDinger Docker Compose - One-Click Deployment
+# Usage:
+#   1. Copy env.example to .env and edit your settings
+#      cp backend_api_python/env.example backend_api_python/.env
+#   2. IMPORTANT: Generate and set a secure SECRET_KEY in backend_api_python/.env
+#      SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+#      Or edit backend_api_python/.env and replace SECRET_KEY value
+#   3. docker-compose up -d --build
+#   4. Open http://localhost:8888 (web) or http://localhost:8889 (mobile H5)
+#
+# Backend is built from local source. Frontend and mobile H5 are pulled from
+# GHCR. Override tags or image paths via FRONTEND_IMAGE / MOBILE_IMAGE /
+# IMAGE_TAG in a project-root `.env`.
+# Trading workers use a dedicated 32-connection pool by default. Override it
+# with TRADING_DB_POOL_MIN / TRADING_DB_POOL_MAX in the project-root `.env`.
+#
+# Note: The container will NOT start if SECRET_KEY is using the default value.
+#       This is a security measure to prevent insecure deployments.
+#
+# Docker image sources:
+#   Default uses official Docker Hub images.
+#   To switch source globally, set a single `IMAGE_PREFIX` in project-root `.env`.
+#   Examples: empty (official), `docker.m.daocloud.io/library/`,
+#   `docker.xuanyuan.me/library/`.
+# Backend Dockerfile uses official Debian/PyPI sources by default.
+# For mainland China builds, set BUILD_REGION=cn to use Aliyun mirrors with fallback.
+# The backend build defaults to a Docker Hub mirror for python:3.12 because
+# Docker Hub auth/base-image pulls are a common first-install failure. Set
+# PYTHON_BASE_IMAGE=python:3.12-slim-bookworm to force the official source.
+
+x-backend-build: &backend-build
+  context: ./backend_api_python
+  dockerfile: Dockerfile
+  args:
+    BASE_IMAGE: ${PYTHON_BASE_IMAGE:-docker.1ms.run/library/python:3.12-slim-bookworm}
+    BUILD_REGION: ${BUILD_REGION:-global}
+    APP_VERSION: ${APP_VERSION:-}
+    GIT_TAG: ${GIT_TAG:-${IMAGE_TAG:-}}
+
+x-backend-runtime: &backend-runtime
+  init: true
+  security_opt:
+    - no-new-privileges:true
+  pids_limit: ${BACKEND_PIDS_LIMIT:-512}
+  stop_grace_period: ${BACKEND_STOP_GRACE_PERIOD:-45s}
+  logging:
+    driver: json-file
+    options:
+      max-size: ${CONTAINER_LOG_MAX_SIZE:-20m}
+      max-file: ${CONTAINER_LOG_MAX_FILES:-5}
+
+x-worker-environment: &worker-environment
+  TZ: ${TZ:-Asia/Shanghai}
+  LOG_FORMAT: ${LOG_FORMAT:-json}
+  DATABASE_URL: postgresql://${POSTGRES_USER:-quantdinger}:${POSTGRES_PASSWORD:-quantdinger123}@postgres:5432/${POSTGRES_DB:-quantdinger}
+  DB_TYPE: postgresql
+  REDIS_HOST: redis
+  REDIS_PORT: 6379
+  REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+  REDIS_CACHE_NAMESPACE: ${REDIS_CACHE_NAMESPACE:-quantdinger:cache:v1}
+  CACHE_ENABLED: "true"
+  CELERY_TASKS_ENABLED: "true"
+  CELERY_REDIS_HOST: redis-jobs
+  CELERY_REDIS_PORT: 6379
+  CELERY_REDIS_PASSWORD: ${CELERY_REDIS_PASSWORD:-}
+  CELERY_BROKER_DB: 0
+  CELERY_RESULT_DB: 1
+  CELERY_BROKER_URL: ${CELERY_BROKER_URL:-}
+  CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-}
+  DB_POOL_MIN: ${WORKER_DB_POOL_MIN:-2}
+  DB_POOL_MAX: ${WORKER_DB_POOL_MAX:-12}
+  DB_POOL_ACQUIRE_TIMEOUT: ${DB_POOL_ACQUIRE_TIMEOUT:-10}
+  DB_POOL_HEALTH_CHECK: ${DB_POOL_HEALTH_CHECK:-true}
+  SKIP_AUTO_MIGRATE: "true"
+  ALLOW_LOCAL_DESKTOP_BROKERS: ${ALLOW_LOCAL_DESKTOP_BROKERS:-true}
+  MARKET_CATALOG_AUTO_SYNC: ${MARKET_CATALOG_AUTO_SYNC:-true}
+  MARKET_CATALOG_SYNC_INTERVAL_SEC: ${MARKET_CATALOG_SYNC_INTERVAL_SEC:-86400}
+
+services:
+  # ========================
+  # PostgreSQL Database
+  # ========================
+  postgres:
+    image: ${POSTGRES_IMAGE:-${IMAGE_PREFIX:-}postgres:18.3-alpine}
+    container_name: quantdinger-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-quantdinger}
+      POSTGRES_USER: ${POSTGRES_USER:-quantdinger}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-quantdinger123}
+      PGDATA: ${POSTGRES_PGDATA:-/var/lib/postgresql/18/docker}
+      TZ: ${TZ:-Asia/Shanghai}
+    # Raise PostgreSQL's max_connections so API and worker pools plus
+    # psql/admin connections remain below PostgreSQL's own limit.
+    command:
+      - "postgres"
+      - "-c"
+      - "max_connections=${PG_MAX_CONNECTIONS:-150}"
+      - "-c"
+      - "shared_buffers=${PG_SHARED_BUFFERS:-256MB}"
+    volumes:
+      - ${POSTGRES_DATA_SOURCE:-postgres_data}:${POSTGRES_PGDATA:-/var/lib/postgresql/18/docker}
+      - ./backend_api_python/migrations/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+    ports:
+      - "${DB_PORT:-127.0.0.1:5432}:5432"
+    networks:
+      - quantdinger-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-quantdinger} -d ${POSTGRES_DB:-quantdinger}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ========================
+  # Redis (optional cache layer)
+  # ========================
+  redis:
+    image: ${REDIS_IMAGE:-${IMAGE_PREFIX:-}redis:8-alpine}
+    container_name: quantdinger-redis
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+    command:
+      - sh
+      - -ec
+      - |
+        if [ -n "$$REDIS_PASSWORD" ]; then set -- --requirepass "$$REDIS_PASSWORD"; fi
+        exec redis-server --maxmemory "${REDIS_CACHE_MAXMEMORY:-128mb}" --maxmemory-policy allkeys-lru "$$@"
+    ports:
+      - "${REDIS_PORT:-127.0.0.1:6379}:6379"
+    networks:
+      - quantdinger-network
+    healthcheck:
+      test: ["CMD-SHELL", "if [ -n \"$$REDIS_PASSWORD\" ]; then redis-cli --no-auth-warning -a \"$$REDIS_PASSWORD\" ping; else redis-cli ping; fi"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis-jobs:
+    image: ${REDIS_IMAGE:-${IMAGE_PREFIX:-}redis:8-alpine}
+    container_name: quantdinger-redis-jobs
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${CELERY_REDIS_PASSWORD:-}
+    command:
+      - sh
+      - -ec
+      - |
+        if [ -n "$$REDIS_PASSWORD" ]; then set -- --requirepass "$$REDIS_PASSWORD"; fi
+        exec redis-server --appendonly yes --appendfsync everysec --save 60 1000 --maxmemory "${REDIS_JOBS_MAXMEMORY:-512mb}" --maxmemory-policy noeviction "$$@"
+    volumes:
+      - celery_redis_data:/data
+    networks:
+      - quantdinger-network
+    healthcheck:
+      test: ["CMD-SHELL", "if [ -n \"$$REDIS_PASSWORD\" ]; then redis-cli --no-auth-warning -a \"$$REDIS_PASSWORD\" ping; else redis-cli ping; fi"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  migration:
+    <<: *backend-runtime
+    build: *backend-build
+    image: ${BACKEND_LOCAL_IMAGE:-quantdinger-backend:local}
+    container_name: quantdinger-migration
+    restart: "no"
+    command: ["python", "-m", "app.commands.migrate"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - backend_logs:/app/logs
+      - backend_data:/app/data
+      - ./backend_api_python/.env:/app/.env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-quantdinger}:${POSTGRES_PASSWORD:-quantdinger123}@postgres:5432/${POSTGRES_DB:-quantdinger}
+      DB_TYPE: postgresql
+      DB_POOL_MIN: 1
+      DB_POOL_MAX: 2
+    networks:
+      - quantdinger-network
+
+  # ========================
+  # Backend API (Python/Flask)
+  # ========================
+  backend:
+    <<: *backend-runtime
+    build: *backend-build
+    image: ${BACKEND_LOCAL_IMAGE:-quantdinger-backend:local}
+    container_name: quantdinger-backend
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redis-jobs:
+        condition: service_healthy
+      migration:
+        condition: service_completed_successfully
+    ports:
+      - "${BACKEND_PORT:-127.0.0.1:5000}:5000"
+    volumes:
+      - backend_logs:/app/logs
+      - backend_data:/app/data
+      # Mount .env for runtime config and admin-panel updates
+      - ./backend_api_python/.env:/app/.env
+    environment:
+      - PYTHON_API_HOST=0.0.0.0
+      - PYTHON_API_PORT=5000
+      - GIT_TAG=${GIT_TAG:-${IMAGE_TAG:-}}
+      - TZ=${TZ:-Asia/Shanghai}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-quantdinger}:${POSTGRES_PASSWORD:-quantdinger123}@postgres:5432/${POSTGRES_DB:-quantdinger}
+      - DB_TYPE=postgresql
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - REDIS_CACHE_NAMESPACE=${REDIS_CACHE_NAMESPACE:-quantdinger:cache:v1}
+      - CACHE_ENABLED=true
+      - QD_PROCESS_ROLE=api
+      - LOG_FORMAT=${LOG_FORMAT:-json}
+      - PROMETHEUS_MULTIPROC_DIR=/tmp/quantdinger-prometheus
+      - STRATEGY_COMMANDS_ENABLED=true
+      - CELERY_TASKS_ENABLED=true
+      - CELERY_REDIS_HOST=redis-jobs
+      - CELERY_REDIS_PORT=6379
+      - CELERY_REDIS_PASSWORD=${CELERY_REDIS_PASSWORD:-}
+      - CELERY_BROKER_DB=0
+      - CELERY_RESULT_DB=1
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL:-}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-}
+      - SKIP_AUTO_MIGRATE=true
+      # Database connection pool tuning (see app/utils/db_postgres.py).
+      # Defaults are safe for ~50 concurrent DB users; raise if you run many
+      # bots or see `connection pool exhausted` errors.
+      - DB_POOL_MIN=${DB_POOL_MIN:-2}
+      - DB_POOL_MAX=${DB_POOL_MAX:-12}
+      - DB_POOL_ACQUIRE_TIMEOUT=${DB_POOL_ACQUIRE_TIMEOUT:-10}
+      - DB_POOL_HEALTH_CHECK=${DB_POOL_HEALTH_CHECK:-true}
+      # Route-level executor tuning (each worker may use one DB connection).
+      - MARKET_EXECUTOR_WORKERS=${MARKET_EXECUTOR_WORKERS:-6}
+      - MARKET_CATALOG_AUTO_SYNC=${MARKET_CATALOG_AUTO_SYNC:-true}
+      - PORTFOLIO_EXECUTOR_WORKERS=${PORTFOLIO_EXECUTOR_WORKERS:-3}
+      - RESOURCE_FD_COOLDOWN_SEC=${RESOURCE_FD_COOLDOWN_SEC:-180}
+      - PORTFOLIO_MONITOR_DUE_BATCH_LIMIT=${PORTFOLIO_MONITOR_DUE_BATCH_LIMIT:-5}
+      - GUNICORN_WORKERS=${GUNICORN_WORKERS:-2}
+      - GUNICORN_THREADS=${GUNICORN_THREADS:-4}
+      # IBKR needs local TWS or IB Gateway; set false on SaaS cloud (see env.example).
+      - ALLOW_LOCAL_DESKTOP_BROKERS=${ALLOW_LOCAL_DESKTOP_BROKERS:-true}
+      # Spot full close / open fee buffer (Admin → Settings → Live Trading, or backend_api_python/.env)
+      - SPOT_CLOSE_SAFETY_RATIO=${SPOT_CLOSE_SAFETY_RATIO:-1.0}
+      - SPOT_OPEN_QUOTE_BUFFER=${SPOT_OPEN_QUOTE_BUFFER:-0.995}
+      # Takes precedence over mounted .env (run.py load_dotenv override=False).
+      # Include :8000 when using Vite dev server alongside this stack.
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:8888,http://localhost:8889,http://localhost:8000}
+    networks:
+      - quantdinger-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Optional network MCP gateway. It is disabled unless the `mcp` profile is
+  # selected and requires separate upstream/inbound tokens.
+  # Example:
+  #   QUANTDINGER_AGENT_TOKEN=qd_agent_xxx \
+  #   QUANTDINGER_MCP_AUTH_TOKEN="$(openssl rand -hex 32)" \
+  #   docker compose --profile mcp up -d --build mcp
+  mcp:
+    profiles: ["mcp"]
+    build:
+      context: ./mcp_server
+      dockerfile: Dockerfile
+    image: ${MCP_LOCAL_IMAGE:-quantdinger-mcp:local}
+    container_name: quantdinger-mcp
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${MCP_HOST_BIND:-127.0.0.1}:${MCP_PORT:-7800}:7800"
+    environment:
+      QUANTDINGER_BASE_URL: http://backend:5000
+      QUANTDINGER_AGENT_TOKEN: ${QUANTDINGER_AGENT_TOKEN:-}
+      QUANTDINGER_MCP_TRANSPORT: streamable-http
+      QUANTDINGER_MCP_HOST: 0.0.0.0
+      QUANTDINGER_MCP_PORT: 7800
+      QUANTDINGER_MCP_PUBLIC_URL: ${QUANTDINGER_MCP_PUBLIC_URL:-http://localhost:7800}
+      QUANTDINGER_MCP_AUTH_TOKEN: ${QUANTDINGER_MCP_AUTH_TOKEN:-}
+      # The default port mapping is loopback-only; TLS may terminate upstream.
+      QUANTDINGER_MCP_ALLOW_HTTP: ${QUANTDINGER_MCP_ALLOW_HTTP:-true}
+    networks:
+      - quantdinger-network
+
+  trading-worker:
+    <<: *backend-runtime
+    build: *backend-build
+    image: ${BACKEND_LOCAL_IMAGE:-quantdinger-backend:local}
+    container_name: quantdinger-trading-worker
+    restart: unless-stopped
+    command: ["python", "-m", "app.commands.trading_worker"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migration:
+        condition: service_completed_successfully
+    volumes:
+      - backend_logs:/app/logs
+      - backend_data:/app/data
+      - ./backend_api_python/.env:/app/.env
+    environment:
+      <<: *worker-environment
+      QD_PROCESS_ROLE: trading
+      STRATEGY_COMMANDS_ENABLED: "false"
+      DB_POOL_MIN: ${TRADING_DB_POOL_MIN:-4}
+      DB_POOL_MAX: ${TRADING_DB_POOL_MAX:-32}
+    networks:
+      - quantdinger-network
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.commands.worker_health", "trading"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  scheduler-worker:
+    <<: *backend-runtime
+    build: *backend-build
+    image: ${BACKEND_LOCAL_IMAGE:-quantdinger-backend:local}
+    container_name: quantdinger-scheduler-worker
+    restart: unless-stopped
+    command: ["python", "-m", "app.commands.scheduler"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migration:
+        condition: service_completed_successfully
+    volumes:
+      - backend_logs:/app/logs
+      - backend_data:/app/data
+      - ./backend_api_python/.env:/app/.env
+    environment:
+      <<: *worker-environment
+      QD_PROCESS_ROLE: scheduler
+    networks:
+      - quantdinger-network
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.commands.worker_health", "scheduler"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  celery-worker:
+    <<: *backend-runtime
+    build: *backend-build
+    image: ${BACKEND_LOCAL_IMAGE:-quantdinger-backend:local}
+    container_name: quantdinger-celery-worker
+    restart: unless-stopped
+    command: ["celery", "-A", "app.celery_app:celery_app", "worker", "--loglevel=INFO", "-Q", "jobs,ai,maintenance", "--concurrency=${CELERY_CONCURRENCY:-2}"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redis-jobs:
+        condition: service_healthy
+      migration:
+        condition: service_completed_successfully
+    volumes:
+      - backend_logs:/app/logs
+      - backend_data:/app/data
+      - ./backend_api_python/.env:/app/.env
+    environment:
+      <<: *worker-environment
+      QD_PROCESS_ROLE: celery
+    networks:
+      - quantdinger-network
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.commands.worker_health", "celery"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 45s
+
+  celery-beat:
+    <<: *backend-runtime
+    build: *backend-build
+    image: ${BACKEND_LOCAL_IMAGE:-quantdinger-backend:local}
+    container_name: quantdinger-celery-beat
+    restart: unless-stopped
+    command: ["celery", "-A", "app.celery_app:celery_app", "beat", "--loglevel=INFO", "--schedule=/app/data/celerybeat-schedule"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-jobs:
+        condition: service_healthy
+      migration:
+        condition: service_completed_successfully
+    volumes:
+      - backend_logs:/app/logs
+      - backend_data:/app/data
+      - ./backend_api_python/.env:/app/.env
+    environment:
+      <<: *worker-environment
+      QD_PROCESS_ROLE: celery
+    networks:
+      - quantdinger-network
+    healthcheck:
+      test: ["CMD-SHELL", "kill -0 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ========================
+  # Frontend (Nginx serving prebuilt SPA)
+  # ========================
+  # Default behaviour: pull the prebuilt multi-arch image from GHCR.
+  # Local iteration: clone QuantDinger-Vue into `./QuantDinger-Vue/`
+  # (gitignored) and layer the build override on top:
+  #   docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
+  # The `build:` block lives in docker-compose.build.yml so users who only
+  # pull never need the `./QuantDinger-Vue/` directory to exist (Compose
+  # validates build context paths eagerly when `build:` is present).
+  frontend:
+    # Tag resolution (highest precedence wins):
+    #   FRONTEND_TAG   — per-side override, decouples FE from BE
+    #   IMAGE_TAG      — unified knob, sets both FE and BE (BE only relevant in ghcr.yml)
+    #   latest         — fallback; pin semver in project-root .env (e.g. IMAGE_TAG=5.0.1)
+    image: ${FRONTEND_IMAGE:-ghcr.io/openbyteinc/quantdinger-frontend}:${FRONTEND_TAG:-${IMAGE_TAG:-latest}}
+    pull_policy: always
+    container_name: quantdinger-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_HOST:-127.0.0.1}:${FRONTEND_PORT:-8888}:80"
+    environment:
+      # nginx envsubst will inject this into the proxy_pass directive at start.
+      # Override with the backend's reachable URL when deploying outside compose
+      # (e.g. Railway: http://${{Backend.RAILWAY_PRIVATE_DOMAIN}}:5000).
+      - BACKEND_URL=${BACKEND_URL:-http://backend:5000}
+    depends_on:
+      - backend
+    networks:
+      - quantdinger-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ========================
+  # Mobile H5 (Nginx serving prebuilt mobile SPA)
+  # ========================
+  # Open http://localhost:8889 for the touch-first mobile web client.
+  # It proxies /api to the same backend service, so users do not need to
+  # manually configure a server URL for the one-click Docker stack.
+  mobile:
+    image: ${MOBILE_IMAGE:-ghcr.io/openbyteinc/quantdinger-mobile}:${MOBILE_TAG:-${IMAGE_TAG:-latest}}
+    pull_policy: always
+    container_name: quantdinger-mobile
+    restart: unless-stopped
+    ports:
+      - "${MOBILE_HOST:-127.0.0.1}:${MOBILE_PORT:-8889}:80"
+    environment:
+      - BACKEND_URL=${BACKEND_URL:-http://backend:5000}
+    depends_on:
+      - backend
+    networks:
+      - quantdinger-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  postgres_data:
+    driver: local
+  backend_logs:
+    driver: local
+  backend_data:
+    driver: local
+  celery_redis_data:
+    driver: local
+
+networks:
+  quantdinger-network:
+    driver: bridge

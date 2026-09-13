@@ -1,0 +1,583 @@
+{
+  "suite": "strategy_v2_catalog_acceptance",
+  "reportType": "semantic_fixture_validation",
+  "marketPerformanceClaims": false,
+  "generatedAt": "2026-07-15T01:03:38.230690+08:00",
+  "userId": 1,
+  "dateRange": {
+    "start": "2025-07-01",
+    "end": "2026-06-29"
+  },
+  "summary": {
+    "total": 16,
+    "cta": 8,
+    "portfolio": 4,
+    "robot": 4,
+    "codeValidationPassed": 16,
+    "semanticSimulationPassed": 16,
+    "notifyOnlyPassed": 16,
+    "exchangeOrdersCreated": 0
+  },
+  "items": [
+    {
+      "catalogKey": "strategy_v2_single_ma",
+      "catalogGroup": "cta",
+      "title": "Single Moving Average",
+      "sourceId": 142,
+      "strategyId": 60,
+      "codeValidation": {
+        "status": "passed",
+        "apiVersion": 2,
+        "strategyType": "cta",
+        "frequency": "1d"
+      },
+      "semanticSimulation": {
+        "status": "passed",
+        "dataKind": "controlled_fixture",
+        "totalExecutions": 7,
+        "closedTrades": 3,
+        "equityPoints": 260,
+        "ledgerReconciled": true,
+        "persistedAsMarketResult": false
+      },
+      "notifyOnly": {
+        "status": "passed",
+        "executionMode": "signal",
+        "notificationChannels": [
+          "browser"
+        ],
+        "exchangeOrdersAllowed": false,
+        "replayTimestamp": "2026-06-29T23:59:00",
+        "intents": 1,
+        "logs": 0,
+        "symbols": 1,
+        "symbolsSkipped": 0
+      }
+    },
+    {
+      "catalogKey": "strategy_v2_double_ma",
+      "catalogGroup": "cta",
+      "title": "Dual Moving Average",
+      "sourceId": 143,
+      "strategyId": 61,
+      "codeValidation": {
+        "status": "passed",
+        "apiVersion": 2,
+        "strategyType": "cta",
+        "frequency": "4h"
+      },
+      "semanticSimulation": {
+        "status": "passed",
+        "dataKind": "controlled_fixture",
+        "totalExecutions": 15,
+        "closedTrades": 14,
+        "equityPoints": 900,
+        "ledgerReconciled": true,
+        "persistedAsMarketResult": false
+      },
+      "notifyOnly": {
+        "status": "passed",
+        "executionMode": "signal",
+        "notificationChannels": [
+          "browser"
+        ],
+        "exchangeOrdersAllowed": false,
+        "replayTimestamp": "2026-06-29T23:59:00",
+        "intents": 1,
+        "logs": 0,
+        "symbols": 1,
+        "symbolsSkipped": 0
+      }
+    },
+    {
+      "catalogKey": "strategy_v2_bullish_three_lines",
+      "catalogGroup": "cta",
+      "title": "Bullish Candle Through Three Averages",
+      "sourceId": 144,
+      "strategyId": 62,
+      "codeValidation": {
+        "status": "passed",
+        "apiVersion": 2,
+        "strategyType": "cta",
+        "frequency": "1d"
+      },
+      "semanticSimulation": {
+        "status": "passed",
+        "dataKind": "controlled_fixture",
+        "totalExecutions": 4,
+        "closedTrades": 2,
+        "equityPoints": 260,
+        "ledgerReconciled": true,
+        "persistedAsMarketResult": false
+      },
+      "notifyOnly": {
+        "status": "passed",
+        "executionMode": "signal",
+        "notificationChannels": [
+          "browser"
+        ],
+        "exchangeOrdersAllowed": false,
+        "replayTimestamp": "2026-06-29T23:59:00",
+        "intents": 0,
+        "logs": 0,
+        "symbols": 1,
+        "symbolsSkipped": 0
+      }
+    },
+    {
+      "catalogKey": "strategy_v2_bullish_three_lines_trend",
+      "catalogGroup": "cta",
+      "title": "Bullish Three Averages With Trend Filter",
+      "sourceId": 145,
+      "strategyId": 63,
+      "codeValidation": {
+        "status": "passed",
+        "apiVersion": 2,
+        "strategyType": "cta",
+        "frequency": "1d"
+      },
+      "semanticSimulation": {
+        "status": "passed",
+        "dataKind": "controlled_fixture",
+        "totalExecutions": 2,
+        "closedTrades": 1,
+        "equityPoints": 260,
+        "ledgerReconciled": true,
+        "persistedAsMarketResult": false
+      },
+      "notifyOnly": {
+        "status": "passed",
+        "executionMode": "signal",
+        "notificationChannels": [
+          "browser"
+        ],
+        "exchangeOrdersAllowed": false,
+        "replayTimestamp": "2026-06-29T23:59:00",
+        "intents": 0,
+        "logs": 0,
+        "symbols": 1,
+        "symbolsSkipped": 0
+      }
+    },
+    {
+      "catalogKey": "strategy_v2_turtle",
+      "catalogGroup": "cta",
+      "title": "Turtle Trading",
+      "sourceId": 146,
+      "strategyId": 64,
+      "codeValidation": {
+        "status": "passed",
+        "apiVersion": 2,
+        "strategyType": "cta",
+        "frequency": "1d"
+      },
+      "semanticSimulation": {
+        "status": "passed",
+        "dataKind": "controlled_fixture",
+        "totalExecutions": 5,
+        "closedTrades": 2,
+        "equityPoints": 260,
+        "ledgerReconciled": true,
+        "persistedAsMarketResult": false
+      },
+      "notifyOnly": {
+        "status": "passed",
+        "executionMode": "signal",
+        "notificationChannels": [
+          "browser"
+        ],
+        "exchangeOrdersAllowed": false,
+        "replayTimestamp": "2026-06-29T23:59:00",
+        "intents": 0,
+        "logs": 0,
+        "symbols": 1,
+        "symbolsSkipped": 0
+      }
+    },
+    {
+      "catalogKey": "strategy_v2_indicator_resonance",
+      "catalogGroup": "cta",
+      "title": "Indicator Resonance",
+      "sourceId": 147,
+      "strategyId": 65,
+      "codeValidation": {
+        "status": "passed",
+        "apiVersion": 2,
+        "strategyType": "cta",
+        "frequency": "1d"
+      },
+      "semanticSimulation": {
+        "status": "passed",
+        "dataKind": "controlled_fixture",
+        "totalExecutions": 12,
+        "closedTrades": 6,
+        "equityPoints": 260,
+        "ledgerReconciled": true,
+        "persistedAsMarketResult": false
+      },
+      "notifyOnly": {
+        "status": "passed",
+        "executionMode": "signal",
+        "notificationChannels": [
+          "browser"
+        ],
+        "exchangeOrdersAllowed": false,
+        "replayTimestamp": "2026-06-29T23:59:00",
+        "intents": 0,
+        "logs": 0,
+        "symbols": 1,
+        "symbolsSkipped": 0
+      }
+    },
+    {
+      "catalogKey": "strategy_v2_macd_kdj",
+      "catalogGroup": "cta",
+      "title": "MACD and KDJ Confirmation",
+      "sourceId": 148,
+      "strategyId": 66,
+      "codeValidation": {
+        "status": "passed",
+        "apiVersion": 2,
+        "strategyType": "cta",
+        "frequency": "4h"
+      },
+      "semanticSimulation": {
+        "status": "passed",
+        "dataKind": "controlled_fixture",
+        "totalExecutions": 66,
+        "closedTrades": 33,
+        "equityPoints": 900,
+        "ledgerReconciled": true,
+        "persistedAsMarketResult": false
+      },
+      "notifyOnly": {
+        "status": "passed",
+        "executionMode": "signal",
+        "notificationChannels": [
+          "browser"
+        ],
+        "exchangeOrdersAllowed": false,
+        "replayTimestamp": "2026-06-29T23:59:00",
+        "intents": 0,
+        "logs": 0,
+        "symbols": 1,
+        "symbolsSkipped": 0
+      }
+    },
+    {
+      "catalogKey": "strategy_v2_supertrend",
+      "catalogGroup": "cta",
+      "title": "SuperTrend",
+      "sourceId": 149,
+      "strategyId": 67,
+      "codeValidation": {
+        "status": "passed",
+        "apiVersion": 2,
+        "strategyType": "cta",
+        "frequency": "1d"
+      },
+      "semanticSimulation": {
+        "status": "passed",
+        "dataKind": "controlled_fixture",
+        "totalExecutions": 5,
+        "closedTrades": 2,
+        "equityPoints": 260,
+        "ledgerReconciled": true,
+        "persistedAsMarketResult": false
+      },
+      "notifyOnly": {
+        "status": "passed",
+        "executionMode": "signal",
+        "notificationChannels": [
+          "browser"
+        ],
+        "exchangeOrdersAllowed": false,
+        "replayTimestamp": "2026-06-29T23:59:00",
+        "intents": 0,
+        "logs": 0,
+        "symbols": 1,
+        "symbolsSkipped": 0
+      }
+    },
+    {
+      "catalogKey": "strategy_v2_market_cap_barbell",
+      "catalogGroup": "portfolio",
+      "title": "Small and Large Cap Barbell",
+      "sourceId": 150,
+      "strategyId": 68,
+      "codeValidation": {
+        "status": "passed",
+        "apiVersion": 2,
+        "strategyType": "portfolio",
+        "frequency": "1d"
+      },
+      "semanticSimulation": {
+        "status": "passed",
+        "dataKind": "controlled_fixture",
+        "totalExecutions": 249,
+        "closedTrades": 128,
+        "equityPoints": 260,
+        "ledgerReconciled": true,
+        "persistedAsMarketResult": false
+      },
+      "notifyOnly": {
+        "status": "passed",
+        "executionMode": "signal",
+        "notificationChannels": [
+          "browser"
+        ],
+        "exchangeOrdersAllowed": false,
+        "replayTimestamp": "2026-06-29T23:59:00",
+        "intents": 6,
+        "logs": 0,
+        "symbols": 12,
+        "symbolsSkipped": 0
+      }
+    },
+    {
+      "catalogKey": "strategy_v2_momentum_top_n",
+      "catalogGroup": "portfolio",
+      "title": "Momentum Top-N Rotation",
+      "sourceId": 151,
+      "strategyId": 69,
+      "codeValidation": {
+        "status": "passed",
+        "apiVersion": 2,
+        "strategyType": "portfolio",
+        "frequency": "1d"
+      },
+      "semanticSimulation": {
+        "status": "passed",
+        "dataKind": "controlled_fixture",
+        "totalExecutions": 155,
+        "closedTrades": 92,
+        "equityPoints": 260,
+        "ledgerReconciled": true,
+        "persistedAsMarketResult": false
+      },
+      "notifyOnly": {
+        "status": "passed",
+        "executionMode": "signal",
+        "notificationChannels": [
+          "browser"
+        ],
+        "exchangeOrdersAllowed": false,
+        "replayTimestamp": "2026-06-29T23:59:00",
+        "intents": 4,
+        "logs": 0,
+        "symbols": 12,
+        "symbolsSkipped": 0
+      }
+    },
+    {
+      "catalogKey": "strategy_v2_low_volatility",
+      "catalogGroup": "portfolio",
+      "title": "Low Volatility Rotation",
+      "sourceId": 152,
+      "strategyId": 70,
+      "codeValidation": {
+        "status": "passed",
+        "apiVersion": 2,
+        "strategyType": "portfolio",
+        "frequency": "1d"
+      },
+      "semanticSimulation": {
+        "status": "passed",
+        "dataKind": "controlled_fixture",
+        "totalExecutions": 227,
+        "closedTrades": 123,
+        "equityPoints": 260,
+        "ledgerReconciled": true,
+        "persistedAsMarketResult": false
+      },
+      "notifyOnly": {
+        "status": "passed",
+        "executionMode": "signal",
+        "notificationChannels": [
+          "browser"
+        ],
+        "exchangeOrdersAllowed": false,
+        "replayTimestamp": "2026-06-29T23:59:00",
+        "intents": 4,
+        "logs": 0,
+        "symbols": 12,
+        "symbolsSkipped": 0
+      }
+    },
+    {
+      "catalogKey": "strategy_v2_quality_growth",
+      "catalogGroup": "portfolio",
+      "title": "Quality Growth Multi-Factor",
+      "sourceId": 153,
+      "strategyId": 71,
+      "codeValidation": {
+        "status": "passed",
+        "apiVersion": 2,
+        "strategyType": "portfolio",
+        "frequency": "1d"
+      },
+      "semanticSimulation": {
+        "status": "passed",
+        "dataKind": "controlled_fixture",
+        "totalExecutions": 203,
+        "closedTrades": 96,
+        "equityPoints": 260,
+        "ledgerReconciled": true,
+        "persistedAsMarketResult": false
+      },
+      "notifyOnly": {
+        "status": "passed",
+        "executionMode": "signal",
+        "notificationChannels": [
+          "browser"
+        ],
+        "exchangeOrdersAllowed": false,
+        "replayTimestamp": "2026-06-29T23:59:00",
+        "intents": 5,
+        "logs": 0,
+        "symbols": 12,
+        "symbolsSkipped": 0
+      }
+    },
+    {
+      "catalogKey": "robot_v2_grid",
+      "catalogGroup": "robot",
+      "title": "Grid Robot",
+      "sourceId": 154,
+      "strategyId": 72,
+      "codeValidation": {
+        "status": "passed",
+        "apiVersion": 2,
+        "strategyType": "cta",
+        "frequency": "1m"
+      },
+      "semanticSimulation": {
+        "status": "passed",
+        "dataKind": "controlled_fixture",
+        "totalExecutions": 20,
+        "closedTrades": 5,
+        "equityPoints": 900,
+        "ledgerReconciled": true,
+        "persistedAsMarketResult": false
+      },
+      "notifyOnly": {
+        "status": "passed",
+        "executionMode": "signal",
+        "notificationChannels": [
+          "browser"
+        ],
+        "exchangeOrdersAllowed": false,
+        "replayTimestamp": "2026-06-29T23:59:00",
+        "intents": 0,
+        "logs": 0,
+        "symbols": 1,
+        "symbolsSkipped": 0
+      }
+    },
+    {
+      "catalogKey": "robot_v2_dca",
+      "catalogGroup": "robot",
+      "title": "Dca Robot",
+      "sourceId": 155,
+      "strategyId": 73,
+      "codeValidation": {
+        "status": "passed",
+        "apiVersion": 2,
+        "strategyType": "cta",
+        "frequency": "1m"
+      },
+      "semanticSimulation": {
+        "status": "passed",
+        "dataKind": "controlled_fixture",
+        "totalExecutions": 57,
+        "closedTrades": 27,
+        "equityPoints": 900,
+        "ledgerReconciled": true,
+        "persistedAsMarketResult": false
+      },
+      "notifyOnly": {
+        "status": "passed",
+        "executionMode": "signal",
+        "notificationChannels": [
+          "browser"
+        ],
+        "exchangeOrdersAllowed": false,
+        "replayTimestamp": "2026-06-29T23:59:00",
+        "intents": 1,
+        "logs": 0,
+        "symbols": 1,
+        "symbolsSkipped": 0
+      }
+    },
+    {
+      "catalogKey": "robot_v2_martingale",
+      "catalogGroup": "robot",
+      "title": "Martingale Robot",
+      "sourceId": 156,
+      "strategyId": 74,
+      "codeValidation": {
+        "status": "passed",
+        "apiVersion": 2,
+        "strategyType": "cta",
+        "frequency": "1m"
+      },
+      "semanticSimulation": {
+        "status": "passed",
+        "dataKind": "controlled_fixture",
+        "totalExecutions": 63,
+        "closedTrades": 30,
+        "equityPoints": 900,
+        "ledgerReconciled": true,
+        "persistedAsMarketResult": false
+      },
+      "notifyOnly": {
+        "status": "passed",
+        "executionMode": "signal",
+        "notificationChannels": [
+          "browser"
+        ],
+        "exchangeOrdersAllowed": false,
+        "replayTimestamp": "2026-06-29T23:59:00",
+        "intents": 1,
+        "logs": 0,
+        "symbols": 1,
+        "symbolsSkipped": 0
+      }
+    },
+    {
+      "catalogKey": "robot_v2_layered_martingale",
+      "catalogGroup": "robot",
+      "title": "Layered Martingale Robot",
+      "sourceId": 157,
+      "strategyId": 75,
+      "codeValidation": {
+        "status": "passed",
+        "apiVersion": 2,
+        "strategyType": "cta",
+        "frequency": "1m"
+      },
+      "semanticSimulation": {
+        "status": "passed",
+        "dataKind": "controlled_fixture",
+        "totalExecutions": 65,
+        "closedTrades": 29,
+        "equityPoints": 900,
+        "ledgerReconciled": true,
+        "persistedAsMarketResult": false
+      },
+      "notifyOnly": {
+        "status": "passed",
+        "executionMode": "signal",
+        "notificationChannels": [
+          "browser"
+        ],
+        "exchangeOrdersAllowed": false,
+        "replayTimestamp": "2026-06-29T23:59:00",
+        "intents": 1,
+        "logs": 0,
+        "symbols": 1,
+        "symbolsSkipped": 0
+      }
+    }
+  ]
+}

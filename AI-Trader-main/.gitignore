@@ -1,0 +1,135 @@
+# ====================
+# Dependencies
+# ====================
+node_modules/
+.venv/
+venv/
+env/
+.env
+.env.local
+.env.*.local
+
+# ====================
+# Build outputs
+# ====================
+dist/
+build/
+artifacts/
+cache/
+typechain-types/
+/exp_frontend/
+
+# ====================
+# Hardhat
+# ====================
+cache/
+artifacts/
+deployments/
+*.log
+
+# ====================
+# IDE
+# ====================
+.idea/
+.vscode/
+*.swp
+*.swo
+*.swn
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# ====================
+# OS
+# ====================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# ====================
+# Logs
+# ====================
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ====================
+# Python
+# ====================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.python-version
+.pytest_cache/
+.coverage
+*.egg-info/
+MANIFEST
+
+# ====================
+# Testing
+# ====================
+coverage/
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+
+# ====================
+# Contract deployment
+# ====================
+addresses.json
+!contracts/abi/*.json
+
+# ====================
+# Sensitive files
+# ====================
+.secrets/
+.env.secrets
+server/.env
+*.pem
+*.key
+*.crt
+private*.key
+mnemonic*.txt
+
+# ====================
+# Closed source (private implementation)
+# ====================
+# closesource/
+
+# ====================
+# Misc
+# ====================
+*.tsbuildinfo
+.eslintcache
+.stylelintcache
+.temp/
+.tmp/
+
+# ====================
+# Documentation (internal only)
+# ====================
+AGENTS.md
+APPENDICES.md
+AUDIT_REPORT.md
+AUDIT_REPORT_NEW.md
+CLAUDE.md
+/research-local/
+/service/data/
+/service/server/data/
+/TODO
+change.md
+
+# Local agent config symlink
+.codex

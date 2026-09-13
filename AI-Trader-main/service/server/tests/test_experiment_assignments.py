@@ -1,0 +1,304 @@
+import os
+import sys
+import tempfile
+import unittest
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from unittest.mock import patch
+
+
+SERVER_DIR = Path(__file__).resolve().parents[1]
+if str(SERVER_DIR) not in sys.path:
+    sys.path.insert(0, str(SERVER_DIR))
+
+import database
+from experiments import (
+    ExperimentError,
+    assign_unit_to_experiment,
+    create_experiment,
+    get_experiment_challenge_report,
+    get_experiment_assignments,
+    list_experiments,
+    stable_bucket,
+    variant_for_agent,
+)
+from challenges import create_challenge, create_challenge_trade, join_challenge
+from routes_shared import utc_now_iso_z
+
+
+class ExperimentAssignmentTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        database.DATABASE_URL = ""
+        database._SQLITE_DB_PATH = os.path.join(self.tmp.name, "test.db")
+        database.init_database()
+        self.agent_ids = [self._create_agent(f"agent-{idx}") for idx in range(12)]
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _create_agent(self, name: str) -> int:
+        conn = database.get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO agents (name, token, points, cash, created_at, updated_at)
+            VALUES (?, ?, 0, 100000.0, ?, ?)
+            """,
+            (name, f"token-{name}", utc_now_iso_z(), utc_now_iso_z()),
+        )
+        agent_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return agent_id
+
+    def _iso(self, value: datetime) -> str:
+        return value.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+    def _insert_assignment(self, experiment_key: str, agent_id: int, variant_key: str) -> None:
+        conn = database.get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO experiment_assignments
+            (experiment_key, unit_type, unit_id, variant_key, assignment_reason, metadata_json, created_at)
+            VALUES (?, 'agent', ?, ?, 'test_fixture', '{}', ?)
+            """,
+            (experiment_key, agent_id, variant_key, utc_now_iso_z()),
+        )
+        conn.commit()
+        conn.close()
+
+    def test_same_agent_stably_assigns_to_same_variant(self):
+        create_experiment({
+            "experiment_key": "stable-reward-test",
+            "title": "Stable reward test",
+            "variants_json": [{"key": "control", "weight": 1}, {"key": "treatment", "weight": 1}],
+        })
+
+        first = assign_unit_to_experiment("stable-reward-test", "agent", self.agent_ids[0])
+        second = assign_unit_to_experiment("stable-reward-test", "agent", self.agent_ids[0])
+
+        self.assertEqual(first["variant_key"], second["variant_key"])
+        self.assertFalse(first["idempotent"])
+        self.assertTrue(second["idempotent"])
+        self.assertEqual(stable_bucket("stable-reward-test", "agent", self.agent_ids[0]), stable_bucket("stable-reward-test", "agent", self.agent_ids[0]))
+
+    def test_stratified_bucket_does_not_put_all_high_activity_agents_in_one_variant(self):
+        create_experiment({
+            "experiment_key": "activity-strata",
+            "title": "Activity strata",
+            "variants_json": [{"key": "control", "weight": 1}, {"key": "treatment", "weight": 1}],
+        })
+
+        assignments = [
+            assign_unit_to_experiment(
+                "activity-strata",
+                "agent",
+                agent_id,
+                metadata={"strata_key": "high-activity"},
+            )
+            for agent_id in self.agent_ids
+        ]
+        variants = {assignment["variant_key"] for assignment in assignments}
+
+        self.assertGreater(len(variants), 1)
+
+    def test_assignment_summary_includes_variant_metrics(self):
+        create_experiment({
+            "experiment_key": "metric-summary",
+            "title": "Metric summary",
+            "variants_json": [{"key": "control", "weight": 1}, {"key": "treatment", "weight": 1}],
+        })
+        assignment = assign_unit_to_experiment("metric-summary", "agent", self.agent_ids[0])
+
+        now = utc_now_iso_z()
+        conn = database.get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO agent_metric_snapshots
+            (agent_id, window_key, window_start_at, window_end_at, return_pct,
+             max_drawdown, trade_count, strategy_count, discussion_count,
+             reply_count, accepted_reply_count, citation_count, adoption_count,
+             quality_score_avg, risk_violation_count, metadata_json, created_at)
+            VALUES (?, '7d', ?, ?, 12.5, 3.5, 4, 2, 1, 5, 1, 2, 3, 4.25, 0, '{}', ?)
+            """,
+            (self.agent_ids[0], now, now, now),
+        )
+        cursor.execute(
+            """
+            INSERT INTO experiment_events
+            (event_id, event_type, actor_agent_id, object_type, object_id,
+             experiment_key, variant_key, metadata_json, created_at)
+            VALUES ('metric-heartbeat', 'agent_heartbeat', ?, 'agent', ?,
+                    'metric-summary', ?, '{}', ?)
+            """,
+            (self.agent_ids[0], str(self.agent_ids[0]), assignment["variant_key"], now),
+        )
+        cursor.execute(
+            """
+            INSERT INTO experiment_events
+            (event_id, event_type, actor_agent_id, object_type, object_id,
+             experiment_key, variant_key, metadata_json, created_at)
+            VALUES ('metric-signal', 'signal_published', ?, 'signal', '101',
+                    'metric-summary', ?, '{}', ?)
+            """,
+            (self.agent_ids[0], assignment["variant_key"], now),
+        )
+        cursor.execute(
+            """
+            INSERT INTO agent_messages (agent_id, type, content, data, read, created_at)
+            VALUES (?, 'experiment_announcement', 'read diagnostic', '{}', 1, ?)
+            """,
+            (self.agent_ids[0], now),
+        )
+        conn.commit()
+        conn.close()
+
+        summary = get_experiment_assignments("metric-summary")
+        metrics = {row["variant_key"]: row for row in summary["variant_metrics"]}
+
+        self.assertIn(assignment["variant_key"], metrics)
+        variant_row = metrics[assignment["variant_key"]]
+        self.assertEqual(variant_row["agent_count"], 1)
+        self.assertEqual(variant_row["trade_count"], 4)
+        self.assertAlmostEqual(variant_row["quality_score_avg"], 4.25)
+        self.assertEqual(variant_row["primary_metric_family"], "active_agent_behavior")
+        self.assertEqual(variant_row["read_receipts_role"], "diagnostic_only")
+        self.assertFalse(variant_row["message_read_state_required"])
+        self.assertEqual(variant_row["active_agent_count_24h"], 1)
+        self.assertEqual(variant_row["heartbeat_count_24h"], 1)
+        self.assertEqual(variant_row["signal_count_24h"], 1)
+        self.assertEqual(variant_row["read_receipt_message_count"], 1)
+        self.assertEqual(summary["metric_policy"]["primary_metric_family"], "active_agent_behavior")
+        self.assertEqual(summary["metric_policy"]["read_receipts_role"], "diagnostic_only")
+
+    def test_enrollment_limit_blocks_new_assignments_but_keeps_existing(self):
+        create_experiment({
+            "experiment_key": "limited-exp",
+            "title": "Limited experiment",
+            "variants_json": {
+                "variants": [{"key": "control", "weight": 1}, {"key": "treatment", "weight": 1}],
+                "enrollment_max_unit_id": self.agent_ids[1],
+                "enrollment_status": "closed",
+            },
+        })
+
+        first = assign_unit_to_experiment("limited-exp", "agent", self.agent_ids[0])
+        second = assign_unit_to_experiment("limited-exp", "agent", self.agent_ids[0])
+
+        self.assertFalse(first["idempotent"])
+        self.assertTrue(second["idempotent"])
+        with self.assertRaises(ExperimentError):
+            assign_unit_to_experiment("limited-exp", "agent", self.agent_ids[2])
+        self.assertEqual(variant_for_agent(self.agent_ids[2]), [])
+
+        conn = database.get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM experiment_assignments
+            WHERE experiment_key = 'limited-exp' AND unit_id = ?
+            """,
+            (self.agent_ids[2],),
+        )
+        self.assertEqual(cursor.fetchone()["count"], 0)
+        conn.close()
+
+    def test_expired_active_experiment_auto_completes_on_list(self):
+        ended_at = self._iso(datetime.now(timezone.utc) - timedelta(days=1))
+        create_experiment({
+            "experiment_key": "expired-exp",
+            "title": "Expired experiment",
+            "status": "active",
+            "end_at": ended_at,
+            "variants_json": [{"key": "control", "weight": 1}, {"key": "treatment", "weight": 1}],
+        })
+
+        active = list_experiments(status="active")
+        self.assertNotIn("expired-exp", {row["experiment_key"] for row in active["experiments"]})
+
+        conn = database.get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT status FROM experiments WHERE experiment_key = 'expired-exp'")
+        self.assertEqual(cursor.fetchone()["status"], "completed")
+        cursor.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM experiment_events
+            WHERE experiment_key = 'expired-exp' AND event_type = 'experiment_completed'
+            """
+        )
+        self.assertEqual(cursor.fetchone()["count"], 1)
+        conn.close()
+
+    def test_challenge_report_groups_live_leaderboard_by_variant(self):
+        now = datetime.now(timezone.utc)
+        create_experiment({
+            "experiment_key": "challenge-report-exp",
+            "title": "Challenge report experiment",
+            "variants_json": [{"key": "control", "weight": 1}, {"key": "treatment", "weight": 1}],
+        })
+        self._insert_assignment("challenge-report-exp", self.agent_ids[0], "control")
+        self._insert_assignment("challenge-report-exp", self.agent_ids[1], "treatment")
+
+        create_challenge(
+            {
+                "challenge_key": "variant-report-challenge",
+                "title": "Variant report challenge",
+                "market": "crypto",
+                "symbol": "all",
+                "experiment_key": "challenge-report-exp",
+                "initial_capital": 1000.0,
+                "max_position_pct": 100.0,
+                "start_at": self._iso(now - timedelta(hours=1)),
+                "end_at": self._iso(now + timedelta(hours=1)),
+            },
+            self.agent_ids[0],
+        )
+        join_challenge("variant-report-challenge", self.agent_ids[0])
+        join_challenge("variant-report-challenge", self.agent_ids[1])
+
+        with patch("challenges._fetch_authoritative_challenge_trade_price", side_effect=[100.0, 110.0]):
+            create_challenge_trade(
+                "variant-report-challenge",
+                self.agent_ids[0],
+                {
+                    "side": "buy",
+                    "symbol": "BTC",
+                    "price": 1.0,
+                    "quantity": 1.0,
+                    "executed_at": self._iso(now),
+                },
+            )
+            create_challenge_trade(
+                "variant-report-challenge",
+                self.agent_ids[0],
+                {
+                    "side": "sell",
+                    "symbol": "BTC",
+                    "price": 1.0,
+                    "quantity": 1.0,
+                    "executed_at": self._iso(now + timedelta(minutes=1)),
+                },
+            )
+
+        report = get_experiment_challenge_report("challenge-report-exp")
+        challenge_report = report["challenges"][0]
+        rows = {row["variant_key"]: row for row in challenge_report["variant_summary"]}
+
+        self.assertEqual(report["challenge_count"], 1)
+        self.assertEqual(rows["control"]["assigned_agent_count"], 1)
+        self.assertEqual(rows["control"]["participant_count"], 1)
+        self.assertEqual(rows["control"]["trading_participant_count"], 1)
+        self.assertEqual(rows["control"]["trade_count"], 2)
+        self.assertAlmostEqual(rows["control"]["avg_return_pct"], 1.0)
+        self.assertEqual(rows["treatment"]["assigned_agent_count"], 1)
+        self.assertEqual(rows["treatment"]["participant_count"], 1)
+        self.assertEqual(rows["treatment"]["trade_count"], 0)
+
+
+if __name__ == "__main__":
+    unittest.main()

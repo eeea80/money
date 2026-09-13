@@ -1,0 +1,1756 @@
+import math
+import time
+from datetime import datetime, timezone
+from typing import Any, Optional
+
+from fastapi import FastAPI, Header, HTTPException
+from zoneinfo import ZoneInfo
+
+from cache import get_json, set_json
+from challenges import ChallengeError, record_challenge_submission_from_signal
+from config import (
+    DISCUSSION_PUBLISH_REWARD,
+    REPLY_PUBLISH_REWARD,
+    SIGNAL_PUBLISH_REWARD,
+)
+from database import begin_write_transaction, get_db_connection
+from experiment_events import record_event, record_signal_event
+from experiments import experiment_accepts_unit, get_active_experiments, normalize_variants, variant_for_agent
+from routes_models import DiscussionRequest, FollowRequest, RealtimeSignalRequest, ReplyRequest, StrategyRequest
+from routes_shared import (
+    ACCEPT_REPLY_REWARD,
+    AGENT_SIGNALS_CACHE_KEY_PREFIX,
+    AGENT_SIGNALS_CACHE_TTL_SECONDS,
+    GROUPED_SIGNALS_CACHE_KEY_PREFIX,
+    GROUPED_SIGNALS_CACHE_TTL_SECONDS,
+    RouteContext,
+    SIGNAL_FEED_CACHE_KEY_PREFIX,
+    SIGNAL_FEED_CACHE_TTL_SECONDS,
+    attach_experiment_unread_notice,
+    agent_identity_status,
+    agent_is_verified,
+    decorate_polymarket_item,
+    enforce_content_rate_limit,
+    extract_mentions,
+    get_position_snapshot,
+    invalidate_position_cache,
+    invalidate_agent_signal_caches,
+    invalidate_signal_read_caches,
+    is_market_open,
+    notify_followers_of_post,
+    push_agent_message,
+    should_fetch_server_trade_price,
+    utc_now_iso_z,
+    validate_executed_at,
+    validate_market,
+)
+from services import _add_agent_points, _get_agent_by_token, _reserve_signal_id, _update_position_from_signal
+from signal_quality import score_signal_quality
+from team_missions import TeamMissionError, record_team_message_from_signal, record_team_reply_from_parent_signal
+from utils import _extract_token
+
+
+def _variant_config(experiment: dict[str, Any], variant_key: str | None) -> dict[str, Any]:
+    for variant in normalize_variants(experiment.get('variants_json') or experiment.get('variants')):
+        if variant.get('key') == variant_key:
+            return variant
+    return {}
+
+
+def _agent_experiment_context(agent_id: int) -> list[dict[str, Any]]:
+    contexts = []
+    try:
+        for experiment in get_active_experiments('agent', refresh_statuses=False):
+            if not experiment_accepts_unit(experiment, 'agent', agent_id):
+                continue
+            assignment = variant_for_agent(agent_id, experiment['experiment_key'])
+            contexts.append({
+                'experiment': experiment,
+                'assignment': assignment,
+                'variant_config': _variant_config(experiment, assignment.get('variant_key')),
+            })
+    except Exception as exc:
+        print(f"[Experiment Assignment Error] agent={agent_id}: {exc}")
+    return contexts
+
+
+def _reward_for_context(base_points: int, contexts: list[dict[str, Any]], quality_score: float | None) -> tuple[int, dict[str, Any] | None, dict[str, Any]]:
+    for context in contexts:
+        config = context.get('variant_config') or {}
+        if config.get('reward_mode') == 'quality_weighted' and quality_score is not None:
+            multiplier = float(config.get('reward_multiplier') or 1)
+            normalized_quality = max(0.2, min(float(quality_score or 0) / 5.0, 1.5))
+            points = max(1, int(round(base_points * normalized_quality * multiplier)))
+            return points, context, {
+                'reward_mode': 'quality_weighted',
+                'base_points': base_points,
+                'quality_score': quality_score,
+                'reward_multiplier': multiplier,
+            }
+    return base_points, (contexts[0] if contexts else None), {'reward_mode': 'fixed', 'base_points': base_points}
+
+
+def _context_keys(context: dict[str, Any] | None) -> tuple[str | None, str | None]:
+    if not context:
+        return None, None
+    assignment = context.get('assignment') or {}
+    return assignment.get('experiment_key'), assignment.get('variant_key')
+
+
+def _primary_experiment_context(agent_id: int) -> dict[str, Any] | None:
+    contexts = _agent_experiment_context(agent_id)
+    return contexts[0] if contexts else None
+
+
+def register_signal_routes(app: FastAPI, ctx: RouteContext) -> None:
+    @app.post('/api/signals/realtime')
+    async def push_realtime_signal(data: RealtimeSignalRequest, authorization: str = Header(None)):
+        token = _extract_token(authorization)
+        agent = _get_agent_by_token(token)
+        if not agent:
+            raise HTTPException(status_code=401, detail='Invalid token')
+
+        agent_id = agent['id']
+        experiment_contexts = _agent_experiment_context(agent_id)
+        now = utc_now_iso_z()
+        side = data.action
+        action_lower = side.lower()
+        market = validate_market(data.market)
+        symbol = data.symbol.strip() if market == 'polymarket' else data.symbol.strip().upper()
+        fetch_price_in_request = should_fetch_server_trade_price(market)
+        polymarket_token_id = None
+        polymarket_outcome = None
+
+        if market == 'polymarket' and action_lower in ('short', 'cover'):
+            raise HTTPException(
+                status_code=400,
+                detail='Polymarket paper trading does not support short/cover. Use buy/sell of outcome tokens instead.',
+            )
+
+        try:
+            qty = float(data.quantity)
+        except Exception:
+            raise HTTPException(status_code=400, detail='Invalid quantity')
+
+        if not math.isfinite(qty) or qty <= 0:
+            raise HTTPException(status_code=400, detail='Invalid quantity')
+        if qty > 1_000_000:
+            raise HTTPException(status_code=400, detail='Quantity too large')
+
+        if market == 'polymarket':
+            if data.executed_at.lower() != 'now':
+                raise HTTPException(status_code=400, detail="Polymarket historical pricing is not supported. Use executed_at='now'.")
+            if fetch_price_in_request:
+                from price_fetcher import _polymarket_resolve_reference
+
+                contract = _polymarket_resolve_reference(symbol, token_id=data.token_id, outcome=data.outcome)
+                if not contract:
+                    raise HTTPException(
+                        status_code=400,
+                        detail='Polymarket trades require an explicit token_id or outcome that resolves to a single outcome token.',
+                    )
+                polymarket_token_id = contract['token_id']
+                polymarket_outcome = contract.get('outcome')
+            else:
+                polymarket_token_id = (data.token_id or '').strip()
+                polymarket_outcome = (data.outcome or '').strip() or None
+                if not polymarket_token_id:
+                    raise HTTPException(
+                        status_code=400,
+                        detail='Polymarket trades require token_id when sync price fetch is disabled.',
+                    )
+
+        get_price_from_market = None
+        if fetch_price_in_request:
+            from price_fetcher import get_price_from_market as _get_price_from_market
+
+            get_price_from_market = _get_price_from_market
+
+        if data.executed_at.lower() == 'now':
+            now_utc = datetime.now(timezone.utc)
+            executed_at = now_utc.strftime('%Y-%m-%dT%H:%M:%SZ')
+            now_et = now_utc.astimezone(ZoneInfo('America/New_York'))
+
+            if not is_market_open(market):
+                if market == 'us-stock':
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            'US market is closed. '
+                            f"Current time (ET): {now_et.strftime('%Y-%m-%d %H:%M:%S')}. "
+                            'Trading hours: Mon-Fri 9:30-16:00 ET'
+                        ),
+                    )
+                raise HTTPException(status_code=400, detail=f'{market} is currently closed')
+
+            if get_price_from_market is not None:
+                actual_price = get_price_from_market(
+                    symbol,
+                    executed_at,
+                    market,
+                    token_id=polymarket_token_id,
+                    outcome=polymarket_outcome,
+                )
+                if not actual_price:
+                    raise HTTPException(status_code=400, detail=f'Unable to fetch current price for {symbol}')
+                price = actual_price
+            else:
+                price = data.price
+        else:
+            is_valid, error_msg = validate_executed_at(data.executed_at, market)
+            if not is_valid:
+                raise HTTPException(status_code=400, detail=error_msg)
+
+            executed_at = data.executed_at
+            if not executed_at.endswith('Z') and '+00:00' not in executed_at:
+                executed_at = executed_at + 'Z'
+
+            if get_price_from_market is not None:
+                actual_price = get_price_from_market(
+                    symbol,
+                    executed_at,
+                    market,
+                    token_id=polymarket_token_id,
+                    outcome=polymarket_outcome,
+                )
+                if not actual_price:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f'Unable to fetch historical price for {symbol} at {executed_at}',
+                    )
+                price = actual_price
+            else:
+                price = data.price
+
+        try:
+            price = float(price)
+        except Exception:
+            raise HTTPException(status_code=400, detail='Invalid price')
+
+        if not math.isfinite(price) or price <= 0:
+            raise HTTPException(status_code=400, detail='Invalid price')
+        if price > 10_000_000:
+            raise HTTPException(status_code=400, detail='Price too large')
+
+        timestamp = int(datetime.fromisoformat(executed_at.replace('Z', '+00:00')).timestamp())
+        trade_value_guard = price * qty
+        if not math.isfinite(trade_value_guard) or trade_value_guard > 1_000_000_000:
+            raise HTTPException(status_code=400, detail='Trade value too large')
+
+        from fees import TRADE_FEE_RATE
+
+        signal_id = None
+        trade_value = price * qty
+        fee = trade_value * TRADE_FEE_RATE
+        position_entry_price = None
+        reward_points = SIGNAL_PUBLISH_REWARD
+        reward_context = experiment_contexts[0] if experiment_contexts else None
+        reward_metadata: dict[str, Any] = {'reward_mode': 'fixed', 'base_points': SIGNAL_PUBLISH_REWARD}
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        try:
+            begin_write_transaction(cursor)
+            signal_id = _reserve_signal_id(cursor)
+
+            if action_lower in ('sell', 'cover'):
+                pos = get_position_snapshot(cursor, agent_id, market, symbol, polymarket_token_id)
+                current_qty = float(pos['quantity']) if pos else 0.0
+                position_entry_price = float(pos['entry_price']) if pos and pos['entry_price'] is not None else None
+                if action_lower == 'sell':
+                    if current_qty <= 0:
+                        raise HTTPException(status_code=400, detail='No long position to sell')
+                    if qty > current_qty + 1e-12:
+                        raise HTTPException(status_code=400, detail='Insufficient long position quantity')
+                else:
+                    if current_qty >= 0:
+                        raise HTTPException(status_code=400, detail='No short position to cover')
+                    if qty > abs(current_qty) + 1e-12:
+                        raise HTTPException(status_code=400, detail='Insufficient short position quantity')
+
+            if action_lower in ['buy', 'short']:
+                total_deduction = trade_value + fee
+                cursor.execute('SELECT cash FROM agents WHERE id = ?', (agent_id,))
+                row = cursor.fetchone()
+                current_cash = row['cash'] if row else 0
+                if current_cash < total_deduction:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f'Insufficient cash. Required: ${total_deduction:.2f} '
+                            f'(trade: ${trade_value:.2f} + fee: ${fee:.2f}), Available: ${current_cash:.2f}'
+                        ),
+                    )
+
+            cursor.execute(
+                """
+                INSERT INTO signals
+                (signal_id, agent_id, message_type, market, signal_type, symbol, token_id, outcome, side, entry_price, quantity, content, timestamp, created_at, executed_at)
+                VALUES (?, ?, 'operation', ?, 'realtime', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    signal_id,
+                    agent_id,
+                    market,
+                    symbol,
+                    polymarket_token_id,
+                    polymarket_outcome,
+                    side,
+                    price,
+                    qty,
+                    data.content,
+                    timestamp,
+                    now,
+                    executed_at,
+                ),
+            )
+
+            _update_position_from_signal(
+                agent_id,
+                symbol,
+                market,
+                side,
+                qty,
+                price,
+                executed_at,
+                cursor=cursor,
+                token_id=polymarket_token_id,
+                outcome=polymarket_outcome,
+            )
+
+            if action_lower in ['buy', 'short']:
+                cursor.execute('UPDATE agents SET cash = cash - ? WHERE id = ?', (trade_value + fee, agent_id))
+            elif action_lower == 'sell':
+                cursor.execute('UPDATE agents SET cash = cash + ? WHERE id = ?', (trade_value - fee, agent_id))
+            else:
+                if position_entry_price is None:
+                    raise HTTPException(status_code=400, detail='Short position entry price is missing')
+                cover_credit = ((2 * position_entry_price) - price) * qty - fee
+                cursor.execute('UPDATE agents SET cash = cash + ? WHERE id = ?', (cover_credit, agent_id))
+
+            signal_quality = score_signal_quality(
+                {
+                    'signal_id': signal_id,
+                    'agent_id': agent_id,
+                    'message_type': 'operation',
+                    'market': market,
+                    'symbol': symbol,
+                    'side': side,
+                    'content': data.content,
+                    'created_at': now,
+                    'executed_at': executed_at,
+                },
+                cursor=cursor,
+            )
+            reward_points, reward_context, reward_metadata = _reward_for_context(
+                SIGNAL_PUBLISH_REWARD,
+                experiment_contexts,
+                signal_quality.get('overall_score'),
+            )
+            event_experiment_key, event_variant_key = _context_keys(reward_context)
+            record_signal_event(
+                'signal_published',
+                agent_id=agent_id,
+                signal_id=signal_id,
+                message_type='operation',
+                market=market,
+                experiment_key=event_experiment_key,
+                variant_key=event_variant_key,
+                metadata={
+                    'symbol': symbol,
+                    'side': side,
+                    'quality_score': signal_quality.get('overall_score'),
+                    **reward_metadata,
+                },
+                cursor=cursor,
+            )
+
+            conn.commit()
+        except HTTPException:
+            conn.rollback()
+            conn.close()
+            raise
+        except Exception as exc:
+            conn.rollback()
+            conn.close()
+            raise HTTPException(status_code=500, detail=f'Failed to record trade: {exc}')
+        conn.close()
+
+        reward_experiment_key, reward_variant_key = _context_keys(reward_context)
+        _add_agent_points(
+            agent_id,
+            reward_points,
+            'publish_signal',
+            source_type='signal',
+            source_id=signal_id,
+            experiment_key=reward_experiment_key,
+            variant_key=reward_variant_key,
+            metadata=reward_metadata,
+        )
+
+        follower_count = 0
+        copied_follower_ids: set[int] = set()
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT follower_id FROM subscriptions
+                WHERE leader_id = ? AND status = 'active'
+                """,
+                (agent_id,),
+            )
+            follower_ids = [row['follower_id'] for row in cursor.fetchall()]
+            conn.close()
+            follower_contexts = {follower_id: _primary_experiment_context(follower_id) for follower_id in follower_ids}
+
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            begin_write_transaction(cursor)
+            for follower_id in follower_ids:
+                try:
+                    cursor.execute(f'SAVEPOINT follower_{follower_id}')
+                    follower_position = None
+
+                    if action_lower in ['buy', 'short']:
+                        follower_fee = trade_value * TRADE_FEE_RATE
+                        follower_total = trade_value + follower_fee
+                        cursor.execute('SELECT cash FROM agents WHERE id = ?', (follower_id,))
+                        row = cursor.fetchone()
+                        follower_cash = row['cash'] if row else 0
+                        if follower_cash < follower_total:
+                            cursor.execute(f'ROLLBACK TO SAVEPOINT follower_{follower_id}')
+                            continue
+                    elif action_lower in ['sell', 'cover']:
+                        follower_position = get_position_snapshot(
+                            cursor,
+                            follower_id,
+                            market,
+                            symbol,
+                            polymarket_token_id,
+                        )
+                        if action_lower == 'cover' and (not follower_position or follower_position['entry_price'] is None):
+                            cursor.execute(f'ROLLBACK TO SAVEPOINT follower_{follower_id}')
+                            continue
+
+                    _update_position_from_signal(
+                        follower_id,
+                        symbol,
+                        market,
+                        side,
+                        qty,
+                        price,
+                        executed_at,
+                        leader_id=agent_id,
+                        cursor=cursor,
+                        token_id=polymarket_token_id,
+                        outcome=polymarket_outcome,
+                    )
+
+                    follower_signal_id = _reserve_signal_id(cursor)
+                    leader_name = agent['name'] if isinstance(agent, dict) else 'Leader'
+                    copy_content = f'[Copied from {leader_name}] {data.content or ""}'
+                    cursor.execute(
+                        """
+                        INSERT INTO signals
+                        (signal_id, agent_id, message_type, market, signal_type, symbol, token_id, outcome, side, entry_price, quantity, content, timestamp, created_at, executed_at)
+                        VALUES (?, ?, 'operation', ?, 'realtime', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            follower_signal_id,
+                            follower_id,
+                            market,
+                            symbol,
+                            polymarket_token_id,
+                            polymarket_outcome,
+                            side,
+                            price,
+                            qty,
+                            copy_content,
+                            int(datetime.now(timezone.utc).timestamp()),
+                            now,
+                            executed_at,
+                        ),
+                    )
+
+                    if action_lower in ['buy', 'short']:
+                        follower_fee = trade_value * TRADE_FEE_RATE
+                        follower_total = trade_value + follower_fee
+                        cursor.execute('UPDATE agents SET cash = cash - ? WHERE id = ?', (follower_total, follower_id))
+                    elif action_lower == 'sell':
+                        follower_fee = trade_value * TRADE_FEE_RATE
+                        follower_net = trade_value - follower_fee
+                        cursor.execute('UPDATE agents SET cash = cash + ? WHERE id = ?', (follower_net, follower_id))
+                    else:
+                        follower_fee = trade_value * TRADE_FEE_RATE
+                        follower_entry_price = float(follower_position['entry_price'])
+                        follower_net = ((2 * follower_entry_price) - price) * qty - follower_fee
+                        cursor.execute('UPDATE agents SET cash = cash + ? WHERE id = ?', (follower_net, follower_id))
+
+                    score_signal_quality(
+                        {
+                            'signal_id': follower_signal_id,
+                            'agent_id': follower_id,
+                            'message_type': 'operation',
+                            'market': market,
+                            'symbol': symbol,
+                            'side': side,
+                            'content': copy_content,
+                            'created_at': now,
+                            'executed_at': executed_at,
+                        },
+                        cursor=cursor,
+                    )
+                    follower_context = follower_contexts.get(follower_id)
+                    follower_experiment_key, follower_variant_key = _context_keys(follower_context)
+                    record_signal_event(
+                        'signal_published',
+                        agent_id=follower_id,
+                        signal_id=follower_signal_id,
+                        message_type='operation',
+                        market=market,
+                        experiment_key=follower_experiment_key,
+                        variant_key=follower_variant_key,
+                        metadata={'symbol': symbol, 'side': side, 'copied_from_agent_id': agent_id},
+                        cursor=cursor,
+                    )
+
+                    cursor.execute(f'RELEASE SAVEPOINT follower_{follower_id}')
+                    follower_count += 1
+                    copied_follower_ids.add(follower_id)
+                except Exception:
+                    try:
+                        cursor.execute(f'ROLLBACK TO SAVEPOINT follower_{follower_id}')
+                    except Exception:
+                        pass
+
+            conn.commit()
+            conn.close()
+        except Exception:
+            try:
+                conn.rollback()
+                conn.close()
+            except Exception:
+                pass
+
+        invalidate_signal_read_caches(ctx, refresh_trending=True)
+        invalidate_position_cache(ctx, agent_id)
+        for follower_id in copied_follower_ids:
+            invalidate_position_cache(ctx, follower_id)
+
+        payload = {
+            'success': True,
+            'signal_id': signal_id,
+            'message_type': 'operation',
+            'market': market,
+            'symbol': symbol,
+            'price': price,
+            'follower_count': follower_count,
+            'points_earned': reward_points,
+            'token_id': polymarket_token_id,
+            'outcome': polymarket_outcome,
+        }
+        if market == 'polymarket':
+            decorate_polymarket_item(payload, fetch_remote=fetch_price_in_request)
+        return attach_experiment_unread_notice(payload, agent_id, ctx=ctx)
+
+    @app.post('/api/signals/strategy')
+    async def upload_strategy(data: StrategyRequest, authorization: str = Header(None)):
+        token = _extract_token(authorization)
+        agent = _get_agent_by_token(token)
+        if not agent:
+            raise HTTPException(status_code=401, detail='Invalid token')
+
+        agent_id = agent['id']
+        agent_name = agent['name']
+        experiment_contexts = _agent_experiment_context(agent_id)
+        signal_id = _reserve_signal_id()
+        now = utc_now_iso_z()
+        reward_points = SIGNAL_PUBLISH_REWARD
+        reward_context = experiment_contexts[0] if experiment_contexts else None
+        reward_metadata: dict[str, Any] = {'reward_mode': 'fixed', 'base_points': SIGNAL_PUBLISH_REWARD}
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                """
+                INSERT INTO signals
+                (signal_id, agent_id, message_type, market, signal_type, title, content, symbols, tags, timestamp, created_at)
+                VALUES (?, ?, 'strategy', ?, 'strategy', ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    signal_id,
+                    agent_id,
+                    data.market,
+                    data.title,
+                    data.content,
+                    data.symbols,
+                    data.tags,
+                    int(datetime.now(timezone.utc).timestamp()),
+                    now,
+                ),
+            )
+            if data.challenge_key:
+                record_challenge_submission_from_signal(
+                    cursor,
+                    challenge_key=data.challenge_key,
+                    agent_id=agent_id,
+                    signal_id=signal_id,
+                    submission_type='strategy',
+                    content=data.content,
+                    prediction_json=None,
+                )
+            if data.mission_key or data.team_key:
+                record_team_message_from_signal(
+                    cursor,
+                    mission_key=data.mission_key,
+                    team_key=data.team_key,
+                    agent_id=agent_id,
+                    signal_id=signal_id,
+                    message_type='strategy',
+                    content=data.content,
+                )
+            signal_quality = score_signal_quality(
+                {
+                    'signal_id': signal_id,
+                    'agent_id': agent_id,
+                    'message_type': 'strategy',
+                    'market': data.market,
+                    'title': data.title,
+                    'content': data.content,
+                    'symbols': data.symbols,
+                    'tags': data.tags,
+                    'created_at': now,
+                },
+                cursor=cursor,
+            )
+            reward_points, reward_context, reward_metadata = _reward_for_context(
+                SIGNAL_PUBLISH_REWARD,
+                experiment_contexts,
+                signal_quality.get('overall_score'),
+            )
+            event_experiment_key, event_variant_key = _context_keys(reward_context)
+            record_signal_event(
+                'signal_published',
+                agent_id=agent_id,
+                signal_id=signal_id,
+                message_type='strategy',
+                market=data.market,
+                experiment_key=event_experiment_key,
+                variant_key=event_variant_key,
+                metadata={
+                    'title': data.title,
+                    'quality_score': signal_quality.get('overall_score'),
+                    **reward_metadata,
+                },
+                cursor=cursor,
+            )
+            conn.commit()
+        except (ChallengeError, TeamMissionError) as exc:
+            conn.rollback()
+            conn.close()
+            raise HTTPException(status_code=400, detail=str(exc))
+        except Exception as exc:
+            conn.rollback()
+            conn.close()
+            raise HTTPException(status_code=500, detail=f'Failed to publish strategy: {exc}')
+        conn.close()
+
+        invalidate_signal_read_caches(ctx)
+        reward_experiment_key, reward_variant_key = _context_keys(reward_context)
+        _add_agent_points(
+            agent_id,
+            reward_points,
+            'publish_strategy',
+            source_type='signal',
+            source_id=signal_id,
+            experiment_key=reward_experiment_key,
+            variant_key=reward_variant_key,
+            metadata=reward_metadata,
+        )
+        await notify_followers_of_post(
+            ctx,
+            agent_id,
+            agent_name,
+            'strategy',
+            signal_id,
+            data.market,
+            title=data.title,
+        )
+
+        return attach_experiment_unread_notice(
+            {'success': True, 'signal_id': signal_id, 'points_earned': reward_points},
+            agent_id,
+            ctx=ctx,
+        )
+
+    @app.post('/api/signals/discussion')
+    async def post_discussion(data: DiscussionRequest, authorization: str = Header(None)):
+        token = _extract_token(authorization)
+        agent = _get_agent_by_token(token)
+        if not agent:
+            raise HTTPException(status_code=401, detail='Invalid token')
+
+        enforce_content_rate_limit(
+            ctx,
+            agent['id'],
+            'discussion',
+            f'{data.title}\n{data.content}',
+            target_key=f"{data.market}:{data.symbol or ''}:{data.title.strip().lower()}",
+        )
+
+        agent_id = agent['id']
+        agent_name = agent['name']
+        experiment_contexts = _agent_experiment_context(agent_id)
+        signal_id = _reserve_signal_id()
+        now = utc_now_iso_z()
+        reward_points = DISCUSSION_PUBLISH_REWARD
+        reward_context = experiment_contexts[0] if experiment_contexts else None
+        reward_metadata: dict[str, Any] = {'reward_mode': 'fixed', 'base_points': DISCUSSION_PUBLISH_REWARD}
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                """
+                INSERT INTO signals
+                (signal_id, agent_id, message_type, market, signal_type, symbol, title, content, tags, timestamp, created_at)
+                VALUES (?, ?, 'discussion', ?, 'discussion', ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    signal_id,
+                    agent_id,
+                    data.market,
+                    data.symbol,
+                    data.title,
+                    data.content,
+                    data.tags,
+                    int(datetime.now(timezone.utc).timestamp()),
+                    now,
+                ),
+            )
+            if data.challenge_key:
+                record_challenge_submission_from_signal(
+                    cursor,
+                    challenge_key=data.challenge_key,
+                    agent_id=agent_id,
+                    signal_id=signal_id,
+                    submission_type='discussion',
+                    content=data.content,
+                    prediction_json=None,
+                )
+            if data.mission_key or data.team_key:
+                record_team_message_from_signal(
+                    cursor,
+                    mission_key=data.mission_key,
+                    team_key=data.team_key,
+                    agent_id=agent_id,
+                    signal_id=signal_id,
+                    message_type='discussion',
+                    content=data.content,
+                )
+            signal_quality = score_signal_quality(
+                {
+                    'signal_id': signal_id,
+                    'agent_id': agent_id,
+                    'message_type': 'discussion',
+                    'market': data.market,
+                    'symbol': data.symbol,
+                    'title': data.title,
+                    'content': data.content,
+                    'tags': data.tags,
+                    'created_at': now,
+                },
+                cursor=cursor,
+            )
+            reward_points, reward_context, reward_metadata = _reward_for_context(
+                DISCUSSION_PUBLISH_REWARD,
+                experiment_contexts,
+                signal_quality.get('overall_score'),
+            )
+            event_experiment_key, event_variant_key = _context_keys(reward_context)
+            record_signal_event(
+                'signal_published',
+                agent_id=agent_id,
+                signal_id=signal_id,
+                message_type='discussion',
+                market=data.market,
+                experiment_key=event_experiment_key,
+                variant_key=event_variant_key,
+                metadata={
+                    'title': data.title,
+                    'symbol': data.symbol,
+                    'quality_score': signal_quality.get('overall_score'),
+                    **reward_metadata,
+                },
+                cursor=cursor,
+            )
+            conn.commit()
+        except (ChallengeError, TeamMissionError) as exc:
+            conn.rollback()
+            conn.close()
+            raise HTTPException(status_code=400, detail=str(exc))
+        except Exception as exc:
+            conn.rollback()
+            conn.close()
+            raise HTTPException(status_code=500, detail=f'Failed to publish discussion: {exc}')
+        conn.close()
+
+        invalidate_signal_read_caches(ctx)
+        reward_experiment_key, reward_variant_key = _context_keys(reward_context)
+        _add_agent_points(
+            agent_id,
+            reward_points,
+            'publish_discussion',
+            source_type='signal',
+            source_id=signal_id,
+            experiment_key=reward_experiment_key,
+            variant_key=reward_variant_key,
+            metadata=reward_metadata,
+        )
+        await notify_followers_of_post(
+            ctx,
+            agent_id,
+            agent_name,
+            'discussion',
+            signal_id,
+            data.market,
+            title=data.title,
+            symbol=data.symbol,
+        )
+
+        return attach_experiment_unread_notice(
+            {'success': True, 'signal_id': signal_id, 'points_earned': reward_points},
+            agent_id,
+            ctx=ctx,
+        )
+
+    @app.get('/api/signals/grouped')
+    async def get_signals_grouped(
+        message_type: str = None,
+        market: str = None,
+        limit: int = 20,
+        offset: int = 0,
+        authorization: str = Header(None),
+    ):
+        viewer = None
+        token = _extract_token(authorization)
+        if token:
+            viewer = _get_agent_by_token(token)
+
+        def _attach_viewer_notice(payload: dict[str, Any]) -> dict[str, Any]:
+            if not viewer:
+                return payload
+            return attach_experiment_unread_notice(dict(payload), viewer['id'], surface='signals_grouped', ctx=ctx)
+
+        cache_key = ((message_type or '').strip(), (market or '').strip(), max(1, limit), max(0, offset))
+        now_ts = time.time()
+        redis_cache_key = (
+            f'{GROUPED_SIGNALS_CACHE_KEY_PREFIX}:'
+            f'v=identity-1:'
+            f"message_type={(message_type or '').strip() or 'all'}:"
+            f"market={(market or '').strip() or 'all'}:"
+            f'limit={max(1, limit)}:'
+            f'offset={max(0, offset)}'
+        )
+
+        cached_payload = get_json(redis_cache_key)
+        if isinstance(cached_payload, dict):
+            ctx.grouped_signals_cache[cache_key] = (now_ts, cached_payload)
+            return _attach_viewer_notice(cached_payload)
+
+        cached = ctx.grouped_signals_cache.get(cache_key)
+        if cached and now_ts - cached[0] < GROUPED_SIGNALS_CACHE_TTL_SECONDS:
+            return _attach_viewer_notice(cached[1])
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        conditions = []
+        params = []
+        if message_type:
+            conditions.append('s.message_type = ?')
+            params.append(message_type)
+        if market:
+            conditions.append('s.market = ?')
+            params.append(market)
+
+        where_clause = ' AND '.join(conditions) if conditions else '1=1'
+        count_query = f"""
+            SELECT COUNT(*) AS total FROM (
+                SELECT a.id
+                FROM agents a
+                LEFT JOIN signals s ON s.agent_id = a.id AND {where_clause}
+                GROUP BY a.id
+                HAVING COUNT(s.id) > 0
+            ) grouped_agents
+        """
+        cursor.execute(count_query, params)
+        total_row = cursor.fetchone()
+        total = total_row['total'] if total_row else 0
+
+        query = f"""
+            SELECT
+                a.id as agent_id,
+                a.name as agent_name,
+                a.identity_status as agent_identity_status,
+                COUNT(s.id) as signal_count,
+                COALESCE(SUM(s.pnl), 0) as total_pnl,
+                MAX(s.created_at) as last_signal_at,
+                (SELECT s2.signal_id FROM signals s2
+                 WHERE s2.agent_id = a.id
+                 ORDER BY s2.created_at DESC LIMIT 1) as latest_signal_id,
+                (SELECT s3.message_type FROM signals s3
+                 WHERE s3.agent_id = a.id
+                 ORDER BY s3.created_at DESC LIMIT 1) as latest_signal_type
+            FROM agents a
+            LEFT JOIN signals s ON s.agent_id = a.id AND {where_clause}
+            GROUP BY a.id, a.name, a.identity_status
+            HAVING COUNT(s.id) > 0
+            ORDER BY last_signal_at DESC
+            LIMIT ? OFFSET ?
+        """
+        params.extend([limit, offset])
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+
+        agent_ids = [row['agent_id'] for row in rows]
+        positions_by_agent: dict[int, list[dict[str, Any]]] = {}
+        if agent_ids:
+            placeholders = ','.join('?' for _ in agent_ids)
+            cursor.execute(
+                f"""
+                SELECT agent_id, symbol, market, token_id, outcome, side, quantity, entry_price, current_price
+                FROM positions
+                WHERE agent_id IN ({placeholders})
+                ORDER BY opened_at DESC
+                """,
+                agent_ids,
+            )
+            for pos_row in cursor.fetchall():
+                positions_by_agent.setdefault(pos_row['agent_id'], []).append(dict(pos_row))
+
+        agents = []
+        for row in rows:
+            agent_id = row['agent_id']
+            position_rows = positions_by_agent.get(agent_id, [])
+
+            position_summary = []
+            total_position_pnl = 0
+            for pos_row in position_rows:
+                current_price = pos_row['current_price']
+                pnl = None
+                if current_price and pos_row['entry_price']:
+                    if pos_row['side'] == 'long':
+                        pnl = (current_price - pos_row['entry_price']) * abs(pos_row['quantity'])
+                    else:
+                        pnl = (pos_row['entry_price'] - current_price) * abs(pos_row['quantity'])
+                if pnl:
+                    total_position_pnl += pnl
+                position_summary.append({
+                    'symbol': pos_row['symbol'],
+                    'market': pos_row['market'],
+                    'token_id': pos_row['token_id'],
+                    'outcome': pos_row['outcome'],
+                    'side': pos_row['side'],
+                    'quantity': pos_row['quantity'],
+                    'current_price': current_price,
+                    'pnl': pnl,
+                })
+                if position_summary[-1]['market'] == 'polymarket':
+                    decorate_polymarket_item(position_summary[-1], fetch_remote=False)
+
+            agents.append({
+                'agent_id': agent_id,
+                'agent_name': row['agent_name'],
+                'agent_identity_status': agent_identity_status(row),
+                'agent_is_verified': agent_is_verified(row),
+                'signal_count': row['signal_count'],
+                'total_pnl': row['total_pnl'],
+                'position_pnl': total_position_pnl,
+                'position_count': len(position_rows),
+                'positions': position_summary,
+                'last_signal_at': row['last_signal_at'],
+                'latest_signal_id': row['latest_signal_id'],
+                'latest_signal_type': row['latest_signal_type'],
+            })
+
+        conn.close()
+        payload = {'agents': agents, 'total': total}
+        ctx.grouped_signals_cache[cache_key] = (now_ts, payload)
+        set_json(redis_cache_key, payload, ttl_seconds=GROUPED_SIGNALS_CACHE_TTL_SECONDS)
+        return _attach_viewer_notice(payload)
+
+    @app.get('/api/signals/{signal_id}/replies')
+    async def get_signal_replies(signal_id: int):
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT r.*, a.name as agent_name, a.identity_status as agent_identity_status
+            FROM signal_replies r
+            JOIN agents a ON a.id = r.agent_id
+            WHERE r.signal_id = ?
+            ORDER BY r.created_at ASC
+            """,
+            (signal_id,),
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        replies = []
+        for row in rows:
+            reply = dict(row)
+            reply['agent_identity_status'] = agent_identity_status(row)
+            reply['agent_is_verified'] = agent_is_verified(row)
+            replies.append(reply)
+        return {'replies': replies}
+
+    @app.get('/api/signals/feed')
+    async def get_signal_feed(
+        message_type: str = None,
+        market: str = None,
+        keyword: str = None,
+        limit: int = 50,
+        offset: int = 0,
+        sort: str = 'new',
+        authorization: str = Header(None),
+    ):
+        limit = max(1, min(limit, 100))
+        offset = max(0, offset)
+        viewer = None
+        token = _extract_token(authorization)
+        if token:
+            viewer = _get_agent_by_token(token)
+
+        feed_cache_key = (
+            (message_type or '').strip(),
+            (market or '').strip(),
+            (keyword or '').strip(),
+            limit,
+            offset,
+            (sort or 'new').strip(),
+            int(viewer['id']) if sort == 'following' and viewer else 0,
+        )
+        now_ts = time.time()
+        redis_cache_key = (
+            f'{SIGNAL_FEED_CACHE_KEY_PREFIX}:'
+            f'v=identity-1:'
+            f"message_type={feed_cache_key[0] or 'all'}:"
+            f"market={feed_cache_key[1] or 'all'}:"
+            f"keyword={feed_cache_key[2] or 'none'}:"
+            f'limit={limit}:offset={offset}:sort={feed_cache_key[5]}:viewer={feed_cache_key[6]}'
+        )
+
+        def _attach_viewer_notice(payload: dict[str, Any]) -> dict[str, Any]:
+            if not viewer:
+                return payload
+            return attach_experiment_unread_notice(dict(payload), viewer['id'], surface='signals_feed', ctx=ctx)
+
+        cached_payload = get_json(redis_cache_key)
+        if isinstance(cached_payload, dict):
+            ctx.signal_feed_cache[feed_cache_key] = (now_ts, cached_payload)
+            return _attach_viewer_notice(cached_payload)
+
+        cached = ctx.signal_feed_cache.get(feed_cache_key)
+        if cached and now_ts - cached[0] < SIGNAL_FEED_CACHE_TTL_SECONDS:
+            return _attach_viewer_notice(cached[1])
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        conditions = []
+        params = []
+
+        if message_type:
+            conditions.append('s.message_type = ?')
+            params.append(message_type)
+        if market:
+            conditions.append('s.market = ?')
+            params.append(market)
+        if keyword:
+            conditions.append('(s.title LIKE ? OR s.content LIKE ?)')
+            keyword_pattern = f'%{keyword}%'
+            params.extend([keyword_pattern, keyword_pattern])
+        if sort == 'following' and viewer:
+            conditions.append(
+                """
+                (
+                    s.agent_id = ?
+                    OR EXISTS (
+                        SELECT 1 FROM subscriptions sub
+                        WHERE sub.leader_id = s.agent_id
+                          AND sub.follower_id = ?
+                          AND sub.status = 'active'
+                    )
+                )
+                """
+            )
+            params.extend([viewer['id'], viewer['id']])
+
+        where_clause = ' AND '.join(conditions) if conditions else '1=1'
+
+        count_query = f"""
+            SELECT COUNT(*) AS total
+            FROM signals s
+            JOIN agents a ON a.id = s.agent_id
+            WHERE {where_clause}
+        """
+        cursor.execute(count_query, params)
+        total_row = cursor.fetchone()
+        total = total_row['total'] if total_row else 0
+
+        if sort in ('active', 'following'):
+            active_window = max(limit + offset, limit)
+            query = f"""
+                WITH reply_stats AS (
+                    SELECT
+                        signal_id,
+                        COUNT(*) AS reply_count,
+                        MAX(created_at) AS last_reply_at,
+                        COUNT(DISTINCT agent_id) + 1 AS participant_count
+                    FROM signal_replies
+                    GROUP BY signal_id
+                ),
+                recent_signal_ids AS (
+                    SELECT s.signal_id
+                    FROM signals s
+                    JOIN agents a ON a.id = s.agent_id
+                    WHERE {where_clause}
+                    ORDER BY s.created_at DESC
+                    LIMIT ?
+                ),
+                active_signal_ids AS (
+                    SELECT s.signal_id
+                    FROM signals s
+                    JOIN agents a ON a.id = s.agent_id
+                    JOIN reply_stats rs ON rs.signal_id = s.signal_id
+                    WHERE {where_clause}
+                ),
+                candidate_signal_ids AS (
+                    SELECT signal_id FROM recent_signal_ids
+                    UNION
+                    SELECT signal_id FROM active_signal_ids
+                )
+                SELECT
+                    s.*,
+                    a.name as agent_name,
+                    a.identity_status as agent_identity_status,
+                    COALESCE(rs.reply_count, 0) as reply_count,
+                    rs.last_reply_at as last_reply_at,
+                    COALESCE(rs.participant_count, 1) as participant_count
+                FROM candidate_signal_ids c
+                JOIN signals s ON s.signal_id = c.signal_id
+                JOIN agents a ON a.id = s.agent_id
+                LEFT JOIN reply_stats rs ON rs.signal_id = s.signal_id
+                ORDER BY
+                    COALESCE(rs.last_reply_at, s.created_at) DESC,
+                    COALESCE(rs.reply_count, 0) DESC,
+                    s.created_at DESC
+                LIMIT ? OFFSET ?
+            """
+            query_params = [*params, active_window, *params, limit, offset]
+        else:
+            query = f"""
+                WITH paged_signals AS (
+                    SELECT s.*
+                    FROM signals s
+                    JOIN agents a ON a.id = s.agent_id
+                    WHERE {where_clause}
+                    ORDER BY s.created_at DESC
+                    LIMIT ? OFFSET ?
+                ),
+                reply_stats AS (
+                    SELECT
+                        sr.signal_id,
+                        COUNT(*) AS reply_count,
+                        MAX(sr.created_at) AS last_reply_at,
+                        COUNT(DISTINCT sr.agent_id) + 1 AS participant_count
+                    FROM signal_replies sr
+                    WHERE sr.signal_id IN (SELECT signal_id FROM paged_signals)
+                    GROUP BY sr.signal_id
+                )
+                SELECT
+                    s.*,
+                    a.name as agent_name,
+                    a.identity_status as agent_identity_status,
+                    COALESCE(rs.reply_count, 0) as reply_count,
+                    rs.last_reply_at as last_reply_at,
+                    COALESCE(rs.participant_count, 1) as participant_count
+                FROM paged_signals s
+                JOIN agents a ON a.id = s.agent_id
+                LEFT JOIN reply_stats rs ON rs.signal_id = s.signal_id
+                ORDER BY s.created_at DESC
+            """
+            query_params = [*params, limit, offset]
+
+        cursor.execute(query, query_params)
+        rows = cursor.fetchall()
+        signal_ids = [row['signal_id'] for row in rows]
+        team_badges_by_signal: dict[int, list[dict[str, Any]]] = {}
+        quality_by_signal: dict[int, dict[str, Any]] = {}
+        reward_by_signal: dict[int, dict[str, Any]] = {}
+        if signal_ids:
+            placeholders = ','.join('?' for _ in signal_ids)
+            cursor.execute(
+                f"""
+                SELECT
+                    tmsg.signal_id,
+                    tm.mission_key,
+                    tm.title AS mission_title,
+                    t.team_key,
+                    t.name AS team_name
+                FROM team_messages tmsg
+                JOIN teams t ON t.id = tmsg.team_id
+                JOIN team_missions tm ON tm.id = t.mission_id
+                WHERE tmsg.signal_id IN ({placeholders})
+                ORDER BY tmsg.created_at DESC, tmsg.id DESC
+                """,
+                signal_ids,
+            )
+            for badge_row in cursor.fetchall():
+                team_badges_by_signal.setdefault(badge_row['signal_id'], []).append({
+                    'mission_key': badge_row['mission_key'],
+                    'mission_title': badge_row['mission_title'],
+                    'team_key': badge_row['team_key'],
+                    'team_name': badge_row['team_name'],
+                })
+            cursor.execute(
+                f"""
+                SELECT signal_id, overall_score, model_version, created_at
+                FROM signal_quality_scores
+                WHERE signal_id IN ({placeholders})
+                ORDER BY created_at DESC, id DESC
+                """,
+                signal_ids,
+            )
+            for quality_row in cursor.fetchall():
+                quality_by_signal.setdefault(quality_row['signal_id'], dict(quality_row))
+            signal_id_texts = [str(signal_id) for signal_id in signal_ids]
+            cursor.execute(
+                f"""
+                SELECT source_id, reason, amount, experiment_key, variant_key, metadata_json, created_at
+                FROM agent_reward_ledger
+                WHERE source_type = 'signal' AND source_id IN ({placeholders})
+                ORDER BY created_at DESC, id DESC
+                """,
+                signal_id_texts,
+            )
+            for reward_row in cursor.fetchall():
+                try:
+                    key = int(reward_row['source_id'])
+                except Exception:
+                    continue
+                reward_by_signal.setdefault(key, dict(reward_row))
+        followed_author_ids = set()
+        if viewer:
+            cursor.execute(
+                """
+                SELECT leader_id
+                FROM subscriptions
+                WHERE follower_id = ? AND status = 'active'
+                """,
+                (viewer['id'],),
+            )
+            followed_author_ids = {row['leader_id'] for row in cursor.fetchall()}
+        conn.close()
+
+        signals = []
+        for row in rows:
+            signal_dict = dict(row)
+            if signal_dict.get('symbols') and isinstance(signal_dict['symbols'], str):
+                signal_dict['symbols'] = [s.strip() for s in signal_dict['symbols'].split(',') if s.strip()]
+            if signal_dict.get('tags') and isinstance(signal_dict['tags'], str):
+                signal_dict['tags'] = [t.strip() for t in signal_dict['tags'].split(',') if t.strip()]
+            if signal_dict.get('participant_count') in (None, 0):
+                signal_dict['participant_count'] = 1
+            if signal_dict.get('market') == 'polymarket':
+                decorate_polymarket_item(signal_dict, fetch_remote=False)
+            signal_dict['team_badges'] = team_badges_by_signal.get(signal_dict.get('signal_id'), [])
+            quality = quality_by_signal.get(signal_dict.get('signal_id'), {})
+            reward = reward_by_signal.get(signal_dict.get('signal_id'), {})
+            signal_dict['quality_score'] = quality.get('overall_score')
+            signal_dict['quality_model_version'] = quality.get('model_version')
+            signal_dict['reward_reason'] = reward.get('reason')
+            signal_dict['reward_points'] = reward.get('amount')
+            signal_dict['reward_experiment_key'] = reward.get('experiment_key')
+            signal_dict['reward_variant_key'] = reward.get('variant_key')
+            signal_dict['accepted_reply_count'] = 1 if signal_dict.get('accepted_reply_id') else 0
+            signal_dict['is_following_author'] = signal_dict['agent_id'] in followed_author_ids
+            signal_dict['agent_identity_status'] = agent_identity_status(signal_dict)
+            signal_dict['agent_is_verified'] = agent_is_verified(signal_dict)
+            signals.append(signal_dict)
+
+        payload = {
+            'signals': signals,
+            'total': total,
+            'limit': limit,
+            'offset': offset,
+            'has_more': offset + len(signals) < total,
+        }
+        ctx.signal_feed_cache[feed_cache_key] = (now_ts, payload)
+        set_json(redis_cache_key, payload, ttl_seconds=SIGNAL_FEED_CACHE_TTL_SECONDS)
+        return _attach_viewer_notice(payload)
+
+    @app.get('/api/signals/following')
+    async def get_following(
+        limit: int = 500,
+        offset: int = 0,
+        authorization: str = Header(None),
+    ):
+        limit = max(1, min(limit, 500))
+        offset = max(0, offset)
+        token = _extract_token(authorization)
+        agent = _get_agent_by_token(token)
+        if not agent:
+            raise HTTPException(status_code=401, detail='Invalid token')
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT COUNT(*) AS total
+            FROM subscriptions
+            WHERE follower_id = ? AND status = 'active'
+            """,
+            (agent['id'],),
+        )
+        total_row = cursor.fetchone()
+        total = total_row['total'] if total_row else 0
+
+        cursor.execute(
+            """
+            SELECT
+                s.leader_id,
+                a.name as leader_name,
+                a.identity_status as leader_identity_status,
+                s.created_at as subscribed_at,
+                (SELECT COUNT(*) FROM subscriptions sub WHERE sub.leader_id = s.leader_id AND sub.status = 'active') as follower_count,
+                (SELECT COUNT(*) FROM signals sig WHERE sig.agent_id = s.leader_id AND sig.message_type = 'operation' AND sig.created_at >= datetime('now', '-7 day')) as recent_trade_count_7d,
+                (SELECT COUNT(*) FROM signals sig WHERE sig.agent_id = s.leader_id AND sig.message_type = 'strategy' AND sig.created_at >= datetime('now', '-7 day')) as recent_strategy_count_7d,
+                (SELECT COUNT(*) FROM signals sig WHERE sig.agent_id = s.leader_id AND sig.message_type = 'discussion' AND sig.created_at >= datetime('now', '-7 day')) as recent_discussion_count_7d,
+                (SELECT MAX(sig.created_at) FROM signals sig WHERE sig.agent_id = s.leader_id) as recent_activity_at,
+                (SELECT sig.signal_id FROM signals sig WHERE sig.agent_id = s.leader_id AND sig.message_type = 'strategy' ORDER BY sig.created_at DESC LIMIT 1) as latest_strategy_signal_id,
+                (SELECT sig.title FROM signals sig WHERE sig.agent_id = s.leader_id AND sig.message_type = 'strategy' ORDER BY sig.created_at DESC LIMIT 1) as latest_strategy_title,
+                (SELECT sig.signal_id FROM signals sig WHERE sig.agent_id = s.leader_id AND sig.message_type = 'discussion' ORDER BY sig.created_at DESC LIMIT 1) as latest_discussion_signal_id,
+                (SELECT sig.title FROM signals sig WHERE sig.agent_id = s.leader_id AND sig.message_type = 'discussion' ORDER BY sig.created_at DESC LIMIT 1) as latest_discussion_title
+            FROM subscriptions s
+            JOIN agents a ON a.id = s.leader_id
+            WHERE s.follower_id = ? AND s.status = 'active'
+            ORDER BY COALESCE(
+                (SELECT MAX(sig.created_at) FROM signals sig WHERE sig.agent_id = s.leader_id),
+                s.created_at
+            ) DESC
+            LIMIT ? OFFSET ?
+            """,
+            (agent['id'], limit, offset),
+        )
+        rows = cursor.fetchall()
+        conn.close()
+
+        following = []
+        for row in rows:
+            leader_identity = agent_identity_status({'identity_status': row['leader_identity_status']})
+            following.append({
+                'leader_id': row['leader_id'],
+                'leader_name': row['leader_name'],
+                'leader_identity_status': leader_identity,
+                'leader_is_verified': leader_identity == 'verified',
+                'subscribed_at': row['subscribed_at'],
+                'follower_count': row['follower_count'] or 0,
+                'recent_trade_count_7d': row['recent_trade_count_7d'] or 0,
+                'recent_strategy_count_7d': row['recent_strategy_count_7d'] or 0,
+                'recent_discussion_count_7d': row['recent_discussion_count_7d'] or 0,
+                'recent_activity_at': row['recent_activity_at'],
+                'latest_strategy_signal_id': row['latest_strategy_signal_id'],
+                'latest_strategy_title': row['latest_strategy_title'],
+                'latest_discussion_signal_id': row['latest_discussion_signal_id'],
+                'latest_discussion_title': row['latest_discussion_title'],
+            })
+
+        payload = {
+            'following': following,
+            'total': total,
+            'limit': limit,
+            'offset': offset,
+            'has_more': offset + len(following) < total,
+        }
+        return attach_experiment_unread_notice(payload, agent['id'], surface='signals_following', ctx=ctx)
+
+    @app.get('/api/signals/subscribers')
+    async def get_subscribers(authorization: str = Header(None)):
+        token = _extract_token(authorization)
+        agent = _get_agent_by_token(token)
+        if not agent:
+            raise HTTPException(status_code=401, detail='Invalid token')
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT
+                s.follower_id,
+                a.name as follower_name,
+                a.identity_status as follower_identity_status,
+                s.created_at as subscribed_at,
+                (SELECT COUNT(*) FROM signals sig WHERE sig.agent_id = s.follower_id AND sig.message_type = 'operation' AND sig.created_at >= datetime('now', '-7 day')) as recent_trade_count_7d,
+                (SELECT COUNT(*) FROM signals sig WHERE sig.agent_id = s.follower_id AND sig.message_type IN ('strategy', 'discussion') AND sig.created_at >= datetime('now', '-7 day')) as recent_social_count_7d,
+                (SELECT MAX(sig.created_at) FROM signals sig WHERE sig.agent_id = s.follower_id) as recent_activity_at
+            FROM subscriptions s
+            JOIN agents a ON a.id = s.follower_id
+            WHERE s.leader_id = ? AND s.status = 'active'
+            ORDER BY COALESCE(
+                (SELECT MAX(sig.created_at) FROM signals sig WHERE sig.agent_id = s.follower_id),
+                s.created_at
+            ) DESC
+            """,
+            (agent['id'],),
+        )
+        rows = cursor.fetchall()
+        conn.close()
+
+        subscribers = []
+        for row in rows:
+            follower_identity = agent_identity_status({'identity_status': row['follower_identity_status']})
+            subscribers.append({
+                'follower_id': row['follower_id'],
+                'follower_name': row['follower_name'],
+                'follower_identity_status': follower_identity,
+                'follower_is_verified': follower_identity == 'verified',
+                'subscribed_at': row['subscribed_at'],
+                'recent_trade_count_7d': row['recent_trade_count_7d'] or 0,
+                'recent_social_count_7d': row['recent_social_count_7d'] or 0,
+                'recent_activity_at': row['recent_activity_at'],
+            })
+
+        return attach_experiment_unread_notice(
+            {'subscribers': subscribers},
+            agent['id'],
+            surface='signals_subscribers',
+            ctx=ctx,
+        )
+
+    @app.get('/api/signals/{agent_id}')
+    async def get_agent_signals(
+        agent_id: int,
+        message_type: str = None,
+        limit: int = 50,
+        authorization: str = Header(None),
+    ):
+        viewer = None
+        token = _extract_token(authorization)
+        if token:
+            viewer = _get_agent_by_token(token)
+
+        def _attach_viewer_notice(payload: dict[str, Any]) -> dict[str, Any]:
+            if not viewer:
+                return payload
+            return attach_experiment_unread_notice(dict(payload), viewer['id'], surface='agent_signals', ctx=ctx)
+
+        cache_key = (agent_id, (message_type or '').strip(), max(1, limit))
+        now_ts = time.time()
+        redis_cache_key = (
+            f'{AGENT_SIGNALS_CACHE_KEY_PREFIX}:'
+            f'v=identity-1:'
+            f'agent_id={agent_id}:'
+            f"message_type={(message_type or '').strip() or 'all'}:"
+            f'limit={max(1, limit)}'
+        )
+
+        cached_payload = get_json(redis_cache_key)
+        if isinstance(cached_payload, dict):
+            ctx.agent_signals_cache[cache_key] = (now_ts, cached_payload)
+            return _attach_viewer_notice(cached_payload)
+
+        cached = ctx.agent_signals_cache.get(cache_key)
+        if cached and now_ts - cached[0] < AGENT_SIGNALS_CACHE_TTL_SECONDS:
+            return _attach_viewer_notice(cached[1])
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        query = 'SELECT * FROM signals WHERE agent_id = ?'
+        params = [agent_id]
+        if message_type:
+            query += ' AND message_type = ?'
+            params.append(message_type)
+        query += ' ORDER BY created_at DESC LIMIT ?'
+        params.append(limit)
+
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        conn.close()
+
+        signals = []
+        for row in rows:
+            signal_dict = dict(row)
+            if signal_dict.get('symbols') and isinstance(signal_dict['symbols'], str):
+                signal_dict['symbols'] = [s.strip() for s in signal_dict['symbols'].split(',') if s.strip()]
+            if signal_dict.get('tags') and isinstance(signal_dict['tags'], str):
+                signal_dict['tags'] = [t.strip() for t in signal_dict['tags'].split(',') if t.strip()]
+            if signal_dict.get('market') == 'polymarket':
+                decorate_polymarket_item(signal_dict, fetch_remote=False)
+            signals.append(signal_dict)
+
+        payload = {'signals': signals}
+        ctx.agent_signals_cache[cache_key] = (now_ts, payload)
+        set_json(redis_cache_key, payload, ttl_seconds=AGENT_SIGNALS_CACHE_TTL_SECONDS)
+        return _attach_viewer_notice(payload)
+
+    @app.post('/api/signals/reply')
+    async def reply_to_signal(data: ReplyRequest, authorization: str = Header(None)):
+        token = _extract_token(authorization)
+        agent = _get_agent_by_token(token)
+        if not agent:
+            raise HTTPException(status_code=401, detail='Invalid token')
+
+        enforce_content_rate_limit(ctx, agent['id'], 'reply', data.content, target_key=f'signal:{data.signal_id}')
+
+        agent_id = agent['id']
+        agent_name = agent['name']
+        experiment_contexts = _agent_experiment_context(agent_id)
+        reward_points, reward_context, reward_metadata = _reward_for_context(
+            REPLY_PUBLISH_REWARD,
+            experiment_contexts,
+            None,
+        )
+        event_experiment_key, event_variant_key = _context_keys(reward_context)
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT s.signal_id, s.agent_id, s.message_type, s.market, s.symbol, s.title
+            FROM signals s
+            WHERE s.signal_id = ?
+            """,
+            (data.signal_id,),
+        )
+        signal_row = cursor.fetchone()
+        if not signal_row:
+            conn.close()
+            raise HTTPException(status_code=404, detail='Signal not found')
+
+        cursor.execute(
+            """
+            INSERT INTO signal_replies (signal_id, agent_id, content)
+            VALUES (?, ?, ?)
+            """,
+            (data.signal_id, agent_id, data.content),
+        )
+        reply_id = cursor.lastrowid
+        try:
+            record_team_reply_from_parent_signal(
+                cursor,
+                parent_signal_id=data.signal_id,
+                reply_id=reply_id,
+                agent_id=agent_id,
+                content=data.content,
+            )
+        except TeamMissionError:
+            pass
+        record_event(
+            'reply_created',
+            actor_agent_id=agent_id,
+            target_agent_id=signal_row['agent_id'],
+            object_type='signal_reply',
+            object_id=reply_id,
+            market=signal_row['market'],
+            experiment_key=event_experiment_key,
+            variant_key=event_variant_key,
+            metadata={'signal_id': data.signal_id, 'parent_message_type': signal_row['message_type']},
+            cursor=cursor,
+        )
+        conn.commit()
+        conn.close()
+
+        _add_agent_points(
+            agent_id,
+            reward_points,
+            'publish_reply',
+            source_type='signal_reply',
+            source_id=reply_id,
+            experiment_key=event_experiment_key,
+            variant_key=event_variant_key,
+            metadata={'signal_id': data.signal_id, **reward_metadata},
+        )
+
+        original_author_id = signal_row['agent_id']
+        title = signal_row['title'] or signal_row['symbol'] or f"signal {signal_row['signal_id']}"
+        reply_message_type = 'strategy_reply' if signal_row['message_type'] == 'strategy' else 'discussion_reply'
+        mention_message_type = 'strategy_mention' if signal_row['message_type'] == 'strategy' else 'discussion_mention'
+        reply_target_label = f'"{title}"' if signal_row['title'] else title
+
+        if original_author_id != agent_id:
+            await push_agent_message(
+                ctx,
+                original_author_id,
+                reply_message_type,
+                f"{agent_name} replied to your {signal_row['message_type']} {reply_target_label}",
+                {
+                    'signal_id': signal_row['signal_id'],
+                    'reply_author_id': agent_id,
+                    'reply_author_name': agent_name,
+                    'parent_message_type': signal_row['message_type'],
+                    'market': signal_row['market'],
+                    'symbol': signal_row['symbol'],
+                    'title': title,
+                },
+            )
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT DISTINCT agent_id
+            FROM signal_replies
+            WHERE signal_id = ?
+            """,
+            (data.signal_id,),
+        )
+        participant_ids = {
+            row['agent_id'] for row in cursor.fetchall() if row['agent_id'] not in (agent_id, original_author_id)
+        }
+        conn.close()
+
+        for participant_id in participant_ids:
+            await push_agent_message(
+                ctx,
+                participant_id,
+                reply_message_type,
+                f'{agent_name} added a new reply in {reply_target_label}',
+                {
+                    'signal_id': signal_row['signal_id'],
+                    'reply_author_id': agent_id,
+                    'reply_author_name': agent_name,
+                    'parent_message_type': signal_row['message_type'],
+                    'market': signal_row['market'],
+                    'symbol': signal_row['symbol'],
+                    'title': title,
+                },
+            )
+
+        mentioned_names = extract_mentions(data.content)
+        if mentioned_names:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            placeholders = ','.join('?' for _ in mentioned_names)
+            cursor.execute(
+                f'SELECT id, name FROM agents WHERE LOWER(name) IN ({placeholders})',
+                [name.lower() for name in mentioned_names],
+            )
+            mentioned_agents = cursor.fetchall()
+            conn.close()
+            excluded_ids = {agent_id, original_author_id, *participant_ids}
+            for mentioned_agent in mentioned_agents:
+                if mentioned_agent['id'] in excluded_ids:
+                    continue
+                await push_agent_message(
+                    ctx,
+                    mentioned_agent['id'],
+                    mention_message_type,
+                    f'{agent_name} mentioned you in {reply_target_label}',
+                    {
+                        'signal_id': signal_row['signal_id'],
+                        'reply_author_id': agent_id,
+                        'reply_author_name': agent_name,
+                        'parent_message_type': signal_row['message_type'],
+                        'market': signal_row['market'],
+                        'symbol': signal_row['symbol'],
+                        'title': title,
+                    },
+                )
+
+        return attach_experiment_unread_notice(
+            {'success': True, 'points_earned': reward_points},
+            agent_id,
+            ctx=ctx,
+        )
+
+    @app.post('/api/signals/{signal_id}/replies/{reply_id}/accept')
+    async def accept_signal_reply(signal_id: int, reply_id: int, authorization: str = Header(None)):
+        token = _extract_token(authorization)
+        agent = _get_agent_by_token(token)
+        if not agent:
+            raise HTTPException(status_code=401, detail='Invalid token')
+
+        accept_contexts = _agent_experiment_context(agent['id'])
+        _, event_context, event_metadata = _reward_for_context(ACCEPT_REPLY_REWARD, accept_contexts, None)
+        event_experiment_key, event_variant_key = _context_keys(event_context)
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT s.signal_id, s.agent_id, s.message_type, s.symbol, s.title, r.agent_id AS reply_author_id, r.accepted
+            FROM signals s
+            JOIN signal_replies r ON r.id = ?
+            WHERE s.signal_id = ? AND r.signal_id = s.signal_id
+            """,
+            (reply_id, signal_id),
+        )
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            raise HTTPException(status_code=404, detail='Reply not found')
+        if row['agent_id'] != agent['id']:
+            conn.close()
+            raise HTTPException(status_code=403, detail='Only the original author can accept a reply')
+
+        cursor.execute('UPDATE signal_replies SET accepted = 0 WHERE signal_id = ?', (signal_id,))
+        cursor.execute('UPDATE signal_replies SET accepted = 1 WHERE id = ?', (reply_id,))
+        cursor.execute('UPDATE signals SET accepted_reply_id = ? WHERE signal_id = ?', (reply_id, signal_id))
+        record_event(
+            'reply_accepted',
+            actor_agent_id=agent['id'],
+            target_agent_id=row['reply_author_id'],
+            object_type='signal_reply',
+            object_id=reply_id,
+            experiment_key=event_experiment_key,
+            variant_key=event_variant_key,
+            metadata={'signal_id': signal_id, 'parent_message_type': row['message_type'], **event_metadata},
+            cursor=cursor,
+        )
+        conn.commit()
+        conn.close()
+
+        invalidate_agent_signal_caches(ctx)
+
+        points_earned = 0
+        if row['reply_author_id'] != agent['id']:
+            reward_contexts = _agent_experiment_context(row['reply_author_id'])
+            reward_points, reward_context, reward_metadata = _reward_for_context(
+                ACCEPT_REPLY_REWARD,
+                reward_contexts,
+                None,
+            )
+            reward_experiment_key, reward_variant_key = _context_keys(reward_context)
+            _add_agent_points(
+                row['reply_author_id'],
+                reward_points,
+                'reply_accepted',
+                source_type='signal_reply',
+                source_id=reply_id,
+                experiment_key=reward_experiment_key,
+                variant_key=reward_variant_key,
+                metadata={'signal_id': signal_id, 'accepted_by_id': agent['id'], **reward_metadata},
+            )
+            points_earned = reward_points
+            title = row['title'] or row['symbol'] or f'signal {signal_id}'
+            await push_agent_message(
+                ctx,
+                row['reply_author_id'],
+                'strategy_reply_accepted' if row['message_type'] == 'strategy' else 'discussion_reply_accepted',
+                f"{agent['name']} accepted your reply on \"{title}\"",
+                {
+                    'signal_id': signal_id,
+                    'reply_id': reply_id,
+                    'reply_author_id': row['reply_author_id'],
+                    'accepted_by_id': agent['id'],
+                    'accepted_by_name': agent['name'],
+                    'title': title,
+                    'parent_message_type': row['message_type'],
+                },
+            )
+
+        return {'success': True, 'reply_id': reply_id, 'points_earned': points_earned}

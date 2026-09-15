@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Traid — Activate</title>
+    <link rel="stylesheet" type="text/css" href="popup.css">
+    <script src="browser-check.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo-section">
+                <img src="../icons/logo.png" alt="Logo" id="logo">
+                <h1>Traid</h1>
+            </div>
+            <div class="maker-section">
+                <span class="by-text">by</span>
+                <a href="https://solaitions.com/" target="_blank" class="solaitions-link">
+                    <img src="../icons/solaitions.png" alt="Solaitions" class="solaitions-logo">
+                </a>
+            </div>
+        </div>
+        <h1 class="hero-title">Master Your Market Analysis.</h1>
+        <p class="hero-subtitle">The professional charting toolkit serious traders rely on.<br>Precision. Speed. Edge.</p>
+        <div class="feature-highlights">
+            <div class="feature-item"><span class="feature-dot"></span>Real-time pattern detection</div>
+            <div class="feature-item"><span class="feature-dot"></span>Professional-grade graphing tools</div>
+            <div class="feature-item"><span class="feature-dot"></span>Instant market insights</div>
+        </div>
+        <input type="text" id="firstName" placeholder="First Name">
+        <input type="email" id="email" placeholder="Email Address">
+        <button id="getLicense">Unlock My Access</button>
+        <p class="secure-text"><span class="lock-icon">&#128274;</span> Secure signup. Trusted by active traders.</p>
+        <button id="checkLicenseLink" class="activate-btn">Already have a license? Activate here.</button>
+        <p id="auth-status"></p>
+        <p id="license-expiry"></p>
+        <button id="back-to-home" style="display:none;">Back to Home</button>
+        <a href="settings.html" id="settings-link" style="display:none;">Go to Settings</a>
+    </div>
+    <script src="trial.js"></script>
+    <script src="auth.js"></script>
+</body>
+</html>

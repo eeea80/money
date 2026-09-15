@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Traid: Multi-Strategy AI Chart Analyzer</title>
+    <link rel="stylesheet" href="popup.css">
+    <link rel="stylesheet" href="multiple-strategies.css">
+    <script src="browser-check.js"></script>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo-section">
+                <img src="../icons/logo.png" alt="Logo" id="logo">
+                <h1>Traid</h1>
+            </div>
+            <div class="maker-section">
+                <span class="by-text">by</span>
+                <a href="https://solaitions.com/" target="_blank" class="solaitions-link">
+                    <img src="../icons/solaitions.png" alt="Solaitions" class="solaitions-logo">
+                </a>
+            </div>
+            <a href="popup.html" id="back-button"
+                style="font-size: 14px; text-decoration: none; color: var(--text-secondary); padding: 4px 8px; border-radius: 6px; transition: all 0.3s ease; margin-left: 8px;">←
+                Back</a>
+        </div>
+
+        <!-- MODE SELECTOR - NEW PROMINENT SECTION -->
+        <div class="mode-selector-section">
+            <div class="mode-selector-title">
+                <span class="mode-icon">🎯</span>
+                <span>Choose Analysis Mode</span>
+            </div>
+            <div class="mode-toggle">
+                <button id="single-mode-btn" class="mode-btn">
+                    <div class="mode-btn-badge free-badge">✨ FREE</div>
+                    <img src="../icons/single.png" alt="Single Strategy" class="mode-btn-icon-img">
+                    <div class="mode-btn-content">
+                        <div class="mode-btn-title">Single Strategy</div>
+                        <div class="mode-btn-subtitle">Pick one approach</div>
+                    </div>
+                </button>
+                <button id="multi-mode-btn" class="mode-btn active">
+                    <div class="mode-btn-badge">🚀 PRO</div>
+                    <div class="mode-btn-icon">🎯</div>
+                    <div class="mode-btn-content">
+                        <div class="mode-btn-title">Multi Strategy</div>
+                        <div class="mode-btn-subtitle">Combine all 10 strategies</div>
+                    </div>
+                </button>
+            </div>
+        </div>
+
+        <!-- Timeframe Selector Section -->
+        <div class="timeframe-container">
+            <div class="timeframe-tabs">
+                <button class="timeframe-btn" data-timeframe="Swing">Swing</button>
+                <button class="timeframe-btn" data-timeframe="Intraday">Intraday</button>
+                <button class="timeframe-btn active" data-timeframe="Scalp">Scalp</button>
+            </div>
+            <div class="timeframe-desc-container">
+                <div class="timeframe-desc-arrow"></div>
+                <div class="timeframe-desc-box" id="timeframe-desc">Fast-paced trades capturing small price movements
+                </div>
+            </div>
+        </div>
+
+        <div class="section-header">
+            <span class="section-title">Select Strategies</span>
+        </div>
+
+        <div id="strategy-list" class="strategy-list"></div>
+
+        <div class="strategy-buttons">
+            <button id="select-all">Select All</button>
+            <button id="select-five">Top 5</button>
+            <button id="reset-selection">Reset</button>
+        </div>
+
+        <button id="analyze" class="analyze-btn">
+            <span class="btn-icon">🔍</span>
+            <span class="btn-text">Analyze Chart</span>
+        </button>
+        <div id="license-status"></div>
+        <div id="scoreboard" class="scoreboard" style="display: none;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Short</th>
+                        <th>Long</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td id="short-score">0</td>
+                        <td id="long-score">0</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <div id="loading-container" class="loading-container" style="display: none;">
+            <div id="loading-bar" class="loading-bar"></div>
+            <p id="loading-text">Analyzing...</p>
+            <p id="loading-percentage">0%</p>
+            <div id="analysis-loader" class="analysis-loader" style="display: none;">
+                <img id="screenshot" src="" style="width:100%;">
+                <div class="scanner"></div>
+            </div>
+        </div>
+        <div id="consolidation-loader" class="consolidation-loader" style="display: none;">
+            <div class="spinner"></div>
+            <p>Consolidating Results...</p>
+        </div>
+        <div id="results" style="display: none;">
+            <button id="copy-signals">Copy All Signals</button>
+            <button id="conclusion" disabled>Copy Conclusion</button>
+            <div id="ai-summary" class="ai-summary"></div>
+        </div>
+    </div>
+    <script src="trial.js"></script>
+    <script src="multiple-strategies.js"></script>
+</body>
+
+</html>

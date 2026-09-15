@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Traid: Multi-Strategy AI Chart Analyzer</title>
+  <link rel="stylesheet" type="text/css" href="popup.css">
+  <script src="browser-check.js"></script>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="logo-section">
+        <img src="../icons/logo.png" alt="Logo" id="logo">
+        <img src="../icons/traid.png" alt="Traid" id="traid-text">
+      </div>
+      <div class="maker-section">
+        <span class="by-text">by</span>
+        <a href="https://solaitions.com/" target="_blank" class="solaitions-link">
+          <img src="../icons/solaitions.png" alt="Solaitions" class="solaitions-logo">
+        </a>
+      </div>
+      <a href="settings.html" id="settingsLink">⚙️</a>
+    </div>
+    
+    <div class="disclaimer">
+      <span class="disclaimer-icon">⚠️</span> This is not financial advice. For informational and educational purposes only.
+    </div>
+
+    <!-- Trial Timer -->
+    <div id="trial-counter" class="trial-counter hidden">
+      ⏳ <span id="trial-count">24h trial</span>
+    </div>
+
+    <!-- MODE SELECTOR - NEW PROMINENT SECTION -->
+    <div class="mode-selector-section">
+      <div class="mode-selector-title">
+        <span class="mode-icon">🎯</span>
+        <span>Choose Analysis Mode</span>
+      </div>
+      <div class="mode-toggle">
+        <button id="single-mode-btn" class="mode-btn active">
+          <div class="mode-btn-badge free-badge">✨ FREE</div>
+          <img src="../icons/single.png" alt="Single Strategy" class="mode-btn-icon-img">
+          <div class="mode-btn-content">
+            <div class="mode-btn-title">Single Strategy</div>
+            <div class="mode-btn-subtitle">Pick one approach</div>
+          </div>
+        </button>
+        <button id="multi-mode-btn" class="mode-btn">
+          <div class="mode-btn-badge">🚀 PRO</div>
+          <div class="mode-btn-icon">🎯</div>
+          <div class="mode-btn-content">
+            <div class="mode-btn-title">Multi Strategy</div>
+            <div class="mode-btn-subtitle">Combine all 10 strategies</div>
+          </div>
+        </button>
+      </div>
+    </div>
+
+    <!-- Timeframe Selector Section -->
+    <div class="timeframe-container">
+      <div class="timeframe-tabs">
+        <button class="timeframe-btn" data-timeframe="Swing">Swing</button>
+        <button class="timeframe-btn" data-timeframe="Intraday">Intraday</button>
+        <button class="timeframe-btn active" data-timeframe="Scalp">Scalp</button>
+      </div>
+      <div class="timeframe-desc-container">
+        <div class="timeframe-desc-arrow"></div>
+        <div class="timeframe-desc-box" id="timeframe-desc">Fast-paced trades capturing small price movements</div>
+      </div>
+    </div>
+
+    <!-- Single Strategy Section -->
+    <div class="section-header">
+      <span class="section-title">Choose Your Strategy</span>
+    </div>
+
+    <div class="strategy-grid" id="strategyGrid">
+      <div class="strategy-card" data-strategy="wyckoff" data-short-desc="Accumulation & Distribution" data-full-desc="Analyzes accumulation/distribution phases and price/volume relationships">
+        <img src="../icons/wyckoff.jpg" alt="Wyckoff" class="strategy-icon">
+        <div class="strategy-info">
+          <span class="strategy-name">Wyckoff</span>
+          <span class="strategy-desc">Accumulation & Distribution</span>
+        </div>
+        <div class="strategy-check">✓</div>
+      </div>
+
+      <div class="strategy-card" data-strategy="support-resistance" data-short-desc="Key Price Levels" data-full-desc="Identifies key price levels for entries and exits">
+        <img src="../icons/snr.jpg" alt="Support & Resistance" class="strategy-icon">
+        <div class="strategy-info">
+          <span class="strategy-name">Support & Resistance</span>
+          <span class="strategy-desc">Key Price Levels</span>
+        </div>
+        <div class="strategy-check">✓</div>
+      </div>
+
+      <div class="strategy-card" data-strategy="moving-averages" data-short-desc="MA Crossovers" data-full-desc="Uses MA crossovers and dynamic support/resistance">
+        <img src="../icons/ma.jpg" alt="Moving Averages" class="strategy-icon">
+        <div class="strategy-info">
+          <span class="strategy-name">Moving Averages</span>
+          <span class="strategy-desc">MA Crossovers</span>
+        </div>
+        <div class="strategy-check">✓</div>
+      </div>
+
+      <div class="strategy-card" data-strategy="volume-profile" data-short-desc="Volume Distribution" data-full-desc="Analyzes volume distribution at price levels">
+        <img src="../icons/vp.jpg" alt="Volume Profile" class="strategy-icon">
+        <div class="strategy-info">
+          <span class="strategy-name">Volume Profile</span>
+          <span class="strategy-desc">Volume Distribution</span>
+        </div>
+        <div class="strategy-check">✓</div>
+      </div>
+
+      <div class="strategy-card" data-strategy="harmonic-patterns" data-short-desc="Geometric Patterns" data-full-desc="Identifies geometric price patterns">
+        <img src="../icons/harmonic.jpg" alt="Harmonic" class="strategy-icon">
+        <div class="strategy-info">
+          <span class="strategy-name">Harmonic</span>
+          <span class="strategy-desc">Geometric Patterns</span>
+        </div>
+        <div class="strategy-check">✓</div>
+      </div>
+
+      <div class="strategy-card" data-strategy="elliott-wave" data-short-desc="Wave Pattern Cycles" data-full-desc="Identifies market cycles through wave patterns">
+        <img src="../icons/elliott.jpg" alt="Elliott Wave" class="strategy-icon">
+        <div class="strategy-info">
+          <span class="strategy-name">Elliott Wave</span>
+          <span class="strategy-desc">Wave Pattern Cycles</span>
+        </div>
+        <div class="strategy-check">✓</div>
+      </div>
+
+      <div class="strategy-card" data-strategy="fibonacci" data-short-desc="Golden Ratio Levels" data-full-desc="Uses Fibonacci ratios to predict price movements">
+        <img src="../icons/fibonacci.jpg" alt="Fibonacci" class="strategy-icon">
+        <div class="strategy-info">
+          <span class="strategy-name">Fibonacci</span>
+          <span class="strategy-desc">Golden Ratio Levels</span>
+        </div>
+        <div class="strategy-check">✓</div>
+      </div>
+
+      <div class="strategy-card" data-strategy="price-action" data-short-desc="Candlestick Patterns" data-full-desc="Pure price movement analysis without indicators">
+        <img src="../icons/priceaction.jpg" alt="Price Action" class="strategy-icon">
+        <div class="strategy-info">
+          <span class="strategy-name">Price Action</span>
+          <span class="strategy-desc">Candlestick Patterns</span>
+        </div>
+        <div class="strategy-check">✓</div>
+      </div>
+
+      <div class="strategy-card" data-strategy="ichimoku" data-short-desc="Trend System" data-full-desc="Comprehensive trend following system">
+        <img src="../icons/cloud.jpg" alt="Ichimoku Cloud" class="strategy-icon">
+        <div class="strategy-info">
+          <span class="strategy-name">Ichimoku Cloud</span>
+          <span class="strategy-desc">Trend System</span>
+        </div>
+        <div class="strategy-check">✓</div>
+      </div>
+
+      <div class="strategy-card" data-strategy="market-structure" data-short-desc="HH/HL Analysis" data-full-desc="Analyzes higher highs/lows and trend changes">
+        <img src="../icons/ms.jpg" alt="Market Structure" class="strategy-icon">
+        <div class="strategy-info">
+          <span class="strategy-name">Market Structure</span>
+          <span class="strategy-desc">HH/HL Analysis</span>
+        </div>
+        <div class="strategy-check">✓</div>
+      </div>
+    </div>
+
+    <!-- Free trial status -->
+    <div id="trial-banner"></div>
+
+    <!-- Analyze Button -->
+    <button id="analyze" class="analyze-btn">
+      <span class="btn-icon">🔍</span>
+      <span class="btn-text">Analyze Chart</span>
+      <span class="btn-strategy" id="selectedStrategyName">Wyckoff</span>
+    </button>
+
+    <!-- Free example scan: proves the product before they need a chart of their own -->
+    <button id="demo-scan" class="demo-scan-btn">
+      👀 See a live example <span class="demo-scan-sub">free — doesn't use a scan</span>
+    </button>
+
+    <div id="trial-gate"></div>
+    <div id="result"></div>
+  </div>
+
+  <!-- Error Modal -->
+  <div id="errorModal" class="error-modal-overlay">
+    <div class="error-modal">
+      <div class="error-modal-header">
+        <div class="error-modal-title-row">
+          <span class="error-modal-icon">⚠️</span>
+          <span class="error-modal-title">Analysis Failed</span>
+        </div>
+        <button class="error-modal-close" id="errorModalClose">✕</button>
+      </div>
+      <p class="error-modal-desc">Something went wrong. Copy this error and send it to support — we'll get you back on track fast.</p>
+      <div class="error-modal-code-wrap">
+        <pre class="error-modal-code" id="errorModalText"></pre>
+      </div>
+      <div class="error-modal-actions">
+        <button class="error-modal-btn copy-btn" id="errorCopyBtn">
+          <span id="errorCopyLabel">📋 Copy Error</span>
+        </button>
+        <a class="error-modal-btn support-btn" id="errorSupportBtn" href="#" target="_blank">
+          💬 Contact Support
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <script src="trial.js"></script>
+  <script src="demo-chart.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

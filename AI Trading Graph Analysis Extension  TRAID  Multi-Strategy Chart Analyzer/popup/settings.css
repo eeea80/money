@@ -1,0 +1,193 @@
+/* ===== ROOT VARIABLES - FINTECH THEME ===== */
+:root {
+  /* Modern Professional Fintech Palette */
+  --bg-primary: #1E222D; /* Deep Charcoal */
+  --bg-secondary: #262B39; /* Slightly lighter charcoal */
+  --bg-card: #2B313F; /* Card background */
+  --bg-card-hover: #363C4E; /* Card hover state */
+  
+  --accent-green: #26A69A; /* Crisp Professional Green */
+  --accent-green-dim: rgba(38, 166, 154, 0.1);
+  --accent-blue: #2962FF; /* Professional Blue */
+  --accent-purple: #7E57C2; /* Refined Purple */
+  --accent-gold: #D1A535; /* Muted Gold (Premium) */
+  
+  --text-primary: #ECECED; /* Off-white for better readability */
+  --text-secondary: #B2B5BE; /* Muted text */
+  --text-dim: #787B86; /* Dim text */
+  
+  --border-color: #434651; /* Subtle border */
+  --success: #26A69A; /* Green */
+  --danger: #EF5350; /* Red */
+}
+
+body {
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu, sans-serif;
+    margin: 0;
+    padding: 16px;
+    width: 100%;
+    min-height: 100vh;
+    box-sizing: border-box;
+}
+
+.container {
+    padding: 0;
+    background: transparent;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+h1 {
+    text-align: center;
+    color: var(--text-primary);
+    margin-bottom: 24px;
+    font-size: 20px;
+    font-weight: 600;
+}
+
+.setting {
+    width: 100%;
+    margin-bottom: 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    padding: 16px;
+    background: var(--bg-card);
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    box-sizing: border-box;
+}
+
+.setting label {
+    margin-bottom: 12px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+#apiKey {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: 14px;
+    box-sizing: border-box;
+    transition: all 0.2s ease;
+}
+
+#apiKey:focus {
+    outline: none;
+    border-color: var(--accent-blue);
+    background-color: var(--bg-card);
+}
+
+#apiKey::placeholder {
+    color: var(--text-dim);
+}
+
+button {
+    background-color: var(--accent-green);
+    color: white;
+    border: none;
+    padding: 12px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 14px;
+    transition: all 0.2s ease;
+    width: 100%;
+    margin-top: 12px;
+}
+
+button:hover {
+    background-color: #2bbbad;
+    transform: translateY(-1px);
+}
+
+#saveApiKey {
+    background: var(--accent-green);
+}
+
+.button-row {
+    display: flex;
+    gap: 12px;
+    margin-top: 12px;
+}
+
+.button-row button {
+    flex: 1;
+    margin-top: 0;
+}
+
+.get-api-key-btn {
+    background: var(--accent-gold);
+    color: white;
+}
+
+.get-api-key-btn:hover {
+    background: #d4a017;
+}
+
+.tutorial-btn {
+    background: var(--accent-blue);
+    color: white;
+}
+
+.tutorial-btn:hover {
+    background: #1e51e6;
+}
+
+#viewLicense {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+}
+
+#viewLicense:hover {
+    background: var(--bg-card);
+    border-color: var(--text-dim);
+}
+
+#back-to-main {
+    background: transparent;
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+    margin-top: 24px;
+}
+
+#back-to-main:hover {
+    background: var(--bg-card);
+    color: var(--text-primary);
+}
+
+#status-message {
+    margin-top: 16px;
+    font-size: 13px;
+    padding: 12px;
+    border-radius: 4px;
+    text-align: center;
+}
+
+#status-message:not(:empty) {
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+}
+
+.success-message {
+    color: var(--success) !important;
+    background: rgba(38, 166, 154, 0.1) !important;
+    border-color: rgba(38, 166, 154, 0.3) !important;
+}
+
+.error-message {
+    color: var(--danger) !important;
+    background: rgba(239, 83, 80, 0.1) !important;
+    border-color: rgba(239, 83, 80, 0.3) !important;
+}

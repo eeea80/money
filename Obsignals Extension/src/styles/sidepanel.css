@@ -1,0 +1,2736 @@
+@import url("./tokens.css");
+
+/* =============================================================================
+   Side panel layout.
+
+   The panel is a narrow, full-height column (Chrome gives it ~320-500px).
+   Header and tabs stay pinned; only the signal list scrolls.
+   ============================================================================= */
+
+* {
+  box-sizing: border-box;
+}
+
+/* `hidden` must win over any layout display value, otherwise a flex/table
+   element stays visible when the attribute is set. */
+[hidden] {
+  display: none !important;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+/*
+ * O unico brilho do painel, atras do topo.
+ *
+ * Substitui a profundidade que antes vinha de sombra em cada superficie: um
+ * halo do acento no alto da coluna, e o resto chapado. Fica em `fixed` porque
+ * acompanha o painel, nao a lista — a tabela rola por baixo dele.
+ */
+body::before {
+  content: "";
+  position: fixed;
+  inset: -20% 0 auto;
+  height: 320px;
+  z-index: -1;
+  background: radial-gradient(
+    60% 100% at 50% 0%,
+    hsl(var(--primary) / var(--glow)),
+    transparent 70%
+  );
+  pointer-events: none;
+}
+
+body {
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  -webkit-font-smoothing: antialiased;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* Ocupa o que sobra depois da barra, em vez dos 100% de antes — senao a tela
+   empurra a barra para fora da janela. `min-height: 0` e o que permite ao
+   conteudo interno rolar em vez de esticar a tela. */
+.screen {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/* === Header extras === */
+
+.header--nav {
+  justify-content: space-between;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+/* Screen title. 16 rather than 15: it is the only heading on the screen, and a
+   pixel of difference from the body text is not a hierarchy. */
+.header__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+/* Balances the back button so the title stays optically centred. */
+.header__spacer {
+  width: 32px;
+}
+
+.header__right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* Same shell as the time zone trigger — both header controls read as a pair. */
+.iconbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid hsl(var(--input));
+  border-radius: var(--radius-lg);
+  background: hsl(var(--secondary));
+  color: hsl(var(--foreground));
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+
+.iconbtn:hover {
+  border-color: hsl(var(--muted-foreground));
+}
+
+/* The back arrow inside the settings header stays plain — a boxed control
+   next to a title would read as an action on the title. */
+.header--nav .iconbtn {
+  border-color: transparent;
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+}
+
+.header--nav .iconbtn:hover {
+  color: hsl(var(--foreground));
+  background: hsl(var(--muted));
+}
+
+.iconbtn:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 1px;
+}
+
+/* === Settings === */
+
+.set {
+  margin-bottom: var(--space-4);
+}
+
+.set__caption {
+  margin: 0 0 var(--space-1-5);
+  margin-inline-start: 2px;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: hsl(var(--muted-foreground));
+}
+
+.set__card {
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-lg);
+  background: hsl(var(--card));
+  overflow: hidden;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid hsl(var(--border));
+  color: hsl(var(--foreground));
+  font-size: var(--text-base);
+  text-decoration: none;
+}
+
+.set__card .row:last-child {
+  border-bottom: 0;
+}
+
+a.row,
+label.row,
+button.row {
+  cursor: pointer;
+}
+
+a.row:hover,
+label.row:hover,
+button.row:hover {
+  background: hsl(var(--muted));
+}
+
+/* The row is also rendered as <button>, which brings its own UA defaults —
+   without resetting `background` the browser paints it button-face white. */
+button.row {
+  width: 100%;
+  border-inline: 0;
+  border-top: 0;
+  background: transparent;
+  font-family: inherit;
+  font-size: var(--text-base);
+  text-align: start;
+  appearance: none;
+}
+
+.row--accent {
+  color: hsl(var(--primary));
+}
+
+/* The one row that destroys something. Red before it is pressed, so it is never
+   the row somebody hits while reaching for the one above. */
+.row--danger,
+.row--danger .row__left .icon {
+  color: hsl(var(--error));
+}
+
+.row__left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.row__left .icon {
+  flex-shrink: 0;
+  color: hsl(var(--muted-foreground));
+}
+
+.row--accent .row__left .icon {
+  color: hsl(var(--primary));
+}
+
+.row__value {
+  flex-shrink: 0;
+  color: hsl(var(--muted-foreground));
+}
+
+/* Value and arrow travel together on the right edge. */
+.row__right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  color: hsl(var(--muted-foreground));
+}
+
+.row .icon:last-child {
+  flex-shrink: 0;
+  color: hsl(var(--muted-foreground));
+}
+
+/*
+ * Language picker.
+ *
+ * Buttons in a popover, not a `<select>`. The option list of a native select is
+ * drawn by the operating system — white panel, system font, system highlight —
+ * and it is the one widget a page cannot style. On a dark panel it was the only
+ * thing on screen that did not look like the product. The website uses the same
+ * control, so the two match.
+ */
+.idiomas {
+  display: inline-flex;
+}
+
+/* Closed, it reads as a value on the right edge like every other row value. */
+.idiomas__atual {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  font-family: inherit;
+  font-size: var(--text-base);
+  cursor: pointer;
+  transition: color 160ms ease;
+}
+
+.idiomas__atual:hover,
+.idiomas__atual[aria-expanded="true"] {
+  color: hsl(var(--foreground));
+}
+
+/* The arrow, drawn with a border instead of a glyph: the triangle character has
+   a different height in every system font and never lines up with the text. */
+.idiomas__atual::after {
+  content: "";
+  width: 5px;
+  height: 5px;
+  margin-block-start: -3px;
+  border-inline-end: 1.5px solid currentColor;
+  border-block-end: 1.5px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform 160ms ease;
+}
+
+.idiomas__atual[aria-expanded="true"]::after {
+  transform: rotate(-135deg);
+  margin-block-start: 2px;
+}
+
+/*
+ * The list, in the browser's top layer.
+ *
+ * It has to escape two ancestors that clip it: the settings card, which hides
+ * overflow to keep its rounded corners, and the panel, which scrolls. No
+ * `z-index` gets a child out of a clipping ancestor — `popover` does, by taking
+ * the element out of the page's stacking order entirely.
+ *
+ * Which means the usual anchoring is gone too: `top` and `left` are written by
+ * the script when it opens, measured against the button. What stays here is
+ * only what does not depend on where it lands.
+ *
+ * The eight languages fit without scrolling. The height limit below only bites
+ * when the panel is short enough that the list would run past the bottom, and
+ * when it does the bar is never painted — in a panel this narrow the track
+ * steals width. Same rule already guards the signals list and the timezone
+ * picker.
+ */
+.idiomas__lista {
+  position: fixed;
+  margin: 0;
+  inset: auto;
+  min-width: 150px;
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* legacy Edge */
+  padding: var(--space-1);
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-lg);
+  background: hsl(var(--card));
+  box-shadow: 0 12px 32px hsl(0 0% 0% / 0.5);
+}
+
+/*
+ * `display` so quando aberto — e esta linha e o motivo de tudo funcionar.
+ *
+ * A folha do navegador esconde um popover fechado com
+ * `[popover]:not(:popover-open) { display: none }`. Declarar `display: grid` no
+ * elemento derruba essa regra, porque regra de autor vence a do navegador: o
+ * popover nunca entra na camada de topo, vira uma div comum no fluxo, e volta a
+ * ser recortado pelo cartao e pintado por baixo do que vem depois dele.
+ */
+.idiomas__lista:popover-open {
+  display: grid;
+}
+
+.idiomas__lista::-webkit-scrollbar {
+  width: 0;
+}
+
+.idiomas__item {
+  padding: 8px var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  font-family: inherit;
+  font-size: var(--text-base);
+  /* Names read in their own script, so the list follows the document direction
+     instead of forcing one side. */
+  text-align: start;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 160ms ease, background-color 160ms ease;
+}
+
+.idiomas__item:hover {
+  background: hsl(var(--foreground) / 0.06);
+  color: hsl(var(--foreground));
+}
+
+/* The language in use. Marked by `aria-current`, which is already the attribute
+   that says so — no class needed just to paint it. */
+.idiomas__item[aria-current="true"] {
+  background: hsl(var(--secondary));
+  color: hsl(var(--foreground));
+}
+
+/* iOS-style switch built on a checkbox — no extra markup, keyboard works. */
+.switch {
+  appearance: none;
+  flex-shrink: 0;
+  width: 36px;
+  height: 20px;
+  margin: 0;
+  border-radius: var(--radius-full);
+  background: hsl(var(--segment-track));
+  border: 1px solid hsl(var(--border));
+  position: relative;
+  cursor: pointer;
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  inset-inline-start: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-full);
+  background: #fff;
+  transition: transform 160ms ease;
+}
+
+.switch:checked {
+  background: hsl(var(--success));
+  border-color: hsl(var(--success));
+}
+
+.switch:checked::after {
+  transform: translateX(16px);
+}
+
+.switch:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 2px;
+}
+
+/* === Premium === */
+
+.header__title--icon {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+}
+
+.prem__bolt {
+  display: inline-flex;
+  color: #facc15; /* the bolt is decorative and always warm yellow */
+}
+
+.prem__card {
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  background: hsl(var(--card));
+}
+
+.prem__features {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.prem__features li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--text-base);
+}
+
+/* Bare check, slightly heavier stroke so it still reads at 16px without the
+   circle behind it. */
+.prem__check {
+  flex-shrink: 0;
+  color: hsl(var(--success));
+  stroke-width: 2.5;
+}
+
+/* Caption with a rule on each side. */
+.prem__divider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-4) 0;
+  color: hsl(var(--muted-foreground));
+  font-size: var(--text-sm);
+}
+
+.prem__divider::before,
+.prem__divider::after,
+.auth__divider::before,
+.auth__divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: hsl(var(--border));
+}
+
+.prem__plans {
+  padding: 0 var(--space-4);
+}
+
+.plan {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) 0;
+  border-bottom: 1px solid hsl(var(--border));
+  cursor: pointer;
+}
+
+.plan:last-child {
+  border-bottom: 0;
+}
+
+.plan__name {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* Mesma leitura das pills da tabela: fundo tingido, texto na mesma cor. O
+   gradiente violeta que estava aqui era a unica cor do painel sem significado
+   — nao dizia "premium", so chamava atencao. */
+.plan__badge {
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: hsl(var(--primary) / 0.16);
+  color: hsl(var(--primary));
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.plan__price {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  text-align: end;
+}
+
+.plan__amount {
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.plan__note {
+  font-size: var(--text-xs);
+  color: hsl(var(--muted-foreground));
+  font-variant-numeric: tabular-nums;
+}
+
+/* Radio built on the input itself — no wrapper span to keep in sync. */
+.radio {
+  appearance: none;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  border: 2px solid hsl(var(--muted-foreground));
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  position: relative;
+  transition: border-color 120ms ease;
+}
+
+.radio:checked {
+  border-color: hsl(var(--primary));
+}
+
+.radio:checked::after {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  border-radius: var(--radius-full);
+  background: hsl(var(--primary));
+}
+
+.radio:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 2px;
+}
+
+.prem__cta {
+  width: 100%;
+  margin-top: var(--space-4);
+  /* Holds the sheen inside the pill. */
+  position: relative;
+  overflow: hidden;
+  height: var(--control-h);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  font-family: inherit;
+  font-size: var(--text-base);
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+/*
+ * Laminated sheen — a highlight that sweeps across on hover, the same effect
+ * Telegram uses on its buttons. It waits off the left edge and travels right.
+ *
+ * The transition lives on the hover rule, not here, on purpose: leaving the
+ * button snaps the highlight back to its start instead of sweeping backwards.
+ */
+.prem__cta::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    100deg,
+    transparent 35%,
+    hsl(0 0% 100% / 0.32) 50%,
+    transparent 65%
+  );
+  pointer-events: none;
+}
+
+.prem__cta:hover:not(:disabled)::after {
+  transform: translateX(100%);
+  transition: transform 700ms ease;
+}
+
+.prem__cta:active:not(:disabled) {
+  transform: scale(0.99);
+}
+
+.prem__cta:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* =============================================================================
+   Sign in — the gate.
+
+   The shape sign-in has everywhere: provider button, divider, the email pair,
+   one solid button. Arriving users already know it, and a form that needs no
+   reading is the point.
+   ============================================================================= */
+
+/*
+ * Centred in the panel rather than sitting at the top, because it is the only
+ * thing on screen — there is no list under it to anchor to.
+ *
+ * `min-height: 100%` instead of `height`: on a short window the form keeps its
+ * natural height and the panel scrolls, rather than the fields being squeezed.
+ */
+.auth {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--space-3);
+  min-height: 100%;
+  padding-block: var(--space-4);
+}
+
+.auth__head {
+  text-align: center;
+  margin-bottom: var(--space-3);
+}
+
+.auth__title {
+  margin: 0 0 var(--space-1-5);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.auth__subtitle {
+  margin: 0 auto;
+  max-width: 30ch;
+  color: hsl(var(--muted-foreground));
+  font-size: var(--text-base);
+  line-height: 1.45;
+}
+
+/*
+ * Google's own guidelines: white surface, hairline border, the mark unaltered.
+ * It stays white in both themes because the logo is drawn for a light ground —
+ * a dark version of this button is the version that fails brand review.
+ */
+.auth__google {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  height: var(--control-h);
+  padding-inline: var(--space-4);
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-md);
+  background: #fff;
+  color: #1f1f1f;
+  font-family: inherit;
+  font-size: var(--text-base);
+  font-weight: 500;
+  cursor: pointer;
+  transition: box-shadow 120ms ease;
+}
+
+.auth__google:hover {
+  box-shadow: 0 0 0 3px hsl(var(--muted));
+}
+
+.auth__google:active {
+  transform: scale(0.99);
+}
+
+/* Caption with a rule on each side. */
+.auth__divider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-2) 0;
+  color: hsl(var(--muted-foreground));
+  font-size: var(--text-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* Holds the input and, on the password, its reveal button. */
+.auth__field {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+/* Label above its field — used where a form has more than two of them and the
+   placeholder alone stops being enough to tell them apart. */
+/* Aplicado por change-password.js. Sem regra, o rotulo saia branco e maior
+   que os irmaos `.contact__label` e `.danger__label`, que fazem o mesmo papel. */
+.auth__label {
+  font-size: var(--text-sm);
+  color: hsl(var(--muted-foreground));
+}
+
+.auth__labelled {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1-5);
+}
+
+/*
+ * The gate centres itself because it is alone on the screen. A form reached
+ * from settings is not: it starts at the top, under the header it came from.
+ */
+.auth--form {
+  justify-content: flex-start;
+  min-height: 0;
+}
+
+.auth__input {
+  width: 100%;
+  height: var(--control-h);
+  padding-inline: var(--space-4);
+  border: 1px solid hsl(var(--input));
+  border-radius: var(--radius-md);
+  background: hsl(var(--input-bg));
+  color: hsl(var(--foreground));
+  font-family: inherit;
+  font-size: var(--text-base);
+  transition: border-color 120ms ease;
+}
+
+.auth__input:focus {
+  outline: none;
+  border-color: hsl(var(--muted-foreground));
+}
+
+.auth__input::placeholder {
+  color: hsl(var(--muted-foreground));
+}
+
+/* Six boxes, one per digit. Not the pill the other fields use: those hold a
+   sentence, this holds characters in fixed positions, and the boxes are what
+   say so before anything is typed. */
+.code {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: center;
+}
+
+.code__box {
+  /* Shares the row rather than claiming a fixed width, so six boxes still fit
+     when the panel is dragged narrow. */
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 48px;
+  height: var(--control-h);
+  padding: 0;
+  border: 1px solid hsl(var(--input));
+  border-radius: var(--radius-md);
+  background: hsl(var(--input-bg));
+  color: hsl(var(--foreground));
+  text-align: center;
+  font-family: inherit;
+  font-size: var(--text-lg);
+  transition: border-color 120ms ease;
+}
+
+.code__box:focus {
+  outline: none;
+  border-color: hsl(var(--muted-foreground));
+}
+
+.code__box:disabled {
+  opacity: 0.6;
+}
+
+/* Room for the reveal button, on whichever side the language runs. */
+.auth__field:has(.auth__reveal) .auth__input {
+  padding-inline-end: 44px;
+}
+
+.auth__reveal {
+  position: absolute;
+  inset-inline-end: var(--space-1-5);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: none;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+}
+
+.auth__reveal:hover {
+  color: hsl(var(--foreground));
+}
+
+.auth__reveal:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: -2px;
+}
+
+/*
+ * Both outcomes share this line — a reset confirmation and a rejected password
+ * answer the same question, so they belong in the same place. Only the colour
+ * separates them.
+ */
+.auth__notice {
+  margin: 0;
+  padding-inline: var(--space-2);
+  color: hsl(var(--muted-foreground));
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+
+.auth__notice--error {
+  color: hsl(var(--error));
+}
+
+/*
+ * The one solid control on the screen, painted in the opposite of the page:
+ * near-black on the light theme, white on the dark one. Reading the colours off
+ * `--foreground` and `--background` is what makes that automatic instead of two
+ * hand-written variants that drift.
+ */
+.auth__submit {
+  width: 100%;
+  height: var(--control-h);
+  margin-top: var(--space-1);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  font-family: inherit;
+  font-size: var(--text-base);
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.auth__submit:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.auth__submit:active:not(:disabled) {
+  transform: scale(0.99);
+}
+
+.auth__submit:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Forgot password, and the way between the views. */
+.auth__link {
+  align-self: center;
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  background: none;
+  color: hsl(var(--muted-foreground));
+  font-family: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+/* "Forgot your password?" is the one people hunt for, so it is not whispered. */
+.auth__link--strong {
+  margin-top: var(--space-2);
+  color: hsl(var(--foreground));
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.auth__link:hover:not(:disabled) {
+  color: hsl(var(--foreground));
+}
+
+.auth__link:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* === Contact form === */
+
+.contact {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.contact__intro {
+  margin: 0;
+  color: hsl(var(--muted-foreground));
+  font-size: var(--text-base);
+  line-height: 1.45;
+}
+
+.contact__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1-5);
+}
+
+.contact__label {
+  font-size: var(--text-sm);
+  color: hsl(var(--muted-foreground));
+}
+
+.input {
+  width: 100%;
+  /* A altura unica do painel. Sem ela a caixa saia 1px mais baixa que as
+     vizinhas e variava com a metrica da fonte do sistema. */
+  height: var(--control-h);
+  padding: 0 var(--space-3);
+  border: 1px solid hsl(var(--input));
+  border-radius: var(--radius-md);
+  background: hsl(var(--input-bg));
+  color: hsl(var(--foreground));
+  font-family: inherit;
+  font-size: var(--text-base);
+  outline: none;
+  transition: border-color 120ms ease;
+}
+
+.input::placeholder {
+  color: hsl(var(--muted-foreground));
+}
+
+.input:focus {
+  border-color: hsl(var(--primary));
+}
+
+.input--area {
+  resize: vertical;
+  min-height: 110px;
+  line-height: 1.45;
+}
+
+/* The native select arrow sits flush against the border and ignores padding.
+   Replacing it with our own chevron is the only way to give it breathing room
+   — and it also stops the arrow from being the OS's instead of the design's. */
+select.input {
+  appearance: none;
+  padding-inline-end: 34px;
+  background-image: var(--chevron);
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 16px;
+}
+
+[dir="rtl"] select.input {
+  background-position: left 12px center;
+}
+
+.contact__error {
+  margin: 0;
+  color: hsl(var(--error));
+  font-size: var(--text-sm);
+}
+
+.set__version {
+  margin: 0;
+  padding-bottom: var(--space-4);
+  text-align: center;
+  font-size: var(--text-xs);
+  color: hsl(var(--muted-foreground));
+}
+
+/* === Header === */
+
+/* One rhythm in both axes: 16px between every block and 16px on the sides,
+   so the grid reads as deliberate instead of nearly-aligned. */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-4);
+}
+
+/* === Time zone picker (combobox with search) === */
+
+.timezone {
+  position: relative;
+}
+
+/* Bordered control, like Obtraders' `rounded-lg border border-input bg-secondary`. */
+.tz__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 220px;
+  /* Matches .iconbtn so both header controls sit on the same baseline. */
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid hsl(var(--input));
+  border-radius: var(--radius-lg);
+  background: hsl(var(--secondary));
+  color: hsl(var(--foreground));
+  font-family: inherit;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.tz__value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tz__chevron {
+  flex-shrink: 0;
+  color: hsl(var(--muted-foreground));
+}
+
+.tz__trigger:hover,
+.tz__trigger[aria-expanded="true"] {
+  border-color: hsl(var(--muted-foreground));
+}
+
+.tz__trigger:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 1px;
+}
+
+.tz__popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  inset-inline-start: 0;
+  z-index: 20;
+  width: 260px;
+  max-width: calc(100vw - 32px);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-lg);
+  background: hsl(var(--card));
+  box-shadow: 0 12px 28px hsl(0 0% 0% / 0.4);
+  overflow: hidden;
+}
+
+.tz__search {
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-bottom: 1px solid hsl(var(--border));
+  background: transparent;
+  color: hsl(var(--foreground));
+  font-family: inherit;
+  font-size: var(--text-base);
+  outline: none;
+}
+
+.tz__search::placeholder {
+  color: hsl(var(--muted-foreground));
+}
+
+.tz__list {
+  margin: 0;
+  padding: var(--space-1);
+  max-height: 240px;
+  overflow-y: auto;
+  list-style: none;
+  scrollbar-width: none;
+}
+
+.tz__list::-webkit-scrollbar {
+  width: 0;
+}
+
+.tz__option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 7px var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-base);
+  cursor: pointer;
+}
+
+.tz__option[data-active="true"] {
+  background: hsl(var(--muted));
+}
+
+.tz__option[aria-selected="true"] .tz__city {
+  color: hsl(var(--primary));
+}
+
+.tz__city {
+  color: hsl(var(--foreground));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tz__offset {
+  flex-shrink: 0;
+  color: hsl(var(--muted-foreground));
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+/* === Sponsored broker banner ===
+   Gradient and CTA pill copied from Obtraders' BullexBanner. */
+
+.banner {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  align-items: center;
+  min-height: 96px;
+  margin: 0 var(--space-4) var(--space-4);
+  padding: 12px var(--space-4);
+  border-radius: var(--radius-2xl);
+  /* A cor do patrocinador mora nesta variavel e em nenhum outro lugar: o CTA e
+     o halo a consomem daqui, entao trocar de corretora e trocar uma linha. */
+  --banner-brand: 345 100% 42%; /* #D60036 — Quotex */
+  /* Card com um halo da marca por tras, no lugar do bloco vermelho inteiro. A
+     identidade continua (logo, arte, CTA); o que sai e o gradiente ocupando
+     96px de um painel de 360. */
+  background:
+    radial-gradient(
+      120% 140% at 85% 50%,
+      hsl(var(--banner-brand) / 0.16),
+      transparent 75%
+    ),
+    hsl(var(--card));
+  /* Sem borda: o halo da marca ja e a forma do banner, e uma linha em volta so
+     brigava com ele. */
+  text-decoration: none;
+  overflow: hidden;
+  transition: transform 120ms ease;
+}
+
+.banner:active {
+  transform: scale(0.985);
+}
+
+.banner:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 2px;
+}
+
+.banner__content {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  min-width: 0;
+}
+
+/* 135:35 e a proporcao do proprio logo.
+   O lockup toma a cor do texto do painel em vez de branco fixo: no card claro
+   um logo branco simplesmente nao existia. Continua chapado — a marca envia o
+   simbolo em vermelho, que sumiria contra o halo. */
+.banner__logo {
+  display: block;
+  width: 85px;
+  height: 22px;
+  background: hsl(var(--foreground));
+  -webkit-mask: url("/assets/quotex-logo.svg") no-repeat left center / contain;
+  mask: url("/assets/quotex-logo.svg") no-repeat left center / contain;
+}
+
+/* Peso normal: com o lockup fazendo de titulo, esta linha e apoio. Em 500 ela
+   disputava a leitura com a marca logo acima. */
+.banner__subtitle {
+  margin: 4px 0 0;
+  font-size: var(--text-base);
+  font-weight: 400;
+  line-height: 16px;
+  color: hsl(var(--muted-foreground));
+}
+
+.banner__cta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  height: 24px;
+  margin-top: 12px;
+  padding: 0 12px;
+  border-radius: var(--radius-full);
+  background: hsl(var(--banner-brand));
+  color: #fff;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: 1;
+}
+
+/* The symbol, blown up and tilted, bleeding past the right edge. Painted via
+   `mask` rather than <img> so it takes a flat white at low opacity — the
+   brand red would fight the green gradient. */
+.banner__art {
+  position: absolute;
+  top: 50%;
+  inset-inline-end: -18px;
+  z-index: 0;
+  width: 150px;
+  height: 150px;
+  transform: translateY(-50%) rotate(-18deg);
+  /* A propria cor da marca, no volume em que ela e textura e nao mancha. O rosa
+     claro que estava aqui so funcionava sobre vermelho; sobre o card claro
+     desaparecia. */
+  background: hsl(var(--banner-brand));
+  opacity: 0.10;
+  -webkit-mask: url("/assets/quotex-symbol.svg") no-repeat center / contain;
+  mask: url("/assets/quotex-symbol.svg") no-repeat center / contain;
+  pointer-events: none;
+}
+
+/* === Segmented control (iOS-style tabs) === */
+
+/* Labelled card wrapping a control — Obtraders' "Sinais para" / "Ativo" cards. */
+/* Label and control share one row: two buttons never justified a stacked card
+   nearly 80px tall. */
+.field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0 var(--space-4);
+  padding: var(--space-1-5);
+  padding-inline-start: 12px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-lg);
+  background: hsl(var(--card));
+}
+
+/* Mesmo tratamento do rotulo da grade de corretoras logo abaixo: os dois
+   cartoes tem a mesma forma — rotulo a esquerda, controle segmentado a
+   direita — e tratar o texto de um jeito em cada um so le como descuido. */
+.field__label {
+  flex-shrink: 0;
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: 500;
+  color: hsl(var(--muted-foreground));
+}
+
+/* Encolhe ate o conteudo e encosta no fim, como o controle da grade de
+   corretoras. Esticado ate a borda ele ocupava dois tercos da faixa para
+   dizer "1M" e "5M". */
+.tabs {
+  flex: none;
+  margin-inline-start: auto;
+  /* Uma largura para os dois cartoes. Quem a define e o controle dos mercados,
+     que carrega a palavra mais longa ("Standard"); o de 1M/5M so acompanha. */
+  width: var(--segmento);
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: hsl(var(--segment-track));
+  border-radius: var(--radius-full);
+}
+
+.tabs__item {
+  /* Metade da largura do controle cada um, com folga generosa nas laterais.
+     O distintivo de nao lidos cabe dentro dessa metade em vez de empurra-la. */
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-1-5) var(--space-4);
+  border: 0;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  font-family: inherit;
+  font-size: var(--text-base);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.tabs__item:hover:not([aria-selected="true"]) {
+  color: hsl(var(--foreground));
+}
+
+.tabs__item[aria-selected="true"] {
+  background: hsl(var(--segment-active));
+  color: hsl(var(--foreground));
+  font-weight: 600;
+}
+
+.tabs__item:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 1px;
+}
+
+/* Unread counter — mirrors the tab that is not currently open. */
+.badge {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.badge[data-visible="true"] {
+  display: inline-flex;
+}
+
+/* === Signals table === */
+
+.panel {
+  flex: 1;
+  /* `min-height: 0` is what lets a flex child shrink below its content — the
+     default `auto` is why the table used to grow past the panel and push the
+     header off screen instead of scrolling. */
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-4);
+
+  /* Scroll stays functional but the bar is never painted — in a panel this
+     narrow the track steals width and cuts the last column. */
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* legacy Edge */
+}
+
+.panel::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+/* Everything above the list keeps its size; only the list gives way. */
+.header,
+.banner,
+.field,
+.footer {
+  flex-shrink: 0;
+}
+
+/* Card around the list — Obtraders' `rounded-lg border border-border bg-card`:
+   #141414 surface on the #0A0A0A page, outlined in #383838.
+
+   The card never grows past the space between the Timeframe box and the
+   footer: it caps at the panel height and scrolls internally, with the header
+   row pinned so the columns stay labelled while the list moves. */
+.card {
+  max-height: 100%;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-lg);
+  background: hsl(var(--card));
+  overflow-y: auto;
+  /* Ghost scroll, same as the panel — no track stealing width. */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.card::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-base);
+
+  /* Auto layout on purpose: the market is either all-OTC (weekends) or all
+     regular (weekdays), never mixed, so letting the columns follow the content
+     reclaims the width that "-OTC" would otherwise reserve for nothing. */
+  table-layout: auto;
+}
+
+/* No explicit widths: auto layout spreads the spare space proportionally
+   across the five columns, which keeps the spacing even. Parking the leftover
+   on a single column — Asset or Result — is what produced a visible gap. */
+
+.cell--asset {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Result sits flush with the right margin, header and pill on the same edge.
+   `width: 1%` shrinks the column to the pill itself, so the remaining space is
+   shared by the four text columns instead of opening a gap before the pill. */
+.col--result,
+.cell--result {
+  width: 1%;
+  white-space: nowrap;
+  text-align: end;
+}
+
+/* Every cell — header included — stays at regular weight so a long list reads
+   light. Meaning is carried by color alone, never by bolding. */
+.table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: hsl(var(--card));
+  padding: 10px var(--space-2);
+  text-align: start;
+  font-size: var(--text-base);
+  font-weight: 400;
+  color: hsl(var(--foreground));
+  border-bottom: 1px solid hsl(var(--border));
+  white-space: nowrap;
+}
+
+/* Roomier side padding — the abbreviated "Exp." header freed the width.
+   O respiro vertical faz o trabalho que a divisoria fazia antes de clarear:
+   sao 16px acima e abaixo que separam uma linha da seguinte. */
+.table tbody td {
+  padding: var(--space-4) var(--space-2);
+  font-weight: 400;
+  border-bottom: 1px solid hsl(var(--border));
+  white-space: nowrap;
+}
+
+.table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+/* The whole row is quiet grey; only the result carries color, so a win or a
+   loss is the single thing that catches the eye while scanning the list. */
+.cell--time,
+.cell--asset,
+.cell--direction,
+.cell--expiry {
+  color: hsl(var(--muted-foreground));
+}
+
+.cell--time,
+.cell--expiry {
+  font-variant-numeric: tabular-nums;
+}
+
+
+/* Result pill — tinted background with the text in the same hue, so it stays
+   legible in both themes without a second set of foreground colors. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 52px;
+  padding: 3px var(--space-2);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  line-height: 1.3;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.pill--win {
+  background: hsl(var(--success) / 0.14);
+  color: hsl(var(--success));
+}
+
+.pill--loss {
+  background: hsl(var(--error) / 0.14);
+  color: hsl(var(--error));
+}
+
+/* Ambar como o gale: "ainda nao aconteceu" nao e vitoria nem derrota, e nao
+   pode ler como nenhuma das duas. */
+.pill--wait,
+.pill--gale {
+  background: hsl(var(--warning) / 0.16);
+  color: hsl(var(--warning));
+}
+
+.pill--pending {
+  background: hsl(var(--muted-foreground) / 0.12);
+  color: hsl(var(--muted-foreground));
+}
+
+/* Holds the spinner instead of a word, so it keeps the pill's width without
+   the padding a label needs. */
+.pill--waiting {
+  padding-block: 5px;
+}
+
+/*
+ * The trade is running.
+ *
+ * One arc of a circle turning — the shape every interface uses for "working",
+ * so it needs no legend. Drawn with a border rather than an image or an SVG:
+ * it inherits the pill's colour, so it costs nothing and never goes stale.
+ */
+.spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: var(--radius-full);
+  /* Unhurried on purpose: this turns for minutes at a time in the corner of a
+     panel someone is trying to read. Fast reads as urgency, and there is none —
+     the trade is simply running. */
+  animation: spin 2s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+/* Motion in a table that redraws every few seconds is exactly what this setting
+   exists for. The circle stays, as a ring, and simply does not turn. */
+/* === Catalogador ===
+   Rotulo em cima e escolhas embaixo, e nao a linha do `.field`: cinco opcoes
+   dentro dos 176px do controle segmentado teriam de encolher ate o texto
+   cortar. Aqui elas quebram linha, que e o que uma escolha larga pede. */
+
+/* 16px entre blocos, o mesmo vao que separa banner, Timeframe e tabela na tela
+   de sinais — e a mesma folga que o painel usa nas laterais. */
+/* Quanto resta da cota gratuita, logo abaixo do titulo da tela. Fica fora do
+   `.catalogo` para nao entrar no `gap` dos grupos do formulario: pertence ao
+   titulo, e nao a primeira pergunta. */
+/* Logo abaixo do botao que a gasta, centrada com ele. O `margin-top` pequeno
+   e negativo contra o `gap` do formulario: as duas coisas sao uma so, e o vao
+   entre grupos aqui as separaria. */
+/* Colada ao botao que a gasta, e centrada com ele. A margem negativa cancela
+   quase todo o `gap` do formulario: o contador e o botao sao uma coisa so, e o
+   vao que separa os grupos os separaria tambem. */
+.cota {
+  margin: calc(var(--space-1-5) - var(--space-4)) 0 0;
+  font-size: var(--text-xs);
+  color: hsl(var(--muted-foreground));
+  text-align: center;
+}
+
+.catalogo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.catalogo__grupo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-lg);
+  background: hsl(var(--card));
+}
+
+.catalogo__rotulo {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: 500;
+  color: hsl(var(--muted-foreground));
+}
+
+/* Colunas iguais ocupando a linha inteira, quantas forem: duas em "Sinais
+   para", tres em "Direcao", cinco em "Assertividade". `grid-auto-columns` faz
+   a divisao sem ninguem contar opcao. */
+.catalogo__opcoes {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: var(--space-1-5);
+}
+
+/* Colunas iguais: os codigos de ativo tem largura parecida, e uma grade le
+   melhor que trinta e duas pilulas de tamanhos diferentes quebrando linha. */
+.catalogo__ativos {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-1-5);
+}
+
+.escolha {
+  /* Mesma altura e mesma fonte de todo controle do painel: `--control-h` e o
+     token que os dez outros ja usam, e o corpo e sempre `--text-base`. Sao
+     caixas de conteudo, nao rotulos. */
+  height: var(--control-h);
+  /* Folga lateral curta porque a largura vem da coluna: com cinco opcoes
+     sobram ~56px cada, e 12px de cada lado nao caberiam com "100%". */
+  padding-inline: var(--space-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-md);
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
+  font-family: inherit;
+  font-size: var(--text-base);
+  font-weight: 400;
+  line-height: 1.2;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+/* Hover e marcado sao a mesma cor, como no Obtraders: o ponteiro mostra o que
+   a caixa vai virar se for clicada, e a selecao se le pela caixa que continua
+   clara quando o ponteiro sai.
+
+   A borda some nos dois — `transparent` e nao `none`, para a caixa nao encolher
+   um pixel ao acender. Faz sentido: em repouso a borda e o que da forma; cheia,
+   o preenchimento ja da, e a borda so endurece a silhueta. */
+.escolha:hover:not([aria-pressed="true"]) {
+  background: hsl(var(--segment-active));
+  border-color: transparent;
+  color: hsl(var(--foreground));
+}
+
+/* `--segment-active` e o token que o painel ja usa para "esta e a escolhida",
+   nas abas 1M/5M. Com `--muted` a 75% a caixa subia 8 niveis sobre o cartao;
+   com este ela sobe 21, que e o contraste que a tela de sinais ja validou. */
+.escolha[aria-pressed="true"] {
+  background: hsl(var(--segment-active));
+  border-color: transparent;
+  color: hsl(var(--foreground));
+}
+
+.escolha:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 2px;
+}
+
+/* Peso 600 como `.auth__submit` e `.prem__cta`: os tres sao o envio principal
+   da tela em que vivem.
+
+   Canto arredondado e nao pilula, e azul e nao branco: e o botao do
+   catalogador do Obtraders. */
+.catalogo__enviar {
+  width: 100%;
+  height: var(--control-h);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  font-family: inherit;
+  font-size: var(--text-base);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.catalogo__enviar:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.catalogo__enviar:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 2px;
+}
+
+/* --- a resposta --- */
+
+/* A saida e UM cartao, e nao quatro pecas coladas: a borda e o raio moram
+   aqui, e as pecas dentro so se separam com uma linha. Antes cada uma
+   arredondava a propria ponta, e bastava a paginacao sumir — uma pagina so —
+   para a tabela terminar em canto vivo. */
+.catalogo__saida {
+  display: flex;
+  flex-direction: column;
+  margin-top: var(--space-4);
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.catalogo__resumo {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: hsl(var(--muted-foreground));
+}
+
+.catalogo__resumo[data-erro] {
+  color: hsl(var(--error));
+}
+
+/* Cabecalho da saida: o que foi catalogado, quando, e o botao de copiar.
+   `relative` porque o aviso de copiado sobe a partir daqui. */
+.saida__cabeca {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: hsl(var(--card));
+}
+
+.saida__titulo {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: 600;
+}
+
+.saida__data {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 3px 0 0;
+  font-size: var(--text-sm);
+  color: hsl(var(--muted-foreground));
+}
+
+.saida__data .icon {
+  flex-shrink: 0;
+}
+
+.saida__copiar {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  /* A altura de todo controle do painel. Em 32 ele era o unico botao fora do
+     `--control-h`. */
+  height: var(--control-h);
+  padding-inline: var(--space-3);
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: hsl(var(--foreground));
+  font-family: inherit;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.saida__copiar:hover:not(:disabled) {
+  border-color: hsl(var(--muted-foreground) / 0.45);
+}
+
+/* Desabilitado e nao escondido: o botao ensina que ha algo a selecionar. */
+.saida__copiar:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.saida__copiar:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 2px;
+}
+
+/* Desenhada a mao: a nativa traz moldura do sistema e nao aceita o recuo que
+   todo controle desta tela usa. */
+/* O aviso de copiado.
+   Ancorado no cabecalho da saida, subindo por cima dele: quem acabou de clicar
+   esta olhando para o botao, e o aviso aparece na mesma altura do olho. */
+.copiado {
+  position: absolute;
+  inset-block-start: -14px;
+  inset-inline-start: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  padding: 7px var(--space-3);
+  border-radius: var(--radius-full);
+  background: hsl(var(--segment-active));
+  box-shadow: 0 6px 18px hsl(0 0% 0% / 0.45);
+  font-size: var(--text-sm);
+  color: hsl(var(--foreground));
+  white-space: nowrap;
+}
+
+/* O tique vem branco dentro de um disco verde, e nao verde solto: em 13px um
+   tique sem fundo some contra a pilula escura. */
+.copiado .icon {
+  flex-shrink: 0;
+  padding: 2px;
+  border-radius: var(--radius-full);
+  background: hsl(var(--success));
+  color: #fff;
+  box-sizing: content-box;
+}
+
+.marcar {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  border: 1px solid hsl(var(--border));
+  /* Quadrada: 8px de raio numa caixa de 16 a deixava redonda. */
+  border-radius: 3px;
+  background: hsl(var(--card));
+  cursor: pointer;
+}
+
+.marcar:checked {
+  border-color: transparent;
+  background: hsl(var(--primary));
+  /* O tique e uma mascara e nao um caractere: em 16px uma fonte varia demais
+     entre sistemas. */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E");
+  background-size: 12px;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+.marcar:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 2px;
+}
+
+/* A tabela rola dentro do cartao. Sem isto o `overflow: hidden` do cartao,
+   que existe para recortar o raio, cortava a ultima coluna em silencio quando
+   os rotulos eram longos — o arabe e o alemao chegavam la primeiro.
+
+   A barra fica invisivel, como em todo o painel: neste largura ela roubaria a
+   coluna que se quer mostrar. */
+.catalogo__rolagem {
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.catalogo__rolagem::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+/* Layout automatico, que e o padrao: com colunas iguais o conteudo desigual
+   abria buracos — "17:51" e "M1" nao pedem a mesma largura que "EURGBP". E a
+   mesma escolha da tabela de sinais, e pelo mesmo motivo. */
+.catalogo__tabela {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: auto;
+  font-size: var(--text-base);
+  border-top: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+}
+
+.catalogo__tabela th,
+.catalogo__tabela td {
+  padding: 10px var(--space-2);
+  text-align: start;
+  white-space: nowrap;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.catalogo__tabela tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+/* O cabecalho nomeia as colunas e fica branco; os dados abaixo ficam cinza. E
+   a mesma relacao da tabela de sinais. */
+.catalogo__tabela th {
+  font-weight: 400;
+  font-size: var(--text-sm);
+  color: hsl(var(--foreground));
+}
+
+.catalogo__tabela td {
+  color: hsl(var(--muted-foreground));
+}
+
+/* A coluna da caixa encolhe ate ela: `width: 1%` num layout automatico e o
+   jeito de dizer "so o necessario". */
+.col--marcar {
+  width: 1%;
+  padding-inline-end: 0;
+}
+
+.catalogo__tabela tbody tr {
+  cursor: pointer;
+}
+
+.catalogo__tabela tbody tr:hover {
+  background: hsl(var(--muted-foreground) / 0.06);
+}
+
+/* Ocupa o lugar da paginacao quando a busca nao acha nada, e fecha o bloco
+   igual a ela — o cabecalho acima continua dizendo o que foi perguntado. */
+.catalogo__vazio {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-4) var(--space-3);
+  border-top: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+  text-align: center;
+}
+
+.catalogo__vazio-titulo {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: 500;
+  color: hsl(var(--foreground));
+}
+
+.catalogo__vazio-dica {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.4;
+  color: hsl(var(--muted-foreground));
+}
+
+/* A hora e a ancora da leitura: e por ela que se procura na lista. O peso
+   basta para isso — a cor e a mesma do resto da linha. */
+.catalogo__hora {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+
+/* === Controles de passo: dias e paginacao ===
+   Os dois sao a mesma coisa — recuar, um valor, avancar — entao dividem a
+   regra em vez de manterem duas copias parecidas que divergem no primeiro
+   ajuste feito em uma delas.
+
+   Tres caixas soltas e nao um bloco repartido: cada uma tem a propria borda,
+   como as caixas de escolha do formulario. E o desenho do Obtraders. */
+.contador,
+.paginas {
+  display: grid;
+  grid-template-columns: var(--control-h) 1fr var(--control-h);
+  gap: var(--space-2);
+}
+
+/* A paginacao fecha o bloco da tabela, entao ela mesma e um cartao. O contador
+   ja mora dentro de um. */
+.paginas {
+  padding: var(--space-3);
+  border-top: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+}
+
+.contador__passo,
+.contador__valor,
+.paginas__passo,
+.paginas__conta {
+  height: var(--control-h);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-md);
+  background: hsl(var(--card));
+}
+
+.contador__passo,
+.paginas__passo {
+  color: hsl(var(--foreground));
+  font-family: inherit;
+  font-size: var(--text-lg);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.contador__passo:hover:not(:disabled),
+.paginas__passo:hover:not(:disabled) {
+  background: hsl(var(--segment-active));
+  border-color: transparent;
+}
+
+/* Desabilitado nas pontas em vez de clicavel sem efeito: um botao que nao faz
+   nada parece quebrado. */
+.contador__passo:disabled,
+.paginas__passo:disabled {
+  color: hsl(var(--muted-foreground) / 0.4);
+  cursor: default;
+}
+
+.contador__passo:focus-visible,
+.paginas__passo:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 2px;
+}
+
+.contador__valor,
+.paginas__conta {
+  font-size: var(--text-base);
+  font-variant-numeric: tabular-nums;
+  color: hsl(var(--foreground));
+}
+
+.contador__valor {
+  font-weight: 500;
+}
+
+
+/* === Checklist ===
+   Reaproveita `.catalogo` inteiro — os grupos, as caixas, a tabela, a
+   paginacao. So o que nao existe la mora aqui. */
+
+.campo-data,
+.campo-lista {
+  width: 100%;
+  padding: 0 var(--space-3);
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-md);
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
+  font-family: inherit;
+  font-size: var(--text-base);
+}
+
+.campo-data {
+  height: var(--control-h);
+}
+
+/* Sem `filter: invert()`: o `color-scheme` da raiz ja entrega o icone e o
+   calendario no tema certo. */
+.campo-data::-webkit-calendar-picker-indicator {
+  opacity: 0.55;
+  cursor: pointer;
+}
+
+.campo-data::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}
+
+.campo-lista {
+  padding-block: var(--space-3);
+  line-height: 1.5;
+  resize: vertical;
+
+  /* Barra invisivel, como em todo o resto do painel: numa coluna de 360px o
+     trilho rouba largura da propria lista que ele deveria ajudar a ler. */
+  scrollbar-width: none;
+  /* Uma lista colada vem em colunas alinhadas por espaco: em fonte
+     proporcional elas desalinham e a pessoa acha que colou errado. */
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--text-sm);
+}
+
+.campo-lista::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.campo-data:focus-visible,
+.campo-lista:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 2px;
+}
+
+.checklist__acoes {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.checklist__acoes .catalogo__enviar {
+  flex: 1;
+}
+
+.checklist__limpar {
+  flex-shrink: 0;
+  height: var(--control-h);
+  padding-inline: var(--space-4);
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-md);
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
+  font-family: inherit;
+  font-size: var(--text-base);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.checklist__limpar:hover {
+  background: hsl(var(--segment-active));
+  border-color: transparent;
+}
+
+/* --- o placar --- */
+
+.placar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-top: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+}
+
+.placar__trio {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-2);
+}
+
+.placar__medida {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: var(--space-2);
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-md);
+}
+
+.placar__rotulo {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
+}
+
+.placar__valor {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.placar__medida--win .placar__valor { color: hsl(var(--success)); }
+.placar__medida--loss .placar__valor { color: hsl(var(--error)); }
+.placar__medida--wait .placar__valor { color: hsl(var(--warning)); }
+
+/* === Barra de abas do aplicativo ===
+   Tres destinos e nada mais. Ajustes, assinatura e o fluxo de entrada nao sao
+   pares destes: abrem por cima, e a barra se esconde enquanto estao no ar. */
+
+.abas-app {
+  flex-shrink: 0;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  border-top: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+}
+
+.aba-app {
+  padding: 12px var(--space-2);
+  border: 0;
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  font-family: inherit;
+  font-size: var(--text-sm);
+  font-weight: 400;
+  cursor: pointer;
+  /* A linha de cima marca a aba ativa sem mover nada: uma borda so na ativa
+     empurraria o texto das outras em um pixel. */
+  border-top: 2px solid transparent;
+  margin-top: -1px;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+
+.aba-app:hover:not([aria-current="true"]) {
+  color: hsl(var(--foreground));
+}
+
+.aba-app[aria-current="true"] {
+  color: hsl(var(--foreground));
+  border-top-color: hsl(var(--primary));
+}
+
+.aba-app:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: -2px;
+}
+
+/* Uma linha so: o nome da aba ja esta escrito na barra de baixo, entao o topo
+   da tela diz o que ela faz em vez de repeti-lo. */
+.header--titulo {
+  padding-block: var(--space-2) var(--space-3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+    border-top-color: currentColor;
+    opacity: 0.5;
+  }
+}
+
+/* Martingale rounds — the signal is still open, but no longer on its first
+   try. Amber sits between the neutral grey of PENDING and the red of a loss. */
+/* === Empty state === */
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  padding: 48px var(--space-4);
+  text-align: center;
+  color: hsl(var(--muted-foreground));
+  font-size: var(--text-sm);
+}
+
+/* The browser's own paragraph margins land on top of the gap above, which
+   turns a 4px rhythm into a 30px one. Spacing here is the flex gap's job. */
+.empty p {
+  margin: 0;
+  /* Honours the line breaks written into the copy — where a sentence ends is a
+     decision the translation makes, not the column width. Long lines still wrap
+     on their own. */
+  white-space: pre-line;
+}
+
+/* The one exception to the gap: an icon needs a little more air under it than
+   two lines of text need between them. Set here rather than on the title, which
+   `.empty p` would outrank. */
+.empty svg {
+  margin-bottom: var(--space-1);
+}
+
+.empty__title {
+  color: hsl(var(--foreground));
+  font-size: var(--text-base);
+  font-weight: 500;
+}
+
+/* Sits under the explanation, never above it: the offer only makes sense once
+   someone knows why the table is empty. */
+.empty__action:hover {
+  opacity: 0.9;
+}
+
+.empty__action {
+  margin-top: var(--space-4);
+  height: var(--control-h);
+  padding-inline: var(--space-4);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  font-family: inherit;
+  font-size: var(--text-base);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+/* === Where to trade these signals ===
+   The footer stopped naming the compatible brokers in a tooltip and became the
+   brokers themselves. Same information, one layer less to open, and the
+   partner link travels with the name it belongs to. */
+
+/* Sem folga no topo: `.panel` ja fecha com 16px abaixo da tabela, e somar mais
+   16 aqui abria um vao de 32 contra os 16 das laterais. O que sobra e a folga
+   dos lados e do fim, igual a de todo o resto do painel. */
+.footer {
+  padding: 0 var(--space-4) var(--space-4);
+}
+
+.corretoras {
+  /* Ancora da bolha do ⓘ, que sobe a partir daqui. */
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-lg);
+  background: hsl(var(--card));
+}
+
+/* Title and markets share a row, exactly like the "Timeframe" field above it:
+   label taking the slack, control pinned to the end. */
+.corretoras__cabeca {
+  display: flex;
+  align-items: center;
+  /* Vao curto: o ⓘ pertence ao titulo, nao a faixa. O controle segmentado se
+     afasta sozinho, pela margem automatica dele. */
+  gap: var(--space-1-5);
+}
+
+/* === Gatilho ⓘ e bolha ===
+   O titulo virou uma palavra so para o controle segmentado caber respirando na
+   mesma linha. O que a palavra deixou de dizer — que sao as corretoras em que
+   estes sinais funcionam, e o que separa o mercado padrao do OTC — passa a
+   morar aqui.
+
+   O aviso de comissao NAO entra nesta bolha: uma divulgacao que exige um clique
+   para aparecer nao alcanca quem nao clicou. */
+
+.info {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid hsl(var(--muted-foreground) / 0.5);
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  font-family: inherit;
+  font-size: 10px;
+  font-style: italic;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+
+.info:hover,
+.info:focus-visible {
+  color: hsl(var(--foreground));
+  border-color: hsl(var(--foreground));
+}
+
+.info:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 2px;
+}
+
+/* Sobe a partir do cartao: a grade mora no rodape, e nao ha espaco abaixo. */
+.tooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  inset-inline: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-lg);
+  background: hsl(var(--card));
+  box-shadow: 0 8px 24px hsl(0 0% 0% / 0.35);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  color: hsl(var(--foreground));
+  text-align: start;
+}
+
+.tooltip p {
+  margin: 0;
+}
+
+.tooltip__group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tooltip__label {
+  font-weight: 600;
+}
+
+.tooltip__value {
+  color: hsl(var(--muted-foreground));
+}
+
+/* Cinza como o rotulo do Timeframe: os dois nomeiam um controle, e nenhum dos
+   dois e o assunto do cartao — o assunto sao as corretoras logo abaixo. */
+/* A esquerda do cabecalho: nome e aviso, um sobre o outro e bem juntos. */
+.corretoras__nome {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.corretoras__linha {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1-5);
+}
+
+.corretoras__titulo {
+  /* Encolhe ate o texto para o ⓘ ficar encostado nele. */
+  flex: 0 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: 500;
+  color: hsl(var(--muted-foreground));
+}
+
+/* Four boxes stay in view and the rest scrolls. The height comes from the
+   arithmetic of the rows rather than a loose number, so showing six one day is
+   changing the multiplier.
+
+   `--respiro` is padding on the scroll box itself, not a margin on the card:
+   that is what keeps a row from ever resting flush against the clip. Without
+   it the last row lands with its border exactly on the cut and reads as
+   truncated, which is the one thing a bordered box must never look like. */
+.corretoras__lista {
+  /* 38 era um numero meu. `--control-h` e o do painel. */
+  --linha: var(--control-h);
+  --vao: var(--space-1-5);
+  --respiro: var(--space-1-5);
+
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-auto-rows: var(--linha);
+  gap: var(--vao);
+
+  padding-block: var(--respiro);
+  max-height: calc(var(--linha) * 2 + var(--vao) + var(--respiro) * 2);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+
+  /* The bar is always hidden: in a 360px column the track steals width from
+     the very list it is supposed to help read. */
+  scrollbar-width: none;
+}
+
+.corretoras__lista::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.corretora {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  padding-inline: 10px;
+  /* Mesma caixa do catalogador: superficie do cartao, borda em repouso, e nome
+     em branco — o nome da corretora e conteudo, nao rotulo. */
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-md);
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
+  font-size: var(--text-base);
+  font-weight: 400;
+  text-decoration: none;
+  /* The name is what has to survive a narrow column, not the arrow. */
+  overflow: hidden;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.corretora > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* `transparent` e nao `none`: com `none` a caixa encolheria 2px ao acender e a
+   fileira inteira daria um pulo. */
+.corretora:hover {
+  background: hsl(var(--segment-active));
+  border-color: transparent;
+  color: hsl(var(--foreground));
+}
+
+.corretora:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 2px;
+}
+
+.corretora__seta {
+  flex-shrink: 0;
+  margin-inline-start: auto;
+  color: hsl(var(--muted-foreground));
+}
+
+.corretora:hover .corretora__seta {
+  color: hsl(var(--foreground));
+}
+
+/* The one line that is not a design choice: without it, clicking a partner
+   link is not an informed click. It sits right under the title, above the
+   links it describes — never behind the ⓘ, and never below the scroll. */
+.corretoras__aviso {
+  margin: 0;
+  font-size: var(--text-xs);
+  font-style: italic;
+  line-height: 1.4;
+  /* `start` e nao `left`: em arabe o painel inteiro espelha. */
+  text-align: start;
+  color: hsl(var(--muted-foreground));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+  }
+}
+
+
+/* =============================================================================
+   Right-to-left (Arabic)
+
+   Everything above uses logical properties, so it flips on its own. What
+   remains here are the three things CSS has no logical form for: transforms,
+   mask position and a directional gradient.
+   ============================================================================= */
+
+[dir="rtl"] .switch:checked::after {
+  transform: translateX(-16px);
+}
+
+[dir="rtl"] .banner__logo {
+  -webkit-mask-position: right center;
+  mask-position: right center;
+}
+
+[dir="rtl"] .banner__art {
+  transform: translateY(-50%) rotate(18deg) scaleX(-1);
+}
+
+/* Back arrows and chevrons point the other way when reading right to left. */
+[dir="rtl"] .iconbtn svg,
+[dir="rtl"] .row > .icon:last-child,
+[dir="rtl"] .row__right .icon {
+  transform: scaleX(-1);
+}
+
+/* =============================================================================
+   Danger zone.
+
+   Deleting an account ends a subscription and erases a record. The screen is
+   built to be slow: red only on the button that does it, and that button stays
+   dead until both fields are typed out.
+   ============================================================================= */
+
+.danger {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding-top: var(--space-2);
+}
+
+.danger__warning {
+  margin: 0;
+  color: hsl(var(--error));
+  font-size: var(--text-base);
+  font-weight: 500;
+}
+
+.danger__list {
+  margin: 0;
+  padding-inline-start: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1-5);
+  color: hsl(var(--muted-foreground));
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+
+.danger__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1-5);
+}
+
+.danger__label {
+  color: hsl(var(--muted-foreground));
+  font-size: var(--text-sm);
+  line-height: 1.4;
+}
+
+.danger__input {
+  width: 100%;
+  height: var(--control-h);
+  padding-inline: var(--space-4);
+  border: 1px solid hsl(var(--input));
+  border-radius: var(--radius-md);
+  background: hsl(var(--input-bg));
+  color: hsl(var(--foreground));
+  font-family: inherit;
+  font-size: var(--text-base);
+}
+
+.danger__input:focus {
+  outline: none;
+  border-color: hsl(var(--error));
+}
+
+.danger__notice {
+  margin: 0;
+  color: hsl(var(--error));
+  font-size: var(--text-sm);
+}
+
+/* The only red control in the extension, and the only one that is red before
+   it can be used — disabled it reads as a warning, enabled as a decision. */
+.danger__button {
+  width: 100%;
+  height: var(--control-h);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: hsl(var(--error));
+  color: #fff;
+  font-family: inherit;
+  font-size: var(--text-base);
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 120ms ease;
+}
+
+.danger__button:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.danger__button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* The terms sentence under the sign-up button. Quiet, but not hidden: it has to
+   be visible for clicking the button above to count as accepting them. */
+.auth__terms {
+  margin: calc(var(--space-1) * -1) 0 0;
+  padding-inline: var(--space-2);
+  color: hsl(var(--muted-foreground));
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  text-align: center;
+}
+
+.auth__legal {
+  color: hsl(var(--foreground));
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* Read-only fields show a value the form does not ask for. Muted enough to read
+   as information, not as an input someone failed to fill in. */
+.input[readonly] {
+  color: hsl(var(--muted-foreground));
+  cursor: default;
+}
+
+/* === FAQ ===================================================================
+   Sanfonado nativo: `<details>` ja abre, fecha, responde ao teclado e se
+   anuncia ao leitor de tela. Escrever isso a mao seria trocar comportamento
+   pronto e correto por comportamento nosso e por manter. */
+
+/* Duas linhas no lugar de uma: o nome da aba em cima, o que a tela e embaixo.
+   Antes o segundo ficava solto no corpo, e a pessoa lia a mesma ideia em dois
+   lugares separados por uma borda. */
+.header__title--duplo {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.2;
+}
+
+.header__sub {
+  font-size: var(--text-xs);
+  font-weight: 400;
+  color: hsl(var(--muted-foreground));
+}
+
+.faq {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.faq__item {
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-lg);
+  background: hsl(var(--card));
+}
+
+.faq__pergunta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  font-size: var(--text-base);
+  font-weight: 500;
+  line-height: 1.4;
+  cursor: pointer;
+  /* Os dois: o triangulo nativo e `list-style` na maioria dos navegadores e um
+     pseudo-elemento proprio no WebKit. */
+  list-style: none;
+}
+
+.faq__pergunta::-webkit-details-marker {
+  display: none;
+}
+
+/* Mais e menos, como no site. Um caractere resolve o que um icone pediria em
+   dois arquivos e uma troca de `innerHTML` a cada abrir. */
+.faq__pergunta::after {
+  content: "+";
+  flex-shrink: 0;
+  font-size: var(--text-lg);
+  font-weight: 400;
+  color: hsl(var(--muted-foreground));
+}
+
+.faq__item[open] .faq__pergunta::after {
+  content: "−";
+}
+
+.faq__pergunta:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: -2px;
+  border-radius: var(--radius-lg);
+}
+
+/* `pre-line` porque varias respostas tem mais de um paragrafo, e a quebra faz
+   parte do sentido — a do martingale e uma lista de tres. Assim a traducao
+   guarda a quebra numa string comum, sem HTML dentro de arquivo de idioma. */
+.faq__resposta {
+  margin: 0;
+  padding: 0 var(--space-3) var(--space-3);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: hsl(var(--muted-foreground));
+  white-space: pre-line;
+}
+
+/* O botao do FAQ leva a palavra alem do simbolo: um ponto de interrogacao
+   sozinho pede que a pessoa adivinhe o que ha do outro lado. */
+.iconbtn--rotulo {
+  width: auto;
+  gap: var(--space-1);
+  padding-inline: var(--space-2);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}

@@ -1,0 +1,45 @@
+{
+"update_url": "https://clients2.google.com/service/update2/crx",
+
+  "manifest_version": 3,
+  "name": "Obsignals",
+  "version": "6.3.0",
+  "default_locale": "en",
+  "description": "__MSG_extension_description__",
+  "homepage_url": "https://obsignals.com",
+  "minimum_chrome_version": "114",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsK+pshzhSoXJjcPC5Cn2cpkS9C31lx0Tn8INjRtKsNqQ+aZkbeAfQP7Z2Ns9HFGV0Bl2Fim8prRgtKjVDmzYWZ9rEGu2s6v9pL/zD9gUfaXwdMnODF1uBQGOgZrI0ngzMzY8wClWP5Yr9HrF3I70IjRr+yNha41FaX/4B/8pT0jvsrkoECzCMG9iWnRGl/gGVDWWPB29rlWRDGIjM1RXe0DNrGq4lvQW0FqRm2gfO+JangBArs6VJKC2Nu/g8NF0GY/9SNwfip9KnjusA674fvdZatxJfM3K+JZu/YWBtNmU5TZOjMurSS3NT6PhtDzL4sAjXwzgNaiz70pcpT8E2QIDAQAB",
+  "permissions": [
+    "sidePanel",
+    "storage",
+    "notifications",
+    "alarms",
+    "identity"
+  ],
+  "host_permissions": [
+    "https://api.obsignals.com/*",
+    "https://auth.obsignals.com/*",
+    "https://securetoken.googleapis.com/*",
+    "https://identitytoolkit.googleapis.com/*"
+  ],
+  "background": {
+    "service_worker": "src/background/service-worker.js",
+    "type": "module"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "Obsignals",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "side_panel": {
+    "default_path": "src/sidepanel/index.html"
+  }
+}

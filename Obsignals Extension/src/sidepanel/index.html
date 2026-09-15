@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Obsignals</title>
+    <link rel="stylesheet" href="../styles/sidepanel.css" />
+  </head>
+  <body>
+    <div class="app">
+      <!-- Every screen lives side by side; only one is shown at a time. The
+           panel is a single window, so this is an internal swap, never a
+           popup or a new tab.
+
+           Three of them are tabs — signals, cataloguer, checklist — and the
+           bar at the bottom moves between them. The rest are flows opened from
+           the gear or by the session, and the bar hides while they are up. -->
+
+      <!-- Fuso e engrenagem valem para as tres abas, entao vivem fora delas,
+           como a barra de baixo. Sem isto o fuso ficaria preso na tela de
+           sinais e valeria em silencio para o catalogador.
+
+           Sem nome de produto: o Chrome ja escreve "Obsignals" com o icone na
+           propria barra de titulo do painel. -->
+      <header class="header" id="barra-topo" hidden>
+        <div class="timezone" id="timezone"></div>
+        <div class="header__right">
+          <button
+            type="button"
+            class="iconbtn iconbtn--rotulo"
+            id="open-faq"
+            data-i18n-label="faq.open"
+          ><span>FAQ</span></button>
+          <button
+            type="button"
+            class="iconbtn"
+            id="open-settings"
+            data-i18n-label="settings.open"
+          ></button>
+        </div>
+      </header>
+
+      <!-- ============ Signals ============ -->
+      <section class="screen" id="screen-signals">
+        <div id="banner"></div>
+
+        <!-- Timeframe lives in a labelled card, like the filter cards in
+             Obtraders, instead of floating loose above the list. -->
+        <div class="field">
+          <p class="field__label" data-i18n="tabs.label"></p>
+          <div class="tabs" id="tabs" role="tablist"></div>
+        </div>
+
+        <main class="panel" id="panel"></main>
+
+        <!-- A grade de corretoras e montada por components/broker-grid.js. -->
+        <footer class="footer" id="corretoras"></footer>
+      </section>
+
+      <!-- ============ Settings ============ -->
+      <section class="screen" id="screen-settings" hidden>
+        <header class="header header--nav">
+          <button
+            type="button"
+            class="iconbtn"
+            id="close-settings"
+            data-i18n-label="settings.back"
+          ></button>
+          <h1 class="header__title" data-i18n="settings.title"></h1>
+          <span class="header__spacer"></span>
+        </header>
+
+        <main class="panel" id="settings-body"></main>
+      </section>
+
+      <!-- ============ Premium ============ -->
+      <section class="screen" id="screen-premium" hidden>
+        <header class="header header--nav">
+          <span class="header__spacer"></span>
+          <h1 class="header__title header__title--icon">
+            <span class="prem__bolt" id="premium-bolt"></span>
+            <span data-i18n="premium.title"></span>
+          </h1>
+          <button
+            type="button"
+            class="iconbtn"
+            id="close-premium"
+            data-i18n-label="premium.close"
+          ></button>
+        </header>
+
+        <main class="panel" id="premium-body"></main>
+      </section>
+
+      <!-- ============ FAQ ============
+           Uma tela so para as tres abas: metade das perguntas serve as tres, e
+           tres telas seriam a mesma resposta escrita em tres lugares. -->
+      <section class="screen" id="screen-faq" hidden>
+        <header class="header header--nav">
+          <span class="header__spacer"></span>
+          <h1 class="header__title header__title--duplo" id="faq-titulo"></h1>
+          <button
+            type="button"
+            class="iconbtn"
+            id="close-faq"
+            data-i18n-label="faq.close"
+          ></button>
+        </header>
+
+        <main class="panel" id="faq-body"></main>
+      </section>
+
+      <!-- ============ Contact ============ -->
+      <section class="screen" id="screen-contact" hidden>
+        <header class="header header--nav">
+          <button
+            type="button"
+            class="iconbtn"
+            id="close-contact"
+            data-i18n-label="settings.back"
+          ></button>
+          <h1 class="header__title" data-i18n="contact.title"></h1>
+          <span class="header__spacer"></span>
+        </header>
+
+        <main class="panel" id="contact-body"></main>
+      </section>
+
+      <!-- ============ Change password ============ -->
+      <section class="screen" id="screen-password" hidden>
+        <header class="header header--nav">
+          <button
+            type="button"
+            class="iconbtn"
+            id="close-password"
+            data-i18n-label="settings.back"
+          ></button>
+          <h1 class="header__title" data-i18n="password.open"></h1>
+          <span class="header__spacer"></span>
+        </header>
+
+        <main class="panel" id="password-body"></main>
+      </section>
+
+      <!-- ============ Delete account ============ -->
+      <section class="screen" id="screen-danger" hidden>
+        <header class="header header--nav">
+          <button
+            type="button"
+            class="iconbtn"
+            id="close-danger"
+            data-i18n-label="settings.back"
+          ></button>
+          <h1 class="header__title" data-i18n="danger.title"></h1>
+          <span class="header__spacer"></span>
+        </header>
+
+        <main class="panel" id="danger-body"></main>
+      </section>
+
+      <!-- ============ Cataloguer ============ -->
+      <section class="screen" id="screen-cataloguer" hidden>
+        <header class="header header--titulo">
+          <h1 class="header__title" data-i18n="cataloguer.subtitle"></h1>
+        </header>
+        <main class="panel" id="cataloguer-body"></main>
+      </section>
+
+      <!-- ============ Checklist ============ -->
+      <section class="screen" id="screen-checklist" hidden>
+        <header class="header header--titulo">
+          <h1 class="header__title" data-i18n="checklist.subtitle"></h1>
+        </header>
+        <main class="panel" id="checklist-body"></main>
+      </section>
+
+      <!-- ============ Sign in ============
+           The gate, not a screen in the stack: nobody reaches the panel without
+           an account, so there is no header and nothing to go back to. -->
+      <section class="screen" id="screen-signin" hidden>
+        <main class="panel" id="signin-body"></main>
+      </section>
+
+      <!-- The other half of the gate. Signing in proves who; this proves the
+           address is reachable, which is what a subscription is claimed by. -->
+      <section class="screen" id="screen-verify" hidden>
+        <main class="panel" id="verify-body"></main>
+      </section>
+
+      <!-- A barra e montada por components/app-tabs.js. Fica fora das telas
+           de proposito: e o unico elemento que sobrevive a troca. -->
+      <nav class="abas-app" id="abas-app" hidden></nav>
+    </div>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

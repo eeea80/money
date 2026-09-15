@@ -1,0 +1,54 @@
+:root {
+  --primary-color: #1e3a8a;
+  --primary-brand: #1e3a8a;
+  --primary-interactive: #1e40af;
+  --primary-light: #3b82f6;
+  --primary-surface: #eff6ff;
+  --secondary-color: #6c757d;
+  --accent-color: #1e40af;
+  --background-card: #f9f9f9;
+  --background-main: #ffffff;
+  --background-gradient: linear-gradient(to right, rgba(30, 58, 138, 0.12), #ffffff, rgba(30, 58, 138, 0.12));
+  --text-color: #333333;
+  --text-primary: #333333;
+  --text-secondary: #6b7280;
+  --text-muted: #9ca3af;
+  --success-color: #28a745;
+  --success: #059669;
+  --warning: #d97706;
+  --error-color: #dc3545;
+  --error: #dc2626;
+  --quota-subscription: #1e40af;
+  --quota-boost: #ea580c;
+  --quota-warning: #d97706;
+  --quota-critical: #dc2626;
+  --feedback-default: #6b7280;
+  --feedback-hover: #374151;
+  --feedback-active: #1e40af;
+  --feedback-background-hover: #f3f4f6;
+  --feedback-background-active: #dbeafe;
+  --feedback-border: #e5e7eb;
+  --feedback-metadata: #9ca3af;
+  --surface-primary: #ffffff;
+  --surface-secondary: #f9fafb;
+  --surface-tertiary: #f3f4f6;
+  --border-subtle: #e5e7eb;
+  --border-medium: #d1d5db;
+  --border-strong: #9ca3af;
+  --modal-overlay: rgba(0, 0, 0, 0.5);
+  --modal-focus-ring: rgba(30, 58, 138, 0.1);
+  --font-family: "Segoe UI", "Roboto", Arial, sans-serif;
+  --border-radius: 16px;
+  --border-radius-button: 6px;
+  --border-radius-badge: 16px;
+
+  /* Modern shadow system - progressive elevation */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px 0 rgba(0, 0, 0, 0.03);
+  --shadow-lg: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+
+  /* Card shadow - softer, modern style with subtle border */
+  --card-shadow: var(--shadow-md);
+  --card-border: 1px solid rgba(0, 0, 0, 0.05);
+}

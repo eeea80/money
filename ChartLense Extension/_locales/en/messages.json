@@ -1,0 +1,14 @@
+{
+  "extensionName": {
+    "message": "ChartLense: AI Chart Analysis & Journaling",
+    "description": "Extension name"
+  },
+  "extensionDescription": {
+    "message": "AI chart analysis & daily journal for TradingView. Instant pattern recognition and trend insights — without leaving your chart.",
+    "description": "Short description shown in Chrome Web Store and extension management page"
+  },
+  "extensionFullDescription": {
+    "message": "In a single click, ChartLense™ delivers a complete technical analysis of any chart, turning complex data into clear, actionable insights. It's designed to cut through the noise and give you a fast and unbiased second opinion.\n\nHere's how ChartLense empowers your decisions:\n\n⏱️ ANALYZE FASTER, ACT SOONER\nGet a full analysis in under 10 seconds. Screen dozens of charts with the speed you need to catch more opportunities, saving an average of 4.5 minutes on every manual review.\n\n💡 Gain Unbiased Clarity & Conviction\nCut through market noise and eliminate indecision. Our objective, data-driven analysis helps you confirm your strategy and execute your trades or investments with confidence.\n\n🧠 Sharpen Your Market Insight\nLearn from the ChartLense™ analysis of live market structure. Train your eyes to spot high-potential setups and understand long-term trends, improving your own skills with every click.\n\nWORKS SEAMLESSLY ON:\n• TradingView\n• Stock3\n• Yahoo Finance\n• ...and many more.\n\nPERFECT FOR:\n→ Active Traders who need to screen charts efficiently and find high-probability setups.\n→ Long-term Investors seeking technical confirmation and optimal entry or exit points.\n→ Anyone wanting to learn from objective analysis and build confidence in their decisions.\n\nInstall ChartLense today and transform the way you see the market.\n\nSUPPORT\nNeed help? Feel free to contact our team at support@chartlense.com and we'll reply as soon as possible.",
+    "description": "Full detailed description for Chrome Web Store listing"
+  }
+}

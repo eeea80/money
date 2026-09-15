@@ -1,0 +1,1974 @@
+/* =========================================
+   ChartLense Modal Styles - Multi-Product Theming Support
+   ========================================= */
+
+/* Import generated CSS variables from theme configuration */
+@import './themes/generated-variables.css';
+
+/* =========================================
+   Specific Modal Implementations
+   ========================================= */
+
+/* Modal Container & Overlay */
+.auth-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: var(--modal-overlay);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 10000;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+.auth-modal.hidden {
+  display: none !important;
+}
+
+.auth-modal-content {
+  background: var(--surface-primary);
+  border-radius: 16px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  padding: 32px;
+  width: 100%;
+  max-width: 380px;
+  margin: 20px;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Universal Close Button - Enhanced with Better Accessibility */
+.modal-close {
+  position: absolute;
+  top: 16px;
+  right: 20px;
+  color: var(--text-secondary);
+  font-size: 20px;
+  font-weight: bold;
+  cursor: pointer;
+  line-height: 1;
+  background: none;
+  border: none;
+  padding: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  transition: all 0.2s ease;
+}
+
+.modal-close:hover,
+.modal-close:focus {
+  color: var(--text-primary);
+  background-color: var(--surface-tertiary);
+  text-decoration: none;
+}
+
+.modal-close:focus {
+  outline: 2px solid var(--primary-brand);
+  outline-offset: 2px;
+}
+
+/* Header Section */
+.auth-modal-header {
+  text-align: center;
+  margin-bottom: 24px;
+}
+
+.auth-modal-logo-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 8px;
+}
+
+.auth-modal-logo {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  margin-right: 8px;
+}
+
+.auth-modal-title {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.auth-modal-subtitle {
+  color: var(--text-secondary);
+  font-size: 14px;
+  margin: 0;
+  line-height: 1.4;
+}
+
+
+/* Google Authentication Button */
+.google-auth-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 16px;
+  border: 1px solid var(--border-medium);
+  border-radius: 16px;
+  background: var(--surface-primary);
+  cursor: pointer;
+  transition: all 0.3s ease;
+  margin-bottom: 16px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.google-auth-btn:hover {
+  background-color: var(--surface-secondary);
+  border-color: var(--border-strong);
+}
+
+.google-auth-btn:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--primary-brand), 0 0 0 4px var(--modal-focus-ring);
+}
+
+/* Enhanced Google Button - More Visual Weight */
+.google-auth-btn.enhanced {
+  background: var(--primary-brand);
+  color: white;
+  border-color: var(--primary-brand);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+  transform: scale(1.02);
+  font-weight: 600;
+}
+
+.google-auth-btn.enhanced:hover {
+  background: var(--primary-interactive);
+  border-color: var(--primary-interactive);
+  box-shadow: 0 6px 16px rgba(16, 185, 129, 0.4);
+  transform: scale(1.02);
+}
+
+.google-auth-btn svg {
+  margin-right: 12px;
+  width: 20px;
+  height: 20px;
+}
+
+
+/* Divider */
+.auth-divider {
+  display: flex;
+  align-items: center;
+  margin: 16px 0;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border-subtle);
+}
+
+.auth-divider span {
+  padding: 0 8px;
+  font-size: 12px;
+  color: #9ca3af;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+/* Form Section */
+.email-auth-section {
+  margin-bottom: 16px;
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.auth-form input[type="email"],
+.auth-form input[type="password"] {
+  width: 100%;
+  padding: 12px 16px;
+  border: 1px solid #d1d5db;
+  border-radius: 16px;
+  font-size: 14px;
+  transition: all 0.3s ease;
+  box-sizing: border-box;
+}
+
+.auth-form input[type="email"]:focus,
+.auth-form input[type="password"]:focus {
+  outline: none;
+  border-color: var(--primary-brand);
+  box-shadow: 0 0 0 3px var(--modal-focus-ring);
+}
+
+.auth-form input[type="email"]::placeholder,
+.auth-form input[type="password"]::placeholder {
+  color: #9ca3af;
+}
+
+/* GDPR Consent Section */
+.gdpr-consent-section {
+  display: flex;
+  align-items: flex-start;
+  padding: 12px 16px;
+  margin: 16px 0;
+  gap: 8px;
+  background-color: #f8f9fa;
+  border: 1px solid #e3e6ea;
+  border-radius: 8px;
+}
+
+.gdpr-consent-section.hidden {
+  display: none;
+}
+
+.gdpr-consent-checkbox {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--primary-brand);
+  border: 2px solid var(--primary-brand);
+  border-radius: 4px;
+  margin: 0;
+  flex-shrink: 0;
+  margin-top: 2px;
+  cursor: pointer;
+}
+
+.gdpr-consent-checkbox:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--modal-focus-ring);
+}
+
+.gdpr-consent-text {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.gdpr-consent-text a {
+  color: var(--primary-brand);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.gdpr-consent-text a:hover {
+  text-decoration: underline;
+}
+
+/* Forgot Password Link */
+.forgot-password-container {
+  text-align: right;
+  margin: 8px 0 4px 0;
+}
+
+.forgot-password-link {
+  font-size: 12px;
+  color: var(--primary-brand);
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-weight: 500;
+}
+
+.forgot-password-link:hover {
+  text-decoration: underline;
+}
+
+.forgot-password-link:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--modal-focus-ring);
+  border-radius: 3px;
+}
+
+/* Submit Button */
+.email-auth-btn {
+  width: 100%;
+  background-color: var(--primary-brand);
+  color: white;
+  font-weight: 700;
+  padding: 12px 16px;
+  border: none;
+  border-radius: 16px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-size: 14px;
+  margin-top: 8px;
+}
+
+.email-auth-btn:hover {
+  background-color: var(--primary-interactive);
+}
+
+.email-auth-btn:disabled {
+  background-color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.email-auth-btn:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--modal-focus-ring);
+}
+
+/* Toggle Section */
+.auth-toggle {
+  text-align: center;
+  margin-top: 16px;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.auth-toggle a {
+  color: var(--primary-brand);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.auth-toggle a:hover {
+  text-decoration: underline;
+}
+
+/* Error Display */
+.auth-error {
+  color: rgb(30, 64, 175); /* Brand-aligned blue for professional messaging */
+  font-size: 12px;
+  text-align: center;
+  margin-top: 8px;
+  padding: 8px;
+  background-color: rgb(219, 234, 254); /* Light blue background */
+  border: 1px solid rgb(59, 130, 246); /* Blue border */
+  border-radius: 6px;
+  display: none;
+}
+
+.auth-error:not(:empty) {
+  display: block;
+}
+
+/* Animation for modal rendering */
+@keyframes forceModalRender {
+  0% { opacity: 0.99; }
+  100% { opacity: 1; }
+}
+
+.auth-modal:not(.hidden) {
+  animation: forceModalRender 0.1s ease-in-out;
+}
+
+/* Responsive Design */
+@media (max-width: 480px) {
+  .auth-modal-content {
+    margin: 10px;
+    padding: 24px;
+    max-width: none;
+  }
+
+  .auth-modal-title {
+    font-size: 20px;
+  }
+
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .auth-modal-content {
+    border: 2px solid #000;
+  }
+
+  .auth-form input[type="email"],
+  .auth-form input[type="password"] {
+    border: 2px solid #000;
+  }
+
+  .google-auth-btn {
+    border: 2px solid #000;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .google-auth-btn,
+  .email-auth-btn,
+  .auth-form input {
+    transition: none;
+  }
+}
+
+/* =========================================
+   Settings Modal - Modern Design (Reusing Patterns)
+   ========================================= */
+
+/* Settings Modal Container - Reuses auth-modal pattern */
+.settings-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 10000;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+.settings-modal.hidden {
+  display: none !important;
+}
+
+/* Settings Modal Content - Reuses auth-modal-content pattern with larger width */
+.settings-modal-content {
+  background: var(--surface-primary);
+  border-radius: 16px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  padding: 32px;
+  width: 100%;
+  max-width: 500px;
+  max-height: 80vh;
+  margin: 20px;
+  position: relative;
+  overflow-y: auto;
+}
+
+
+/* Settings Modal Header - Reuses auth-modal-header pattern */
+.settings-modal-header {
+  text-align: center;
+  margin-bottom: 32px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.settings-modal-logo-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 8px;
+}
+
+.settings-modal-logo {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  margin-right: 8px;
+}
+
+.settings-modal-title {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.settings-modal-subtitle {
+  color: var(--text-secondary);
+  font-size: 14px;
+  margin: 8px 0 0 0;
+  line-height: 1.4;
+}
+
+/* Settings Sections - Card-based design */
+.settings-section {
+  margin-bottom: 32px;
+  padding: 24px;
+  background: var(--surface-tertiary);
+  border-radius: 16px;
+  border: 1px solid var(--border-subtle);
+}
+
+.settings-section:last-child {
+  margin-bottom: 0;
+}
+
+.settings-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 16px 0;
+}
+
+.settings-section-title span:first-child {
+  font-size: 20px;
+}
+
+.settings-section-description {
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 0 0 20px 0;
+}
+
+.settings-section-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+/* Button Styling - Reuses existing primary/secondary patterns */
+.settings-section .primary-btn,
+.settings-section .secondary-btn {
+  padding: 10px 16px;
+  border-radius: 16px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  border: none;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center; /* Center content */
+  gap: 6px;
+  flex: 1; /* Make buttons share width equally */
+}
+
+.settings-section .primary-btn {
+  background-color: var(--primary-brand);
+  color: white;
+}
+
+.settings-section .primary-btn:hover {
+  background-color: var(--primary-interactive);
+}
+
+.settings-section .secondary-btn {
+  background-color: var(--surface-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-medium);
+}
+
+.settings-section .secondary-btn:hover {
+  background-color: var(--surface-secondary);
+  border-color: var(--border-strong);
+}
+
+.settings-section .primary-btn:focus,
+.settings-section .secondary-btn:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--modal-focus-ring);
+}
+
+/* Privacy Status Display */
+.privacy-status {
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  border-radius: 16px;
+  padding: 12px;
+  font-size: 14px;
+  color: #0c4a6e;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.privacy-status::before {
+  content: "🔒";
+  font-size: 16px;
+}
+
+/* Data Processing Info */
+.data-processing-info {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.processing-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px;
+  background: white;
+  border-radius: 16px;
+  border: 1px solid #e5e7eb;
+}
+
+.step-icon {
+  font-size: 20px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.step-content {
+  flex: 1;
+}
+
+.step-content strong {
+  display: block;
+  font-weight: 600;
+  color: #1f2937;
+  margin-bottom: 4px;
+}
+
+.step-content p {
+  margin: 0;
+  color: #6b7280;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+/* Responsive Design for Settings Modal */
+@media (max-width: 480px) {
+  .settings-modal-content {
+    margin: 10px;
+    padding: 24px;
+    max-width: none;
+    max-height: 90vh;
+  }
+
+  .settings-modal-title {
+    font-size: 20px;
+  }
+
+  .settings-section {
+    padding: 20px;
+    margin-bottom: 24px;
+  }
+
+}
+
+/* =========================================
+   Blackout Modal - Modern Design (Reusing Patterns)
+   ========================================= */
+
+/* Blackout Modal Container - Reuses settings-modal pattern */
+.blackout-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 10000;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+.blackout-modal.hidden {
+  display: none !important;
+}
+
+/* Blackout Modal Content - Reuses settings-modal-content pattern with wider width */
+.blackout-modal-content {
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  padding: 32px;
+  width: 100%;
+  max-width: 600px;
+  max-height: 90vh;
+  margin: 20px;
+  position: relative;
+  overflow-y: auto;
+}
+
+
+/* Blackout Modal Header - Reuses settings-modal-header pattern */
+.blackout-modal-header {
+  text-align: center;
+  margin-bottom: 32px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.blackout-modal-logo-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 8px;
+}
+
+.blackout-modal-logo {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  margin-right: 8px;
+}
+
+.blackout-modal-title {
+  font-size: 24px;
+  font-weight: 700;
+  color: #1f2937;
+  margin: 0;
+}
+
+.blackout-modal-description {
+  color: #6b7280;
+  font-size: 14px;
+  margin: 8px 0 0 0;
+  line-height: 1.4;
+}
+
+/* Canvas Container - Modern card design */
+.blackout-canvas-container {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 24px;
+  padding: 20px;
+  background: #f3f4f6;
+  border-radius: 16px;
+  border: 1px solid #e5e7eb;
+}
+
+.blackout-canvas {
+  max-width: 100%;
+  max-height: 400px;
+  border: 2px solid #d1d5db;
+  cursor: crosshair;
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+/* Mode Toggle - Blackout vs Allowlist */
+.blackout-mode-toggle {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+  background: var(--surface-secondary, #f3f4f6);
+  border-radius: 8px;
+  padding: 3px;
+}
+
+.blackout-mode-toggle .mode-btn {
+  flex: 1;
+  padding: 6px 12px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary, #6b7280);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.blackout-mode-toggle .mode-btn:hover {
+  color: var(--text-primary, #111);
+}
+
+.blackout-mode-toggle .mode-btn.active {
+  background: var(--primary-brand, #1e40af);
+  color: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+
+/* Modal Controls - Reuses settings button patterns */
+.blackout-modal-controls {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.blackout-modal-controls .primary-btn,
+.blackout-modal-controls .secondary-btn {
+  padding: 10px 16px;
+  border-radius: 16px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  border: none;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.blackout-modal-controls .primary-btn {
+  background-color: var(--primary-brand);
+  color: white;
+}
+
+.blackout-modal-controls .primary-btn:hover {
+  background-color: var(--primary-interactive);
+}
+
+.blackout-modal-controls .secondary-btn {
+  background-color: var(--surface-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-medium);
+}
+
+.blackout-modal-controls .secondary-btn:hover {
+  background-color: var(--surface-secondary);
+  border-color: var(--border-strong);
+}
+
+.blackout-modal-controls .primary-btn:focus,
+.blackout-modal-controls .secondary-btn:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--modal-focus-ring);
+}
+
+/* Status Display - Modern status cards */
+.blackout-status {
+  text-align: center;
+  font-size: 14px;
+  min-height: 20px;
+  padding: 12px;
+  border-radius: 16px;
+  transition: all 0.3s ease;
+  border: 1px solid transparent;
+  margin: 0;
+}
+
+.blackout-status:empty {
+  display: none;
+}
+
+.blackout-status.loading {
+  background-color: #fff7ed;
+  border-color: #fed7aa;
+  color: #ea580c;
+}
+
+.blackout-status.error {
+  background-color: #fef2f2;
+  border-color: #fecaca;
+  color: #dc2626;
+  white-space: pre-line; /* Preserves line breaks from \n */
+}
+
+.blackout-status.success {
+  background-color: #f0fdf4;
+  border-color: #bbf7d0;
+  color: #16a34a;
+}
+
+/* Responsive Design for Blackout Modal */
+@media (max-width: 480px) {
+  .blackout-modal-content {
+    margin: 10px;
+    padding: 24px;
+    max-width: none;
+    max-height: 95vh;
+  }
+
+  .blackout-modal-title {
+    font-size: 20px;
+  }
+
+  .blackout-canvas-container {
+    padding: 16px;
+    margin-bottom: 20px;
+  }
+
+  .blackout-modal-controls {
+    flex-direction: column;
+  }
+
+  .blackout-modal-controls .primary-btn,
+  .blackout-modal-controls .secondary-btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+/* =========================================
+   Feedback Modal - Modern Design (Reusing Patterns)
+   ========================================= */
+
+/* Feedback Modal Container - Reuses settings-modal pattern */
+.feedback-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 10000;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+.feedback-modal.hidden {
+  display: none !important;
+}
+
+/* Feedback Modal Content - Reuses auth-modal-content pattern with moderate width */
+.feedback-modal-content {
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  padding: 32px;
+  width: 100%;
+  max-width: 420px;
+  max-height: 80vh;
+  margin: 20px;
+  position: relative;
+  overflow-y: auto;
+}
+
+
+/* Feedback Modal Header - Reuses settings-modal-header pattern */
+.feedback-modal-header {
+  text-align: center;
+  margin-bottom: 32px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.feedback-modal-logo-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 8px;
+}
+
+.feedback-modal-logo {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  margin-right: 8px;
+}
+
+.feedback-title {
+  font-size: 24px;
+  font-weight: 700;
+  color: #1f2937;
+  margin: 0;
+}
+
+.feedback-modal-subtitle {
+  color: #6b7280;
+  font-size: 14px;
+  margin: 8px 0 0 0;
+  line-height: 1.4;
+}
+
+/* Feedback Form Section */
+.feedback-form-section {
+  margin-bottom: 24px;
+}
+
+.feedback-text {
+  width: 100%;
+  padding: 12px 16px;
+  border: 1px solid #d1d5db;
+  border-radius: 16px;
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  resize: vertical;
+  min-height: 100px;
+  transition: all 0.3s ease;
+  box-sizing: border-box;
+}
+
+.feedback-text:focus {
+  outline: none;
+  border-color: var(--primary-brand);
+  box-shadow: 0 0 0 3px var(--modal-focus-ring);
+}
+
+.feedback-text::placeholder {
+  color: var(--text-muted);
+}
+
+/* Feedback Consent Section - Reuses GDPR pattern */
+.feedback-consent {
+  margin: 20px 0;
+  padding: 20px;
+  background: var(--surface-tertiary);
+  border-radius: 16px;
+  border: 1px solid var(--border-subtle);
+}
+
+.feedback-consent-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.feedback-checkbox {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--primary-brand);
+  border: 2px solid var(--primary-brand);
+  border-radius: 4px;
+  margin: 0;
+  flex-shrink: 0;
+  margin-top: 2px;
+  cursor: pointer;
+}
+
+.feedback-checkbox:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--modal-focus-ring);
+}
+
+.feedback-consent-text {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.feedback-consent-note {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 6px;
+  margin-left: 24px;
+  line-height: 1.3;
+}
+
+/* Submit Button - Reuses primary button pattern */
+.feedback-submit-btn {
+  width: 100%;
+  background-color: var(--primary-brand);
+  color: white;
+  font-weight: 700;
+  padding: 12px 16px;
+  border: none;
+  border-radius: 16px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-size: 14px;
+  margin-top: 8px;
+}
+
+.feedback-submit-btn:hover {
+  background-color: var(--primary-interactive);
+}
+
+.feedback-submit-btn:disabled {
+  background-color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.feedback-submit-btn:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--modal-focus-ring);
+}
+
+/* Error Display - Reuses auth-error pattern */
+.feedback-error {
+  color: #dc2626;
+  font-size: 12px;
+  text-align: center;
+  margin-top: 8px;
+  padding: 8px;
+  background-color: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  display: none;
+}
+
+.feedback-error:not(:empty) {
+  display: block;
+}
+
+/* Responsive Design for Feedback Modal */
+@media (max-width: 480px) {
+  .feedback-modal-content {
+    margin: 10px;
+    padding: 24px;
+    max-width: none;
+    max-height: 90vh;
+  }
+
+  .feedback-title {
+    font-size: 20px;
+  }
+
+  .feedback-text {
+    min-height: 80px;
+  }
+
+  .feedback-consent {
+    padding: 16px;
+    margin: 16px 0;
+  }
+}
+
+
+/* =========================================
+   LenseBoost Modal - Modern Design (Reusing Patterns)
+   ========================================= */
+
+/* LenseBoost Modal Container - Reuses feedback-modal pattern */
+.lenseboost-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 10000;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+.lenseboost-modal.hidden {
+  display: none !important;
+}
+
+/* LenseBoost Modal Content - Reuses feedback-modal-content pattern with wider design */
+.lenseboost-modal-content {
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  padding: 32px;
+  width: 100%;
+  max-width: 480px;
+  max-height: 85vh;
+  margin: 20px;
+  position: relative;
+  overflow-y: auto;
+}
+
+
+/* LenseBoost Modal Header - Reuses feedback-modal-header pattern */
+.lenseboost-modal-header {
+  text-align: center;
+  margin-bottom: 32px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.lenseboost-logo-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 8px;
+}
+
+.lenseboost-logo {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  margin-right: 8px;
+}
+
+.lenseboost-title {
+  font-size: 24px;
+  font-weight: 700;
+  color: #1f2937;
+  margin: 0;
+}
+
+.lenseboost-subtitle {
+  color: #6b7280;
+  font-size: 14px;
+  margin: 8px 0 0 0;
+  line-height: 1.4;
+}
+
+/* Quota Status Section */
+.quota-status-section {
+  margin-bottom: 24px;
+  text-align: center;
+}
+
+.quota-status {
+  font-size: 16px;
+  color: #374151;
+  margin-bottom: 8px;
+}
+
+.quota-status strong {
+  color: #1f2937;
+  font-weight: 600;
+}
+
+/* Error Message Display */
+.error-message {
+  background-color: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #dc2626;
+  padding: 12px;
+  border-radius: 16px;
+  font-size: 14px;
+  text-align: center;
+  margin-bottom: 20px;
+  display: none;
+  white-space: pre-line; /* Preserves line breaks from \n */
+}
+
+.error-message:not(:empty) {
+  display: block;
+}
+
+/* Purchase Options Container */
+.purchase-options-container {
+  margin-bottom: 20px;
+}
+
+/* High-Conversion Modal Design */
+
+/* Primary CTA Container - Subscription Focus */
+.primary-cta-container {
+  margin-bottom: 24px;
+}
+
+.upgrade-value-proposition {
+  background: linear-gradient(135deg, var(--primary-brand) 0%, var(--primary-interactive) 100%);
+  border-radius: 16px;
+  padding: 24px;
+  color: white;
+  text-align: center;
+  box-shadow: 0 10px 15px -3px rgba(30, 58, 138, 0.3), 0 4px 6px -2px rgba(30, 58, 138, 0.2);
+}
+
+.upgrade-benefits h3 {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0 0 16px 0;
+  color: white;
+}
+
+.benefit-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 20px 0;
+  text-align: left;
+  max-width: 320px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.benefit-list li {
+  padding: 6px 0;
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.95);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.primary-upgrade-btn {
+  background: var(--surface-primary);
+  color: var(--primary-brand);
+  border: none;
+  border-radius: 12px;
+  padding: 16px 32px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.primary-upgrade-btn:hover {
+  background: var(--surface-secondary);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 12px -1px rgba(0, 0, 0, 0.15);
+}
+
+.upgrade-btn-text {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.upgrade-btn-subtitle {
+  font-size: 12px;
+  font-weight: 400;
+  color: #6b7280;
+}
+
+/* Secondary Option Container - LenseBoost */
+.secondary-option-container {
+  padding: 16px 0;
+}
+
+.option-divider {
+  text-align: center;
+  margin-bottom: 16px;
+  position: relative;
+}
+
+.option-divider::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: #e5e7eb;
+}
+
+.divider-text {
+  background: white;
+  padding: 0 12px;
+  color: #6b7280;
+  font-size: 12px;
+  font-weight: 500;
+  position: relative;
+  z-index: 1;
+}
+
+.lenseboost-compact {
+  text-align: center;
+  background: linear-gradient(135deg, #fef9f3 0%, #fef3e2 100%);
+  border-radius: 12px;
+  padding: 16px;
+  border: 1px solid #f3e5d0;
+  box-shadow: 0 2px 4px rgba(120, 53, 15, 0.08);
+}
+
+.lenseboost-description {
+  font-size: 14px;
+  color: #4b5563;
+  line-height: 1.4;
+}
+
+.boost-description-text {
+  font-size: 15px;
+  color: #78350f;
+  font-weight: 500;
+}
+
+.lenseboost-link {
+  color: var(--primary-brand);
+  text-decoration: none;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-block;
+  background: var(--surface-primary);
+  padding: 10px 20px;
+  border-radius: 8px;
+  margin-top: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.lenseboost-link:hover {
+  color: var(--primary-brand);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+.lenseboost-note {
+  display: block;
+  font-size: 12px;
+  color: #92400e;
+  margin-top: 8px;
+  font-weight: 500;
+}
+
+
+.price {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--primary-brand);
+  background: var(--surface-primary);
+  padding: 8px 16px;
+  border-radius: 16px;
+  border: 1px solid #bfdbfe;
+}
+
+/* Option Features */
+.option-features {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 20px 0;
+}
+
+.option-features li {
+  padding: 6px 0;
+  font-size: 14px;
+  color: #374151;
+  display: flex;
+  align-items: center;
+}
+
+.option-features li::before {
+  content: "✓";
+  color: #10b981;
+  font-weight: bold;
+  margin-right: 8px;
+  font-size: 16px;
+}
+
+.boost-quota {
+  font-weight: 600;
+  color: var(--primary-brand);
+}
+
+.expiry-notice {
+  color: var(--text-secondary);
+}
+
+.upgrade-text {
+  color: var(--text-secondary);
+  font-size: 14px;
+  margin: 0 0 16px 0;
+  line-height: 1.4;
+}
+
+
+
+/* Responsive Design for LenseBoost Modal */
+@media (max-width: 480px) {
+  .lenseboost-modal-content {
+    margin: 10px;
+    padding: 24px;
+    max-width: none;
+    max-height: 90vh;
+  }
+
+  .lenseboost-title {
+    font-size: 20px;
+  }
+  
+  /* Mobile-responsive primary CTA */
+  .upgrade-value-proposition {
+    padding: 20px;
+  }
+  
+  .upgrade-benefits h3 {
+    font-size: 18px;
+  }
+  
+  .benefit-list {
+    max-width: 280px;
+  }
+  
+  .benefit-list li {
+    font-size: 13px;
+  }
+  
+  .primary-upgrade-btn {
+    padding: 14px 24px;
+    font-size: 15px;
+  }
+  
+  .upgrade-btn-text {
+    font-size: 15px;
+  }
+  
+  .lenseboost-description {
+    font-size: 13px;
+  }
+}
+
+/* =========================================
+   Registration Completion Modal - Unified Design
+   ========================================= */
+
+/* Registration Modal Container - Inherits from email verification pattern */
+.registration-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 10000;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+.registration-modal.hidden {
+  display: none !important;
+}
+
+/* Registration Modal Content - Restored with proper scrolling behavior */
+.registration-modal-content {
+  background: var(--surface-primary);
+  border-radius: 16px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  padding: 32px;
+  width: 100%;
+  max-width: 520px;
+  max-height: 90vh;
+  overflow-y: auto;
+  margin: 20px;
+  position: relative;
+}
+
+/* Note: .registration-title and .registration-subtitle removed - now using .auth-modal-title and .auth-modal-subtitle */
+
+/* Progress Indicator Styles */
+.progress-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 20px;
+}
+
+.progress-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+}
+
+.step-number {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #e5e7eb;
+  color: #6b7280;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 14px;
+  transition: all 0.3s ease;
+}
+
+.progress-step.active .step-number {
+  background: #4285f4;
+  color: white;
+}
+
+.step-label {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.progress-step.active .step-label {
+  color: #4285f4;
+  font-weight: 600;
+}
+
+.progress-connector {
+  width: 60px;
+  height: 2px;
+  background: #e5e7eb;
+  margin: 0 12px;
+  margin-bottom: 24px; /* Offset for the labels */
+}
+
+/* Note: .registration-logo-container, .registration-logo, .registration-title, .registration-subtitle removed - now using .auth-modal-* classes */
+
+/* Note: .reg-step-section removed - Step 2 now uses .auth-form, Step 1 keeps .reg-consent-section */
+
+/* Enhanced Consent Details */
+.consent-details {
+  margin: 20px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.consent-detail-item {
+  display: flex;
+  align-items: flex-start;
+  background: white;
+  padding: 16px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  transition: all 0.2s ease;
+}
+
+.consent-detail-item:hover {
+  border-color: #d1d5db;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.detail-icon {
+  font-size: 20px;
+  margin-right: 12px;
+  margin-top: 2px;
+}
+
+.detail-content {
+  flex: 1;
+}
+
+.detail-content strong {
+  display: block;
+  font-weight: 600;
+  color: #1f2937;
+  margin-bottom: 4px;
+  font-size: 14px;
+}
+
+.detail-content p {
+  margin: 0;
+  color: #6b7280;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+/* Note: Old .email-verification-info and .verification-step removed - now using simplified .verification-info-line */
+
+/* Modern Consent Button Styling */
+.consent-action-wrapper {
+  margin: 24px 0;
+  text-align: center;
+}
+
+.consent-btn {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: white;
+  border: none;
+  padding: 14px 32px;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.25);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.consent-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(16, 185, 129, 0.3);
+  background: linear-gradient(135deg, #059669 0%, #047857 100%);
+}
+
+.consent-btn:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2), 0 4px 16px rgba(16, 185, 129, 0.3);
+}
+
+/* Google Account Verified State */
+.google-verified-state .google-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+  background-color: var(--primary-surface);
+  border: 1px solid var(--primary-brand);
+  border-radius: 6px;
+  margin: 8px 0;
+}
+
+.google-icon {
+  background: #4285f4;
+  color: white;
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: bold;
+  margin-right: 8px;
+}
+
+.email-confirmed {
+  font-size: 14px;
+  color: #6b7280;
+  display: block;
+  margin-top: 4px;
+}
+
+/* Email Verification States */
+.verified-state {
+  color: #10b981;
+}
+
+.pending-verification-state .verification-status-box {
+  background: #fef7ed;
+  border: 1px solid #f59e0b;
+  border-radius: 6px;
+  padding: 12px;
+  margin: 8px 0;
+}
+
+.checking-status {
+  font-style: italic;
+  color: #6b7280;
+  margin: 8px 0;
+}
+
+/* Consent Section */
+.reg-consent-section {
+  margin-bottom: 24px;
+}
+
+.reg-consent-section h4 {
+  margin: 0 0 12px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.consent-details {
+  margin: 12px 0;
+  padding-left: 20px;
+  color: #4b5563;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.consent-details li {
+  margin-bottom: 4px;
+}
+
+/* Enhanced Privacy Highlight Box with Trust Indicators */
+.privacy-highlight-box {
+  background: linear-gradient(135deg, var(--primary-surface) 0%, #dbeafe 100%);
+  border: 1px solid var(--primary-brand);
+  border-radius: 12px;
+  padding: 20px;
+  margin: 20px 0;
+  text-align: center;
+  box-shadow: 0 2px 8px rgba(30, 58, 138, 0.1);
+}
+
+/* Legal Disclaimer - Desktop Chrome Extension */
+.legal-disclaimer {
+  background: var(--surface-secondary);    /* #f9fafb - matches existing system */
+  border: 1px solid var(--border-subtle);  /* #e5e7eb - consistent with detail items */
+  border-radius: 8px;                      /* 8px - matches consent-detail-item */
+  padding: 16px;                           /* 16px - consistent padding */
+  margin: 20px 0;                          /* 20px - matches privacy-highlight-box */
+  text-align: center;
+}
+
+.legal-disclaimer-text {
+  margin: 0;
+  font-size: 12px;                         /* 12px - matches registration-footer */
+  color: var(--text-secondary);            /* #6b7280 - secondary text */
+  line-height: 1.4;
+}
+
+.legal-disclaimer-text a {
+  color: var(--primary-brand);             /* #1e3a8a - brand color */
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.legal-disclaimer-text a:hover {
+  text-decoration: underline;
+}
+
+.legal-disclaimer-text strong {
+  color: var(--text-primary);              /* #1f2937 - emphasis */
+  font-weight: 600;
+}
+
+.privacy-highlight-title {
+  font-weight: 700;
+  color: #1d4ed8;
+  margin-bottom: 8px;
+  font-size: 16px;
+}
+
+.privacy-highlight-box p {
+  margin: 8px 0 16px 0;
+  color: #1e40af;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+/* Security Badges */
+.security-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin: 16px 0;
+}
+
+.security-badge {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(16, 185, 129, 0.1);
+  color: #065f46;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.privacy-learn-more-btn {
+  display: inline-flex;
+  align-items: center;
+  background: white;
+  color: #1d4ed8;
+  padding: 8px 16px;
+  border-radius: 6px;
+  text-decoration: none;
+  font-weight: 500;
+  font-size: 13px;
+  border: 1px solid var(--primary-brand);
+  transition: all 0.2s ease;
+}
+
+.privacy-learn-more-btn:hover {
+  background: #f8fafc;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(59, 130, 246, 0.2);
+}
+
+
+/* Note: Duplicate .email-verification-info and .verification-step removed - using simplified structure */
+
+/* Action Buttons */
+.registration-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.registration-actions button {
+  flex: 1;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+/* Note: .registration-actions .primary-btn removed - now using .email-auth-btn from login modal */
+
+.registration-actions .secondary-btn {
+  background: white;
+  color: #374151;
+  border: 2px solid #e5e7eb;
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.registration-actions .secondary-btn:hover {
+  border-color: #d1d5db;
+  background: #f9fafb;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.registration-actions .secondary-btn:hover {
+  background-color: #f9fafb;
+}
+
+/* Footer Links */
+.registration-footer {
+  text-align: center;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #e5e7eb;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.registration-footer a {
+  color: var(--primary-brand);
+  text-decoration: none;
+}
+
+.registration-footer a:hover {
+  text-decoration: underline;
+}
+
+.registration-footer span {
+  margin: 0 8px;
+}
+
+/* Responsive Design for Registration Modal */
+@media (max-width: 480px) {
+  .registration-modal-content {
+    margin: 10px;
+    padding: 24px;
+    max-width: none;
+    max-height: 90vh;
+  }
+  
+  .registration-actions {
+    flex-direction: column;
+  }
+  
+  .privacy-highlight-box {
+    padding: 12px;
+  }
+}
+
+/* Registration Message Styles */
+.reg-message {
+  margin: 16px 0;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  text-align: center;
+  transition: opacity 0.3s ease;
+}
+
+.reg-message.hidden {
+  display: none;
+}
+
+/* =========================================
+   Registration Modal Helper Classes  
+   ========================================= */
+
+/* Registration step visibility control */
+.registration-step {
+  display: block;
+  transition: opacity 0.3s ease;
+}
+
+.registration-step.hidden {
+  display: none;
+}
+
+/* Progress indicator states */
+.progress-step.completed .step-number {
+  background: #10b981;
+  color: white;
+}
+
+.progress-step.completed .step-label {
+  color: #10b981;
+  font-weight: 600;
+}
+
+/* Privacy Badge - Simple Design */
+#settings-btn {
+  position: relative;
+}
+
+#settings-btn.has-privacy-areas::after {
+  content: attr(data-count);
+  position: absolute;
+  top: 0px;
+  right: 0px;
+  background: #10b981;
+  color: white;
+  border-radius: 50%;
+  font-size: 9px;
+  font-weight: bold;
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+

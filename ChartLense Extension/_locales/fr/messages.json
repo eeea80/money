@@ -1,0 +1,14 @@
+{
+  "extensionName": {
+    "message": "ChartLense: AI Chart Analysis & Journaling",
+    "description": "Nom de l'extension"
+  },
+  "extensionDescription": {
+    "message": "Analyse graphique IA et journal de trading pour TradingView. Reconnaissance de motifs et tendances — sans quitter votre graphique.",
+    "description": "Description courte dans le Chrome Web Store et la page de gestion"
+  },
+  "extensionFullDescription": {
+    "message": "En un seul clic, ChartLense™ fournit une analyse technique complète de n'importe quel graphique, transformant des données complexes en informations claires et exploitables. Il est conçu pour éliminer le bruit et vous donner un deuxième avis rapide et impartial.\n\nVoici comment ChartLense renforce vos décisions :\n\n⏱️ ANALYSEZ PLUS VITE, AGISSEZ PLUS TÔT\nObtenez une analyse complète en moins de 10 secondes. Examinez des dizaines de graphiques avec la rapidité dont vous avez besoin pour saisir plus d'opportunités, économisant en moyenne 4,5 minutes sur chaque examen manuel.\n\n💡 Gagnez en Clarté et Conviction Impartiales\nÉliminez le bruit du marché et l'indécision. Notre analyse objective basée sur les données vous aide à confirmer votre stratégie et à exécuter vos transactions ou investissements en toute confiance.\n\n🧠 Affinez votre Vision du Marché\nApprenez de l'analyse ChartLense™ de la structure du marché en temps réel. Entraînez votre œil à repérer les configurations à fort potentiel et à comprendre les tendances à long terme, améliorant vos propres compétences à chaque clic.\n\nFONCTIONNE PARFAITEMENT SUR :\n• TradingView\n• Stock3\n• Yahoo Finance\n• ...et bien d'autres.\n\nPARFAIT POUR :\n→ Les Traders Actifs qui ont besoin d'examiner les graphiques efficacement et de trouver des configurations à haute probabilité.\n→ Les Investisseurs à Long Terme à la recherche de confirmation technique et de points d'entrée ou de sortie optimaux.\n→ Toute personne souhaitant apprendre d'une analyse objective et renforcer la confiance dans ses décisions.\n\nInstallez ChartLense aujourd'hui et transformez votre façon de voir le marché.\n\nSUPPORT\nBesoin d'aide ? N'hésitez pas à contacter notre équipe à support@chartlense.com et nous vous répondrons dès que possible.",
+    "description": "Description complète détaillée pour le listing Chrome Web Store"
+  }
+}

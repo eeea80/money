@@ -1,0 +1,375 @@
+/**
+ * Score Meter Component
+ *
+ * Sentiment-driven horizontal score visualization (KEY INNOVATION #1)
+ * Part of M3: Score Bar Component
+ *
+ * DUAL ENCODING SYSTEM:
+ * - Color: Indicates sentiment direction (Bullish = green, Bearish = red, Neutral = blue)
+ * - Fill: Indicates score strength (0-10 scale, 70% fill = 7/10 score)
+ *
+ * EDUCATIONAL DESIGN:
+ * - Labels guide user interpretation ("Negative Momentum ← Neutral → Positive Momentum")
+ * - Score value prominently displayed inside fill
+ * - Smooth animation on load for visual polish
+ *
+ * @module score-meter
+ * @since M3 - Score Bar Component
+ */
+
+/* ============================================================================
+   SCORE METER CONTAINER
+   ========================================================================= */
+
+.score-meter {
+  width: 100%;
+  margin: 8px 0;
+}
+
+.score-meter-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+}
+
+/* ============================================================================
+   SCORE METER BAR (Outer container with background track)
+   ========================================================================= */
+
+.score-meter-bar {
+  position: relative;
+  width: 100%;
+  height: 28px;
+  background-color: #F3F4F6; /* Light gray track */
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+/* ============================================================================
+   SCORE METER FILL (Dynamic width based on score)
+   ========================================================================= */
+
+.score-meter-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 12px;
+  border-radius: 14px;
+
+  /* Smooth animation */
+  transition: width 0.5s ease-out;
+
+  /* Will be animated in M6 */
+  /* animation: fillBar 500ms ease-out; */
+}
+
+/* Score value text inside fill */
+.score-meter-fill .score-value {
+  font-family: 'Courier New', 'Monaco', monospace;
+  font-size: 14px;
+  font-weight: 700;
+  color: #FFFFFF;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  z-index: 1;
+}
+
+/* ============================================================================
+   HYBRID QUALITY GRADIENTS (Sentiment-Tinted Trend Strength)
+   ========================================================================= */
+
+/* Simplified two-color gradients: Gray (weak) → Sentiment Color (strong) */
+/* Score determines width; quality increases smoothly from gray to sentiment color */
+
+/* Bearish: Direct Gray → Red gradient */
+.score-meter[data-sentiment="bearish"] .score-meter-fill {
+  background: linear-gradient(
+    to right,
+    #9CA3AF 0%,      /* Gray 400 - Weak (0/10) */
+    #A8A29E 25%,     /* Gray-Red hint - Low (2.5/10) */
+    #C87171 50%,     /* Gray-Red blend - Moderate (5/10) */
+    #DC2626 75%,     /* Red 600 - Strong (7.5/10) */
+    #B91C1C 100%     /* Red 700 - Peak (10/10) */
+  ) !important;
+}
+
+/* Neutral: Direct Gray → Blue gradient */
+.score-meter[data-sentiment="neutral"] .score-meter-fill {
+  background: linear-gradient(
+    to right,
+    #9CA3AF 0%,      /* Gray 400 - Weak (0/10) */
+    #9CA8B8 25%,     /* Gray-Blue hint - Low (2.5/10) */
+    #6B8CAF 50%,     /* Gray-Blue blend - Moderate (5/10) */
+    #3B82F6 75%,     /* Blue 500 - Strong (7.5/10) */
+    #2563EB 100%     /* Blue 600 - Peak (10/10) */
+  ) !important;
+}
+
+/* Bullish: Direct Gray → Green gradient */
+.score-meter[data-sentiment="bullish"] .score-meter-fill {
+  background: linear-gradient(
+    to right,
+    #9CA3AF 0%,      /* Gray 400 - Weak (0/10) */
+    #9CA89E 25%,     /* Gray-Green hint - Low (2.5/10) */
+    #6FA888 50%,     /* Gray-Green blend - Moderate (5/10) */
+    #10B981 75%,     /* Green 500 - Strong (7.5/10) */
+    #059669 100%     /* Green 600 - Peak (10/10) */
+  ) !important;
+}
+
+/* Fallback for missing sentiment attribute */
+.score-meter-fill {
+  background: linear-gradient(
+    to right,
+    #9CA3AF 0%,
+    #6B8CAF 50%,
+    #3B82F6 100%
+  );
+}
+
+/* ============================================================================
+   EDUCATIONAL LABELS (Help users interpret the meter)
+   ========================================================================= */
+
+.score-meter-labels {
+  display: none; /* Hidden to save vertical space */
+  /* Original styles preserved for potential future use:
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  letter-spacing: 0.02em;
+  */
+}
+
+.score-meter-labels span {
+  flex: 1;
+  text-align: center;
+}
+
+.score-meter-labels span:first-child {
+  text-align: left;
+}
+
+.score-meter-labels span:last-child {
+  text-align: right;
+}
+
+/* ============================================================================
+   TRIANGLE POSITION MARKER (Shows exact score position)
+   ========================================================================= */
+
+/* Triangle indicator pointing up to bar at exact score position */
+.score-meter-marker {
+  position: absolute;
+  top: 100%;
+  margin-top: 2px;
+  left: 0; /* Will be set inline based on score percentage */
+  transform: translateX(-50%);
+
+  /* Triangle pointing up to bar */
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-bottom: 6px solid var(--text-secondary);
+
+  /* Ensure visibility above labels */
+  z-index: 2;
+}
+
+/* ============================================================================
+   MINIMUM VISIBLE FILL (Ensure 0-1 scores are still visible)
+   ========================================================================= */
+
+/* For very low scores, ensure at least some visual presence */
+.score-meter-fill[style*="width: 0%"],
+.score-meter-fill[style*="width: 1%"],
+.score-meter-fill[style*="width: 2%"],
+.score-meter-fill[style*="width: 3%"],
+.score-meter-fill[style*="width: 4%"],
+.score-meter-fill[style*="width: 5%"] {
+  min-width: 40px; /* Ensure score value is visible */
+  justify-content: center; /* Center text in small fill */
+}
+
+/* ============================================================================
+   ACCESSIBILITY ENHANCEMENTS
+   ========================================================================= */
+
+/* Reduced motion support (M6 will add full animation control) */
+@media (prefers-reduced-motion: reduce) {
+  .score-meter-fill {
+    transition: none;
+  }
+}
+
+/* High contrast mode - stronger borders */
+@media (prefers-contrast: high) {
+  .score-meter-bar {
+    border: 2px solid var(--border-primary);
+  }
+
+  .score-meter-fill {
+    border: 2px solid currentColor;
+  }
+
+  .score-meter-fill .score-value {
+    font-weight: 900;
+    text-shadow: none;
+  }
+}
+
+/* ============================================================================
+   FILL BAR ANIMATION (Reserved for M6)
+   ========================================================================= */
+
+/*
+@keyframes fillBar {
+  from {
+    width: 0%;
+  }
+  to {
+    width: var(--target-width);
+  }
+}
+*/
+
+/* ============================================================================
+   RESPONSIVE ADJUSTMENTS
+   ========================================================================= */
+
+/* For very small viewports, reduce height slightly */
+@media (max-width: 360px) {
+  .score-meter-bar {
+    height: 28px;
+  }
+
+  .score-meter-fill .score-value {
+    font-size: 13px;
+  }
+
+  .score-meter-labels {
+    font-size: 10px;
+  }
+}
+
+/* ============================================================================
+   EDGE CASES & SPECIAL STATES
+   ========================================================================= */
+
+/* Score of 10/10 - Full width */
+.score-meter-fill[style*="width: 100%"] {
+  justify-content: center; /* Center the "10/10" text */
+}
+
+/* Score of 0/10 - Show subtle indication */
+.score-meter-fill[style*="width: 0%"] .score-value {
+  color: var(--text-tertiary); /* Less prominent for zero */
+}
+
+/* ============================================================================
+   PRINT STYLES
+   ========================================================================= */
+
+@media print {
+  .score-meter-bar {
+    box-shadow: none;
+    border: 1px solid #000;
+  }
+
+  .score-meter-fill {
+    /* Use solid colors for print */
+    background: #000 !important;
+  }
+
+  .score-meter-fill .score-value {
+    color: #FFF;
+    text-shadow: none;
+  }
+
+  .score-meter-labels {
+    color: #000;
+  }
+}
+
+/* ============================================================================
+   COMPACT SCORE METER - Card Header Variant
+   ========================================================================= */
+
+/* Container - Inline flexbox for header positioning */
+.score-meter-compact {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Compact Bar - Small horizontal indicator (96px × 8px) */
+.score-meter-compact-bar {
+  width: 96px;
+  height: 8px;
+  background-color: #F3F4F6;
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+/* Compact Fill - Dynamic width based on score */
+.score-meter-compact-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.5s ease-out;
+}
+
+/* Sentiment-based gradients */
+.score-meter-compact[data-sentiment="bearish"] .score-meter-compact-fill {
+  background: linear-gradient(to right, #9CA3AF 0%, #DC2626 75%, #B91C1C 100%);
+}
+
+.score-meter-compact[data-sentiment="neutral"] .score-meter-compact-fill {
+  background: linear-gradient(to right, #9CA3AF 0%, #3B82F6 75%, #2563EB 100%);
+}
+
+.score-meter-compact[data-sentiment="bullish"] .score-meter-compact-fill {
+  background: linear-gradient(to right, #9CA3AF 0%, #10B981 75%, #059669 100%);
+}
+
+/* Fallback gradient */
+.score-meter-compact-fill {
+  background: linear-gradient(to right, #9CA3AF 0%, #3B82F6 100%);
+}
+
+/* Score Text */
+.score-meter-compact-text {
+  font-family: 'Courier New', 'Monaco', monospace;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Responsive */
+@media (max-width: 360px) {
+  .score-meter-compact-bar { width: 80px; }
+  .score-meter-compact-text { font-size: 12px; }
+}
+
+/* Accessibility */
+@media (prefers-reduced-motion: reduce) {
+  .score-meter-compact-fill { transition: none; }
+}

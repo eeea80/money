@@ -1,0 +1,2088 @@
+/* sidebar.css - Multi-Product Theming Support */
+
+/* Import generated CSS variables from theme configuration */
+@import './themes/generated-variables.css';
+
+/* M2: Import Analysis Typography & Color System */
+/* DISABLED: Backend rendering provides all CSS inline */
+/* @import './styles/analysis-typography.css'; */
+/* @import './styles/analysis-colors.css'; */
+
+/* M3: Import Score Meter Component */
+/* DISABLED: Backend rendering provides all CSS inline */
+/* @import './styles/score-meter.css'; */
+
+/* M4: Import Card Layout & Structure */
+/* DISABLED: Backend rendering provides all CSS inline */
+/* @import './styles/analysis-cards.css'; */
+
+/* M5: Import Price Ladder Visualization */
+/* DISABLED: Backend rendering provides all CSS inline */
+/* @import './styles/price-ladder.css'; */
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  min-height: 100vh;
+  font-family: "Segoe UI", "Roboto", Arial, sans-serif;
+  color: var(--text-color);
+}
+
+.sidebar-wrapper {
+  width: 100%;
+  height: 100vh;
+  display: flex;
+  justify-content: center;
+  background: linear-gradient(to right, rgba(30, 58, 138, 0.12), #ffffff, rgba(30, 58, 138, 0.12));
+}
+
+.sidebar-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100%;
+  max-width: 500px;
+  min-width: 370px;
+  overflow-x: hidden; /* Prevent horizontal overflow */
+  box-sizing: border-box;
+}
+
+.sidebar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 16px; /* Reduced vertical padding for more compact header */
+  background-color: var(--primary-color);
+  color: #ffffff;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  flex-shrink: 0;
+  width: 100%;
+  box-sizing: border-box; /* Ensure padding doesn't affect width */
+}
+
+.logo-link {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+  transition: opacity 0.2s ease;
+}
+
+.logo-link:hover {
+  opacity: 0.85;
+}
+
+.header-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.logo-container {
+  display: flex;
+  align-items: center;
+}
+
+.logo {
+  height: 32px;
+  vertical-align: middle;
+}
+
+.header-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px; /* Increased spacing for better visual rhythm */
+  flex-shrink: 1; /* Allow controls to shrink */
+  min-width: 0; /* Enable text truncation */
+  margin: 0; /* Ensure no negative margins */
+}
+
+/* Clean icon-only layout for header controls */
+.header-controls > a,
+.header-controls > button {
+  background: none;
+  border: none;
+  color: #e0e0e0;
+  padding: 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: "Segoe UI", "Roboto", Arial, sans-serif;
+  text-decoration: none;
+  display: flex;
+  flex-direction: row; /* Icon-only, no stacking needed */
+  align-items: center;
+  justify-content: center;
+  width: 40px; /* Reduced width for icon-only */
+  height: 40px; /* Square aspect ratio */
+  transition: background-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
+  margin: 0;
+}
+
+.doc-link {
+  padding-left: 2px;
+}
+
+.header-controls > a:hover,
+.header-controls > button:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  transform: scale(1.05);
+}
+
+/* Icon styling - SVG container for consistent flat design */
+.header-controls .icon,
+.upgrade-account-icon,
+.logout-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  line-height: 1;
+  margin: 0;
+}
+
+/* SVG icon styling with smooth transitions */
+.header-controls .icon svg,
+.upgrade-account-icon svg,
+.logout-icon svg {
+  width: 100%;
+  height: 100%;
+  stroke: currentColor;
+  transition: transform 0.2s ease;
+}
+
+/* Scale effect on hover */
+.header-controls > a:hover .icon svg,
+.header-controls > button:hover .icon svg,
+.upgrade-account-option:hover .upgrade-account-icon svg,
+.logout-option:hover .logout-icon svg {
+  transform: scale(1.1);
+}
+
+/* Text styling - Hidden for clean icon-only design */
+.header-controls .text {
+  display: none;
+}
+
+/* All header controls now use consistent stacked icon + text layout */
+
+/* Account Dropdown Styles */
+.account-dropdown {
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0; /* No need to shrink with icon-only design */
+}
+
+.account-btn {
+  /* Match clean icon-only design of other header controls */
+  background: none;
+  border: none;
+  color: #e0e0e0;
+  padding: 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: "Segoe UI", "Roboto", Arial, sans-serif;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  transition: background-color 0.2s ease, color 0.2s ease;
+  margin: 0;
+}
+
+.account-btn:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+/* Profile picture avatar styles */
+.account-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.account-btn.has-avatar .icon {
+  display: none;
+}
+
+.account-btn.has-avatar .account-avatar {
+  display: inline-block !important;
+}
+
+/* Clean styling for both login and user states */
+.account-btn.login-state,
+.account-btn.user-state {
+  /* Keep the same clean styling as the base account-btn */
+}
+
+/* Loading state styling */
+.account-btn.loading-state {
+  /* Slight opacity to indicate loading */
+  opacity: 0.8;
+}
+
+/* Loading pulse animation */
+.loading-pulse {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.6;
+  }
+}
+
+.account-preview {
+  /* Hidden for clean icon-only design */
+  display: none;
+}
+
+.account-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  background: #ffffff;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  min-width: 200px;
+  z-index: 1000;
+  padding: 8px 0;
+  margin-top: 4px;
+  max-width: calc(100vw - 32px); /* Prevent overflow beyond viewport */
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition: opacity 0.15s ease, visibility 0.15s ease;
+}
+
+.account-menu.hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.account-email {
+  padding: 10px 12px 6px 12px;
+  font-size: 0.9rem;
+  color: #374151;
+  font-weight: 600;
+}
+
+/* Detailed plan info in dropdown - multi-line breakdown */
+.account-plan-detailed {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 12px 10px 12px;
+  font-size: 0.8rem;
+  border-bottom: 1px solid #e5e7eb;
+  margin-bottom: 4px;
+}
+
+.account-plan-row {
+  display: flex;
+  justify-content: space-between;
+  color: #6b7280;
+}
+
+.account-plan-row span:first-child {
+  color: #9ca3af;
+}
+
+.account-plan-row span:last-child {
+  color: #374151;
+  font-weight: 500;
+}
+
+/* Plan badge in account dropdown - plain text style matching quota values */
+.account-plan-row .plan-badge {
+  /* Reset glassmorphic styling */
+  background: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+
+  /* Match quota value styling */
+  color: #374151 !important;
+  font-size: 0.8rem !important;
+  font-weight: 500 !important;
+  text-transform: none !important;
+  letter-spacing: normal !important;
+
+  /* Remove transitions */
+  transition: none !important;
+}
+
+/* Remove hover effects for dropdown badge */
+.account-plan-row .plan-badge:hover {
+  background: none !important;
+  border: none !important;
+  box-shadow: none !important;
+  color: #374151 !important;
+}
+
+/* .account-divider removed - using single border on .account-plan-detailed */
+
+.logout-option,
+.manage-subscription-option,
+.upgrade-account-option {
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 8px 12px;
+  text-align: left;
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: #374151;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: background-color 0.2s ease;
+}
+
+.logout-option:hover,
+.manage-subscription-option:hover,
+.upgrade-account-option:hover {
+  background-color: #f3f4f6;
+}
+
+.logout-option:hover .logout-icon,
+.manage-subscription-option:hover .manage-subscription-icon,
+.upgrade-account-option:hover .upgrade-account-icon {
+  transform: translateX(5px);
+}
+
+.logout-icon,
+.manage-subscription-icon,
+.upgrade-account-icon {
+  font-size: 1rem;
+  transition: transform 0.2s ease;
+}
+
+.logout-text,
+.manage-subscription-text,
+.upgrade-account-text {
+  font-weight: 500;
+}
+
+.plan-status-container {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.plan-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Plan badges row - Free badge and quota on same line */
+.plan-badges {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+/* Simplified layout without subscription badges */
+
+/* ============================================
+   GLASSMORPHIC BADGE SYSTEM
+   ============================================ */
+
+/* Base glassmorphic style - all tiers inherit */
+.plan-badge {
+  display: inline-block;
+  font-size: 0.56rem;
+  font-weight: 600;
+  min-width: auto;
+  padding: 3px 10px;
+  border-radius: 12px;
+  text-align: center;
+
+  /* Glassmorphic foundation */
+  background: rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+
+  /* Subtle shadow for depth */
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.15);
+
+  /* Smooth transitions */
+  transition: all 0.2s ease;
+
+  /* Fallback for browsers without backdrop-filter */
+  @supports not (backdrop-filter: blur(8px)) {
+    background: rgba(255, 255, 255, 0.2);
+  }
+}
+
+/* Header Quota Display — Glassmorphic pill between logo and controls */
+.header-quota-display {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+
+  /* Glassmorphic — matches .plan-badge foundation */
+  background: rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.header-quota-display:hover {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.header-quota-text {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.header-quota-boost {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+/* Plan-colored borders — reuse plan-badge color palette */
+.header-quota-free    { border-color: rgba(209, 213, 219, 0.4); }
+.header-quota-starter { border-color: rgba(59, 130, 246, 0.5); }
+.header-quota-pro     { border-color: rgba(168, 85, 247, 0.6); }
+.header-quota-trader  { border-color: rgba(245, 158, 11, 0.7); }
+
+/* Quota state — text color signals urgency */
+.header-quota-display.quota-low .header-quota-text      { color: #fbbf24; }
+.header-quota-display.quota-depleted .header-quota-text  { color: #ef4444; }
+
+/* FREE Badge - Silver/Grey Glass */
+.plan-badge-free {
+  color: #e5e7eb;
+  border: 1px solid rgba(209, 213, 219, 0.4);
+  text-transform: uppercase;
+  letter-spacing: 0.35px;
+}
+
+.plan-badge-free:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(209, 213, 219, 0.6);
+  box-shadow: 0 2px 7px rgba(0, 0, 0, 0.2);
+}
+
+/* STARTER Badge - Brand Blue Glass */
+.plan-badge-starter {
+  color: #93c5fd;
+  border: 1px solid rgba(59, 130, 246, 0.5);
+  text-transform: uppercase;
+  letter-spacing: 0.35px;
+}
+
+.plan-badge-starter:hover {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(59, 130, 246, 0.7);
+  box-shadow: 0 2px 7px rgba(59, 130, 246, 0.15);
+}
+
+/* PRO Badge - Electric Purple Glass */
+.plan-badge-pro {
+  color: #e9d5ff;
+  border: 1.5px solid rgba(168, 85, 247, 0.6);
+  text-transform: uppercase;
+  letter-spacing: 0.35px;
+  font-weight: 700;
+}
+
+.plan-badge-pro:hover {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(168, 85, 247, 0.8);
+  box-shadow: 0 3px 8px rgba(168, 85, 247, 0.25);
+}
+
+/* TRADER Badge - Gold/Amber Glass with Luxury Glow */
+.plan-badge-trader {
+  color: #fef3c7;
+  border: 1.5px solid rgba(245, 158, 11, 0.7);
+  text-transform: uppercase;
+  letter-spacing: 0.56px;
+  font-weight: 700;
+
+  /* Subtle gold glow */
+  box-shadow:
+    0 1px 5px rgba(0, 0, 0, 0.15),
+    0 0 8px rgba(245, 158, 11, 0.2),
+    inset 0 1px 1px rgba(255, 255, 255, 0.15);
+}
+
+.plan-badge-trader:hover {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(245, 158, 11, 0.9);
+
+  /* Enhanced glow on hover */
+  box-shadow:
+    0 3px 10px rgba(0, 0, 0, 0.2),
+    0 0 11px rgba(245, 158, 11, 0.35),
+    inset 0 1px 2px rgba(255, 255, 255, 0.2);
+}
+
+/* --- Main Content --- */
+.main-content {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.card {
+  background-color: var(--background-card);
+  border-radius: var(--border-radius);
+  box-shadow: var(--card-shadow);
+  border: var(--card-border);
+  margin-bottom: 12px;
+  padding: 12px;
+}
+
+/* Unified card layout for better UX */
+.unified-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-bottom: 12px;
+  padding: 12px;
+}
+
+.quota-section {
+  padding-bottom: 0px;
+}
+
+.control-section {
+  padding-top: 8px;
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 8px;
+  align-items: stretch;  /* Ensure equal height */
+}
+
+/* Optimized disclaimer styling - fits in one line */
+.compact-disclaimer {
+  font-size: 0.85em; /* Smaller font for better fit */
+  color: #666;
+  margin-top: 4px;
+  padding: 4px 6px;
+  background: #f8f9fa;
+  border-radius: 3px;
+  border-left: 2px solid #ffc107;
+  line-height: 1.2;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.disclaimer-link {
+  color: #007bff;
+  text-decoration: none;
+}
+
+.disclaimer-link:hover {
+  text-decoration: underline;
+}
+
+.primary-btn {
+  background-color: var(--primary-color);
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  padding: 10px 15px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  width: 100%;
+  transition: background-color 0.2s ease;
+  margin-top: 0;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.primary-btn:hover:not(:disabled) {
+  background-color: var(--primary-interactive);
+}
+
+.primary-btn:disabled {
+  background-color: #9ca3af;
+  cursor: not-allowed;
+}
+
+.primary-btn.loading,
+.primary-btn.loading:disabled {
+  background-color: var(--primary-color) !important;
+  opacity: 0.9 !important;
+  color: #ffffff !important;
+  cursor: not-allowed;
+  animation: btnGlowPulse 3s ease-in-out infinite;
+}
+
+@keyframes btnGlowPulse {
+  0%, 100% {
+    box-shadow: 0 0 2px rgba(37, 99, 235, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 8px rgba(37, 99, 235, 0.4);
+  }
+}
+
+.primary-btn.loading::before {
+  content: "";
+  width: 16px;
+  height: 16px;
+  border: 2px solid #ffffff;
+  border-top: 2px solid transparent;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.wide-btn {
+  width: 100%;
+}
+
+.analyze-btn-horizontal {
+  grid-column: span 9;  /* 9 of 12 columns = 75% */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.secondary-btn {
+  background: #f5f5f5;
+  border: 1px solid #ddd;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  margin: 5px;
+  font-size: 14px;
+}
+
+.secondary-btn:hover {
+  background: #e5e5e5;
+}
+
+.sidebar-footer {
+  flex-shrink: 0;
+  padding: 8px 12px;
+  background-color: #fafafa;
+  box-shadow: 0 -1px 4px rgba(0, 0, 0, 0.1);
+  min-height: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.footer-links {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.7rem;
+  flex: 0 0 auto; /* Natural width, no grow/shrink */
+}
+
+.version-info {
+  font-size: 0.75rem;
+  color: #aaa;
+  text-align: right;
+  flex: 0 0 auto; /* No grow/shrink, stay on right */
+  padding: 4px 0;
+}
+
+.footer-link {
+  color: #999;
+  text-decoration: none;
+  transition: color 0.2s ease;
+  position: relative;
+}
+
+.footer-link::after {
+  content: '';
+  position: absolute;
+  width: 0;
+  height: 1px;
+  bottom: -2px;
+  left: 0;
+  background-color: var(--primary-color);
+  transition: width 0.3s ease;
+}
+
+.footer-link:hover {
+  color: var(--primary-color);
+}
+
+.footer-link:hover::after {
+  width: 100%;
+}
+
+.footer-separator {
+  color: #d0d0d0;
+  font-size: 0.6rem;
+}
+
+.notification {
+  position: fixed;
+  bottom: 60px;
+  left: 50%;
+  transform: translateX(-50%) translateY(100%);
+  padding: 12px 16px;
+  border-radius: 6px;
+  color: white;
+  font-weight: 500;
+  z-index: 3000;
+  opacity: 0;
+  transition: all 0.3s ease;
+  max-width: 280px;
+  width: calc(100% - 40px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  text-align: center;
+}
+
+.notification.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.notification.success {
+  background-color: #4caf50;
+}
+
+.notification.error {
+  background-color: #f44336;
+}
+
+.notification.info {
+  background-color: var(--primary-interactive);
+}
+
+.response {
+  white-space: pre-wrap;
+  line-height: 1.5;
+  font-family: inherit;
+  margin: 8px 0;
+  font-size: 0.875rem;
+  color: var(--text-color);
+}
+
+/* --- CTA Buttons Container --- */
+.cta-container {
+  margin-top: 12px;
+  padding: 12px;
+  background-color: #f8f9fa;
+  border-radius: var(--border-radius);
+  text-align: center;
+}
+
+.cta-btn {
+  display: inline-block;
+  padding: 8px 16px;
+  background-color: var(--primary-color);
+  color: white;
+  text-decoration: none;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.cta-btn:hover {
+  background-color: var(--primary-interactive);
+  text-decoration: none;
+}
+
+.cta-buttons-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed #e0e0e0;
+  text-align: center;
+}
+.cta-buttons-container p {
+  font-size: 0.9rem;
+  color: var(--text-color);
+  margin: 0;
+}
+.cta-button {
+  display: block;
+  padding: 8px 12px;
+  border-radius: 6px;
+  text-align: center;
+  text-decoration: none;
+  font-size: 0.9rem;
+  font-weight: 600;
+  transition: background-color 0.2s ease, color 0.2s ease,
+    border-color 0.2s ease;
+}
+.cta-button.secondary {
+  background-color: #ffc107;
+  color: #333;
+}
+.cta-button.secondary:hover {
+  background-color: #e0a800;
+}
+.cta-button.neutral {
+  background-color: transparent;
+  color: var(--primary-color);
+  border: 1px solid var(--primary-color);
+}
+.cta-button.neutral:hover {
+  background-color: var(--primary-color);
+  color: white;
+}
+
+/* Modal-related styles moved to modal.css for consolidation */
+
+button:disabled {
+  opacity: 0.6;
+  background-color: #ccc !important;
+  color: #666 !important;
+  cursor: not-allowed !important;
+}
+
+/* ========================================
+   Dynamic Feedback System CSS
+   ======================================== */
+
+/* Feedback CSS Variables now imported from generated-variables.css */
+
+/* Enhanced UI Footer Layout */
+.sidebar-footer {
+  /* Existing styles enhanced for dynamic feedback */
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px;
+  background: #fafafa;
+  border-top: 1px solid var(--feedback-border);
+  flex-shrink: 0;
+  box-shadow: 0 -1px 4px rgba(0, 0, 0, 0.1);
+  min-height: 20px;
+}
+
+/* NEW: Footer systems row for independent operation */
+.footer-systems-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  order: 1; /* Appears first when visible */
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  padding: 0; /* Remove padding, handled by sidebar-footer */
+}
+
+/* LEFT: Independent feedback thumbs container - Collapses when empty */
+.feedback-thumbs-container {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto; /* Don't grow or shrink */
+}
+
+/* Feedback buttons inside thumbs container */
+.feedback-buttons {
+  display: none; /* Hidden by default, shown after analysis */
+  gap: 8px;
+  align-items: center;
+  flex: 0 0 auto; /* Don't grow or shrink */
+}
+
+/* RIGHT: Independent Message2Client container */
+.message2client-container {
+  display: flex;
+  align-items: center;
+  flex: 1; /* Grow to fill available space */
+  justify-content: flex-end;
+}
+
+.message2client-container.hidden {
+  display: none;
+}
+
+/* Message content inside Message2Client container */
+.message-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 1 auto; /* Can shrink if needed */
+  justify-content: flex-end;
+  padding: 6px 12px;
+  border-radius: 6px;
+  background: var(--feedback-background-hover);
+  border: 1px solid var(--feedback-border);
+  transition: all 0.3s ease;
+}
+
+.message-text {
+  flex: 1;
+  font-size: 0.9rem;
+  color: var(--feedback-default);
+  line-height: 1.4;
+}
+
+/* Message action button */
+.message-action-btn {
+  background: var(--feedback-active);
+  color: white;
+  border: none;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.message-action-btn:hover {
+  background: var(--feedback-hover);
+}
+
+.message-action-btn:focus-visible {
+  outline: 2px solid var(--feedback-active);
+  outline-offset: 2px;
+}
+
+/* Message type styling */
+.message-content[data-type="warning"] {
+  background: #fffbeb; /* Softer amber-50 background */
+  border-color: #fde68a; /* Gentle amber-200 border */
+}
+
+.message-content[data-type="warning"] .message-text {
+  color: #78716c; /* Warm gray text - professional, not aggressive */
+}
+
+.message-content[data-type="error"] {
+  background: #fee2e2;
+  border-color: #ef4444;
+}
+
+.message-content[data-type="error"] .message-text {
+  color: #dc2626;
+}
+
+.message-content[data-type="success"] {
+  background: #d1fae5;
+  border-color: #10b981;
+}
+
+.message-content[data-type="success"] .message-text {
+  color: #065f46;
+}
+
+/* Animation reuses existing feedback pattern - no separate animation needed */
+
+/* Message Controls (dismiss link + settings icon) - stacked vertically */
+.message-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin-top: 0;
+  padding-left: 8px;
+}
+
+.message-dismiss-link {
+  font-size: 18px;
+  color: #6b7280;
+  text-decoration: none;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+  line-height: 1;
+  opacity: 0.7;
+  font-weight: 300;
+}
+
+.message-dismiss-link:hover {
+  background-color: rgba(107, 114, 128, 0.1);
+  color: #374151;
+  text-decoration: none;
+  opacity: 1;
+}
+
+.message-settings-icon {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-size: 14px;
+  opacity: 0.7;
+  transition: all 0.2s ease;
+  line-height: 1;
+}
+
+.message-settings-icon:hover {
+  background-color: rgba(107, 114, 128, 0.1);
+  opacity: 1;
+  transform: scale(1.1);
+}
+
+.message-settings-icon:focus-visible {
+  outline: 2px solid var(--feedback-active);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Message Preferences Modal */
+.message-preferences-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 10000;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+.message-preferences-modal.hidden {
+  display: none !important;
+}
+
+.message-prefs-content {
+  background: var(--surface-primary, white);
+  border-radius: 16px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  padding: 24px;
+  width: 100%;
+  max-width: 500px;
+  max-height: 80vh;
+  margin: 20px;
+  position: relative;
+  overflow-y: auto;
+}
+
+.message-prefs-header {
+  text-align: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-subtle, #e5e7eb);
+}
+
+.message-prefs-header h2 {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-primary, #1f2937);
+  margin: 0;
+}
+
+.message-preferences-modal .modal-body {
+  margin-bottom: 16px;
+}
+
+.message-preferences-modal .modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-subtle, #e5e7eb);
+}
+
+.message-preferences-modal .primary-btn {
+  padding: 8px 20px;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.message-preferences-modal .secondary-btn {
+  padding: 8px 16px;
+  font-size: 0.9rem;
+}
+
+.prefs-description {
+  color: #6b7280;
+  font-size: 0.9rem;
+  margin-bottom: 16px;
+  line-height: 1.4;
+}
+
+.pref-category {
+  margin-bottom: 18px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.pref-category:last-of-type {
+  border-bottom: none;
+}
+
+.pref-header {
+  margin-bottom: 6px;
+}
+
+.pref-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 0.95rem;
+  color: #1f2937;
+}
+
+.pref-label input[type="checkbox"] {
+  cursor: pointer;
+  width: 20px;
+  height: 20px;
+  accent-color: var(--primary-color, #3b82f6);
+  border: 2px solid var(--primary-color, #3b82f6);
+  border-radius: 4px;
+}
+
+.pref-description {
+  font-size: 0.85rem;
+  color: #9ca3af;
+  margin-left: 26px;
+  line-height: 1.3;
+}
+
+.prefs-feedback {
+  margin-top: 16px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  text-align: center;
+  font-weight: 500;
+}
+
+.prefs-feedback.success {
+  background: #d1fae5;
+  color: #065f46;
+  border: 1px solid #10b981;
+}
+
+.prefs-feedback.error {
+  background: #fee2e2;
+  color: #dc2626;
+  border: 1px solid #ef4444;
+}
+
+/* Footer content (version + links) - Compact left-right layout */
+.footer-content {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px; /* Reasonable spacing between sections */
+  order: 2; /* Appears second */
+  min-height: 20px; /* Prevent layout collapse */
+}
+
+/* Feedback buttons */
+.feedback-btn {
+  background: none;
+  border: none;
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background-color 0.2s ease, color 0.2s ease, transform 0.1s ease;
+  min-width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--feedback-default);
+  position: relative;
+}
+
+.feedback-btn:hover {
+  background-color: var(--feedback-background-hover);
+  color: var(--feedback-hover);
+  transform: translateY(-1px);
+}
+
+.feedback-btn:active {
+  transform: translateY(0);
+}
+
+.feedback-btn.active {
+  background-color: var(--feedback-background-active);
+  color: var(--feedback-active);
+  font-weight: 600;
+}
+
+.feedback-btn:disabled {
+  color: #d1d5db;
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.feedback-btn:disabled:hover {
+  background-color: transparent;
+  transform: none;
+}
+
+/* Focus styles for accessibility */
+.feedback-btn:focus-visible {
+  outline: 2px solid var(--feedback-active);
+  outline-offset: 2px;
+}
+
+/* Responsive behavior for footer systems */
+@media (max-width: 390px) {
+  .footer-systems-row {
+    justify-content: center; /* Center on narrow screens */
+  }
+
+  .feedback-btn {
+    min-width: 28px;
+    height: 28px;
+    font-size: 1rem;
+  }
+
+  .message-content {
+    padding: 4px 8px; /* Reduce padding on narrow screens */
+  }
+
+  .message-text {
+    font-size: 0.85rem; /* Slightly smaller text */
+  }
+
+  .message-action-btn {
+    padding: 3px 6px;
+    font-size: 0.75rem;
+  }
+
+  .sidebar-footer {
+    gap: 6px; /* Slightly more spacing on mobile */
+  }
+}
+
+@media (min-width: 420px) {
+  .footer-systems-row {
+    justify-content: flex-start;
+  }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .feedback-btn {
+    border: 1px solid currentColor;
+  }
+
+  .feedback-btn.active {
+    background: #000000;
+    color: #ffffff;
+    border-color: #000000;
+  }
+
+  .feedback-btn:hover {
+    border-color: var(--feedback-hover);
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .feedback-btn {
+    transition: none;
+  }
+
+  .footer-systems-row {
+    transition: none;
+  }
+
+  .message-content {
+    transition: none;
+  }
+
+  .message-action-btn {
+    transition: none;
+  }
+
+  .feedback-btn:hover {
+    transform: none;
+  }
+}
+
+/* Animation for systems appearance */
+.footer-systems-row:not(.hidden) {
+  animation: feedbackSlideIn 0.3s ease-out;
+}
+
+@keyframes feedbackSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Feedback button success state */
+.feedback-btn.submitted {
+  animation: feedbackSuccess 0.4s ease-out;
+}
+
+@keyframes feedbackSuccess {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.1);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes forceRender {
+  0% {
+    opacity: 0.99;
+    transform: translateZ(0) scale(0.999);
+  }
+  100% {
+    opacity: 1;
+    transform: translateZ(0) scale(1);
+  }
+}
+
+/* Error Message Styling */
+.error {
+  white-space: pre-line; /* Preserves line breaks from \n */
+  color: rgb(30, 64, 175); /* Brand-aligned blue for professional messaging */
+  background-color: rgb(219, 234, 254); /* Light blue background */
+  border: 1px solid rgb(59, 130, 246); /* Blue border */
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  margin: 8px 0;
+}
+
+.error a {
+  color: rgb(37, 99, 235);
+  text-decoration: underline;
+}
+
+.error-image {
+  display: block;
+  width: calc(100% + 24px);
+  margin: 10px -12px 0;
+  border-radius: 0;
+  border: none;
+  border-top: 1px solid rgb(147, 197, 253);
+}
+
+/* ========================================
+   Prompt Selection Container & Components
+   ======================================== */
+
+/* Prompt Selection Container */
+.prompt-selection-container {
+  grid-column: span 3;  /* 3 of 12 columns = 25% */
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  position: relative;
+}
+
+/* Custom Dropdown Component */
+.custom-dropdown {
+  position: relative;
+  display: block;
+  width: 100%;
+  margin-bottom: 0;
+}
+
+/* Toggle Button */
+.custom-dropdown-btn {
+  width: 100%;
+  min-height: 44px;  /* Fixed height to prevent size changes */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 10px;  /* Match analyze button vertical padding */
+  gap: 4px;
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: "Segoe UI", "Roboto", Arial, sans-serif;
+  font-size: 0.95rem;
+  color: #374151;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.custom-dropdown-btn:hover {
+  border-color: #9ca3af;
+}
+
+.custom-dropdown-btn:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.1);
+}
+
+.custom-dropdown-btn[aria-expanded="true"] {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.1);
+}
+
+.custom-dropdown-btn-text {
+  flex: 0 0 auto;
+  text-align: left;
+  padding-left: 8px;
+  font-size: 13px;
+  letter-spacing: 0.5px;
+  color: #374151;
+}
+
+.custom-dropdown-btn-icon {
+  margin-left: 0;
+  font-size: 0.75rem;
+  color: #6b7280;
+  transition: transform 0.2s ease;
+}
+
+.custom-dropdown-btn[aria-expanded="true"] .custom-dropdown-btn-icon {
+  transform: rotate(180deg);
+}
+
+/* Dropdown Menu */
+.custom-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  /* Wider menu for better readability */
+  min-width: 240px;
+  max-width: min(360px, calc(100vw - 32px));
+  background: #ffffff;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.custom-dropdown-menu.hidden {
+  display: none;
+}
+
+/* Dropdown Options - Inline layout for space savings */
+.custom-dropdown-option {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 10px 12px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: "Segoe UI", "Roboto", Arial, sans-serif;
+  text-align: left;
+  transition: background-color 0.15s ease;
+  gap: 12px;
+}
+
+.custom-dropdown-option:hover {
+  background-color: #f3f4f6;
+}
+
+.custom-dropdown-option.selected {
+  background-color: #eff6ff;
+}
+
+.custom-dropdown-option.selected:hover {
+  background-color: #dbeafe;
+}
+
+/* Content wrapper for inline label + description layout */
+.custom-dropdown-option-content {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 16px;
+}
+
+.custom-dropdown-option-label {
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: #374151;
+  margin-bottom: 0;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.custom-dropdown-option.selected .custom-dropdown-option-label {
+  color: var(--primary-color);
+}
+
+.custom-dropdown-option-description {
+  font-size: 0.8rem;
+  color: #6b7280;
+  line-height: 1.3;
+  text-align: right;
+  margin-left: auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 1;
+}
+
+/* Locked dropdown options */
+.custom-dropdown-option.locked {
+  opacity: 0.6;
+  cursor: not-allowed;
+  background-color: #f9fafb;
+}
+
+.custom-dropdown-option.locked:hover {
+  background-color: #f9fafb;
+}
+
+.custom-dropdown-option.locked .custom-dropdown-option-label {
+  color: #9ca3af;
+}
+
+.custom-dropdown-option.locked .custom-dropdown-option-description {
+  color: #d97706;
+  font-weight: 500;
+}
+
+/* Progressive Disclosure - Custom Prompt UI */
+.custom-prompt-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 12px 0 12px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  margin-top: 0;  /* No top margin */
+  grid-column: span 12;  /* Span full width of control-section grid */
+  width: 100%;
+  box-sizing: border-box;  /* Include padding and border in width calculation */
+  transition: opacity 0.2s ease, max-height 0.3s ease;
+}
+
+.custom-prompt-container.hidden {
+  display: none;
+  opacity: 0;
+  max-height: 0;
+  overflow: hidden;
+}
+
+/* Header line: Label (left) + Character count (right) */
+.custom-prompt-header-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 2px;
+  margin-bottom: 4px;
+}
+
+.custom-prompt-label {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #374151;
+  margin-bottom: 0;
+}
+
+.custom-prompt-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  font-family: "Segoe UI", "Roboto", Arial, sans-serif;
+  font-size: 0.9rem;
+  color: #374151;
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  resize: vertical;
+  min-height: 80px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.custom-prompt-textarea:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.1);
+}
+
+.custom-prompt-textarea::placeholder {
+  color: #9ca3af;
+}
+
+.custom-prompt-char-count {
+  font-size: 0.75rem;
+  color: #6b7280;
+  text-align: right;
+  margin-left: 8px;
+  white-space: nowrap;
+}
+
+/* Phase 3: Save status indicator and status line container */
+.custom-prompt-status-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 4px;
+  margin-bottom: 0;
+}
+
+.save-status {
+  font-size: 0.75rem;
+  font-weight: 500;
+  margin-left: 12px;
+  transition: opacity 0.3s ease;
+}
+
+.custom-prompt-save-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.save-prompt-checkbox {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.save-prompt-label {
+  font-size: 0.9rem;
+  color: #374151;
+  cursor: pointer;
+  user-select: none;
+}
+
+.prompt-name-input-container {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-left: 24px; /* Indent under checkbox */
+  transition: opacity 0.2s ease;
+}
+
+.prompt-name-input-container.hidden {
+  display: none;
+  opacity: 0;
+}
+
+.prompt-name-label {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: #374151;
+}
+
+.prompt-name-input {
+  padding: 8px 12px;
+  font-family: "Segoe UI", "Roboto", Arial, sans-serif;
+  font-size: 0.9rem;
+  color: #374151;
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.prompt-name-input:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.1);
+}
+
+.phase1-notice {
+  font-size: 0.8rem;
+  color: #6b7280;
+  background: #fef3c7;
+  border: 1px solid #fbbf24;
+  padding: 8px 10px;
+  border-radius: 4px;
+  margin-top: 4px;
+}
+
+/* Utility Classes */
+.hidden {
+  display: none !important;
+}
+
+/* =================================================================
+   Trade Marker Toolbar
+   ================================================================= */
+
+.marker-toolbar--unavailable {
+  /* Removed opacity - disabled buttons use grayscale filter instead */
+  /* This ensures tooltips remain fully readable */
+}
+
+.marker-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 2px solid transparent;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-family: inherit;
+}
+
+.marker-btn:disabled {
+  cursor: not-allowed;
+  filter: grayscale(0.5) brightness(1.1);
+}
+
+.marker-btn--long {
+  background: rgba(34, 197, 94, 0.08);
+  color: #15803d;
+  border-color: rgba(34, 197, 94, 0.2);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 1px 2px 0 rgba(34, 197, 94, 0.1);
+}
+
+.marker-btn--long:hover:not(:disabled) {
+  background: rgba(34, 197, 94, 0.12);
+  border-color: rgba(34, 197, 94, 0.3);
+  box-shadow: 0 2px 4px 0 rgba(34, 197, 94, 0.15);
+}
+
+.marker-btn--long.marker-btn--active {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.9), rgba(34, 197, 94, 1));
+  color: #ffffff;
+  border-color: #16a34a;
+  box-shadow: 0 4px 8px 0 rgba(34, 197, 94, 0.25);
+}
+
+.marker-btn--short {
+  background: rgba(239, 68, 68, 0.08);
+  color: #b91c1c;
+  border-color: rgba(239, 68, 68, 0.2);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 1px 2px 0 rgba(239, 68, 68, 0.1);
+}
+
+.marker-btn--short:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.3);
+  box-shadow: 0 2px 4px 0 rgba(239, 68, 68, 0.15);
+}
+
+.marker-btn--short.marker-btn--active {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.9), rgba(239, 68, 68, 1));
+  color: #ffffff;
+  border-color: #dc2626;
+  box-shadow: 0 4px 8px 0 rgba(239, 68, 68, 0.25);
+}
+
+.marker-btn__icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.marker-btn__triangle {
+  width: 0;
+  height: 0;
+  border-style: solid;
+  flex-shrink: 0;
+}
+
+.marker-btn__triangle--up {
+  border-width: 0 8px 12px 8px;
+  border-color: transparent transparent #166534 transparent;
+}
+
+.marker-btn--long:hover:not(:disabled) .marker-btn__triangle--up {
+  border-color: transparent transparent #15803d transparent;
+}
+
+.marker-btn--long.marker-btn--active .marker-btn__triangle--up {
+  border-color: transparent transparent #ffffff transparent;
+}
+
+.marker-btn__triangle--down {
+  border-width: 12px 8px 0 8px;
+  border-color: #991b1b transparent transparent transparent;
+}
+
+.marker-btn--short:hover:not(:disabled) .marker-btn__triangle--down {
+  border-color: #b91c1c transparent transparent transparent;
+}
+
+.marker-btn--short.marker-btn--active .marker-btn__triangle--down {
+  border-color: #ffffff transparent transparent transparent;
+}
+
+/* marker-status removed - using tooltips instead */
+
+/* =================================================================
+   Compact Single-Row Marker Toolbar - Above Analyze Button
+   ================================================================= */
+
+.marker-toolbar--compact {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);  /* Match control-section grid */
+  gap: 8px;
+  padding: 0;  /* No padding */
+  margin-bottom: 0;  /* No bottom margin */
+  background: transparent;  /* Remove background for cleaner look */
+  border-radius: 0;
+  /* Border removed - using whitespace for visual separation */
+}
+
+/* Grid layout: 2+2+2 (actions) + 2-col gap + 4 (journal) = 12 columns */
+.marker-toolbar--compact .marker-btn--long {
+  grid-column: 1 / span 2;
+}
+
+.marker-toolbar--compact .marker-btn--short {
+  grid-column: 3 / span 2;
+}
+
+.marker-toolbar--compact .marker-btn--textbox {
+  grid-column: 5 / span 2;
+}
+
+.marker-toolbar--compact .marker-btn--util {
+  display: none;  /* Hide Clear button */
+}
+
+.marker-toolbar--compact .marker-btn--right {
+  grid-column: 9 / span 4;  /* Creates 2-column gap (cols 7-8) */
+}
+
+/* Journal button icon styling */
+.marker-btn--journal .icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 4px;  /* Space between icon and "Journal" text */
+}
+
+.marker-btn--journal .icon svg {
+  width: 16px;  /* Slightly smaller than header icons for compact button */
+  height: 16px;
+  stroke: currentColor;
+  transition: transform 0.2s ease;
+}
+
+.marker-btn--journal:hover:not(:disabled) .icon svg {
+  transform: scale(1.05);  /* Subtle hover effect */
+}
+
+/* Compact buttons - uniform size for all */
+.marker-btn--compact {
+  padding: 4px 10px;
+  font-size: 11px;
+  min-width: 32px;
+  height: 28px;
+  justify-content: center;
+}
+
+/* Smaller triangles for compact mode */
+.marker-toolbar--compact .marker-btn__triangle--up {
+  border-width: 0 5px 8px 5px;
+}
+
+.marker-toolbar--compact .marker-btn__triangle--down {
+  border-width: 8px 5px 0 5px;
+}
+
+/* Text box button - glassmorphic style */
+.marker-btn--textbox {
+  background: rgba(245, 158, 11, 0.08);
+  color: #c2410c;
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 1px 2px 0 rgba(245, 158, 11, 0.1);
+}
+
+.marker-btn--textbox:hover:not(:disabled) {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.3);
+  box-shadow: 0 2px 4px 0 rgba(245, 158, 11, 0.15);
+}
+
+.marker-btn--textbox.marker-btn--active {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.9), rgba(245, 158, 11, 1));
+  color: #ffffff;
+  border-color: #d97706;
+  box-shadow: 0 4px 8px 0 rgba(245, 158, 11, 0.25);
+}
+
+/* Utility buttons (clear) - minimal text style */
+.marker-btn--util {
+  background: transparent;
+  color: var(--text-secondary, #6b7280);
+  border: 1px solid transparent;
+  font-size: 11px;
+  text-transform: lowercase;
+  padding: 4px 8px;
+}
+
+.marker-btn--util:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.05);
+  border-color: var(--border-color, #e5e7eb);
+}
+
+/* Journal button - smart enabled state */
+.marker-btn--journal {
+  background: transparent;
+  color: var(--text-secondary, #6b7280);
+  border: 1px solid transparent;
+  font-size: 11px;
+  padding: 4px 10px;
+  gap: 4px;
+  transition: all 0.2s ease;
+}
+
+/* Disabled state - unified with other marker buttons */
+.marker-btn--journal:disabled {
+  filter: grayscale(0.5) brightness(1.1);
+}
+
+/* Enabled state - blue accent links to analysis workflow */
+.marker-btn--journal:not(:disabled) {
+  background: var(--surface-tertiary);      /* #f3f4f6 - light grey background */
+  border: 1.5px solid #60a5fa;              /* #60a5fa - lighter blue border (blue-400) */
+  color: var(--primary-color);              /* #1e3a8a - deep blue text */
+  font-weight: 500;                         /* Slightly bolder for emphasis */
+}
+
+.marker-btn--journal:not(:disabled):hover {
+  background: var(--primary-surface);       /* #eff6ff - light blue background */
+  border-color: var(--primary-light);       /* #3b82f6 - medium blue on hover */
+  color: var(--primary-color);              /* Maintain blue text */
+  box-shadow: 0 1px 3px rgba(59, 130, 246, 0.15); /* Subtle blue shadow */
+}
+
+/* Tooltip for active marker buttons - appears above, subtle style */
+.marker-btn--compact[data-tooltip] {
+  position: relative;
+}
+
+.marker-btn--compact[data-tooltip]:hover::after,
+.marker-btn--compact[data-tooltip].marker-btn--active::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: #f3f4f6 !important;
+  color: #1f2937 !important;  /* Dark text for all tooltips */
+  padding: 5px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  z-index: 100;
+  border: 1px solid #d1d5db;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  animation: tooltipFadeIn 0.2s ease;
+}
+
+.marker-btn--compact[data-tooltip]:hover::before,
+.marker-btn--compact[data-tooltip].marker-btn--active::before {
+  content: '';
+  position: absolute;
+  bottom: calc(100% + 2px);
+  left: 50%;
+  transform: translateX(-50%);
+  border: 4px solid transparent;
+  border-top-color: #d1d5db;
+  z-index: 100;
+}
+
+@keyframes tooltipFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Left-aligned tooltip for marker buttons (▲ ▼) - prevents left overflow */
+.marker-btn--long[data-tooltip]:hover::after,
+.marker-btn--long[data-tooltip].marker-btn--active::after,
+.marker-btn--short[data-tooltip]:hover::after,
+.marker-btn--short[data-tooltip].marker-btn--active::after,
+.marker-btn--textbox[data-tooltip]:hover::after,
+.marker-btn--textbox[data-tooltip].marker-btn--active::after {
+  left: 0;
+  right: auto;
+  transform: translateX(0);
+}
+
+.marker-btn--long[data-tooltip]:hover::before,
+.marker-btn--long[data-tooltip].marker-btn--active::before,
+.marker-btn--short[data-tooltip]:hover::before,
+.marker-btn--short[data-tooltip].marker-btn--active::before,
+.marker-btn--textbox[data-tooltip]:hover::before,
+.marker-btn--textbox[data-tooltip].marker-btn--active::before {
+  left: 10px;
+  right: auto;
+  transform: translateX(0);
+}
+
+/* Right-aligned tooltip for rightmost button (Journal) - prevents right overflow */
+.marker-btn--right[data-tooltip]:hover::after,
+.marker-btn--right[data-tooltip].marker-btn--active::after {
+  left: auto;
+  right: 0;
+  transform: translateX(0);
+}
+
+.marker-btn--right[data-tooltip]:hover::before,
+.marker-btn--right[data-tooltip].marker-btn--active::before {
+  left: auto;
+  right: 10px;
+  transform: translateX(0);
+}

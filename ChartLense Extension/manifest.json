@@ -1,0 +1,98 @@
+{
+"update_url": "https://clients2.google.com/service/update2/crx",
+
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAm46AYjKOHFW80pwjLfXkzbOjbib8uPMI4BTDIvAYgPBu+3MDVlqvnPTX+0l4TZr2ydd+xh0bUWCuE/fz7NWdhBlrdbRawrGERfgGrbvUI1Q9z7zUYkqN3E8zTc91ecIHEEOvE5J6DnVp/tHlpG+6bTD6lMOCuVHSj5puI4PhjTkn0k8uQYyjvONCmKDLZO88intwcw5bUX3ZrOEaD4Z65bb9E04KnP+zEnJsHLqHclOVvfCWcQiNXBlqDnVlC5lmGgVMY2hkHYRWRJyrAUvpXbJY7u+3L4C4R39uQuCiG4/sbOFLhIL8lYZeZZqdcGy6WklaqDXlGh6s3Vrzf5lo5QIDAQAB",
+  "manifest_version": 3,
+  "name": "__MSG_extensionName__",
+  "short_name": "ChartLense",
+  "version": "1.6.6",
+  "description": "__MSG_extensionDescription__",
+  "default_locale": "en",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "sidePanel",
+    "tabs",
+    "offscreen",
+    "identity"
+  ],
+  "oauth2": {
+    "client_id": "182191314631-0ecv0qakrq3n840asrigve48v17ibkea.apps.googleusercontent.com",
+    "scopes": [
+      "https://www.googleapis.com/auth/userinfo.email",
+      "https://www.googleapis.com/auth/userinfo.profile"
+    ]
+  },
+  "host_permissions": [
+    "https://*.tradingview.com/*",
+    "https://*.stock3.com/*",
+    "https://*.prorealtime.com/*",
+    "https://finance.yahoo.com/*",
+    "https://snapchart-proxy.brightcompass.workers.dev/*",
+    "https://*.googleapis.com/*"
+  ],
+  "optional_host_permissions": ["*://*/*"],
+  "action": {
+    "default_icon": {
+      "16": "icons/ChartLense_icon_white_16.png",
+      "32": "icons/ChartLense_icon_white_32.png",
+      "48": "icons/ChartLense_icon_white_48.png",
+      "128": "icons/ChartLense_icon_white_128.png"
+    }
+  },
+  "side_panel": {
+    "default_path": "sidebar.html"
+  },
+  "icons": {
+    "16": "icons/ChartLense_icon_white_16.png",
+    "32": "icons/ChartLense_icon_white_32.png",
+    "48": "icons/ChartLense_icon_white_48.png",
+    "128": "icons/ChartLense_icon_white_128.png"
+  },
+  "background": {
+    "service_worker": "background.bundle.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.tradingview.com/*",
+        "https://*.stock3.com/*",
+        "https://*.prorealtime.com/*",
+        "https://finance.yahoo.com/*"
+      ],
+      "js": ["content/trade-marker-overlay.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://*.tradingview.com/*",
+        "https://*.stock3.com/*",
+        "https://*.prorealtime.com/*",
+        "https://finance.yahoo.com/*"
+      ],
+      "js": ["content/platform-indicator.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "icons/*",
+        "images/*",
+        "offscreen.html",
+        "sidebar.css",
+        "modal.css",
+        "blackout-test-preview.html"
+      ],
+      "matches": [
+        "*://*.tradingview.com/*",
+        "*://*.stock3.com/*",
+        "*://*.prorealtime.com/*",
+        "*://finance.yahoo.com/*"
+      ]
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; connect-src https://snapchart-proxy.brightcompass.workers.dev https://snapchart-proxy-dev.brightcompass.workers.dev https://api.openai.com https://firebase.googleapis.com https://securetoken.googleapis.com https://identitytoolkit.googleapis.com https://*.firebaseio.com https://accounts.google.com https://oauth2.googleapis.com https://www.googleapis.com"
+  }
+}

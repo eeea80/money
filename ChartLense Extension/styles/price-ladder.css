@@ -1,0 +1,337 @@
+/* ============================================================================
+   PRICE LADDER VISUALIZATION - "Sleek & Clean" Architecture
+   Implements design specification from `.docs/07-ongoing/price_ladder.md`
+   M5: Spatial Risk/Reward Component (KEY INNOVATION #2)
+   ========================================================================= */
+
+/* ============================================================================
+   CONTAINER WRAPPER
+   Clean container with border and padding
+   ========================================================================= */
+
+.price-ladder-container {
+  padding: 15px 10px;
+  background: #fff;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+}
+
+/* ============================================================================
+   WARNING BADGE
+   Real HTML element (not pseudo-element) for tight consolidation
+   Positioned at top with margin clearance
+   ========================================================================= */
+
+.ladder-warning {
+  font-size: 11px;
+  color: #d97706; /* Amber */
+  background: #fffbeb; /* Amber tint */
+  padding: 4px 8px;
+  border-radius: 4px;
+  margin-bottom: 20px; /* KEY: Space below warning */
+  text-align: center;
+  font-weight: 500;
+}
+
+/* ============================================================================
+   PRICE LADDER MAIN CONTAINER
+   Fixed height with relative positioning for absolute children
+   ========================================================================= */
+
+.price-ladder {
+  position: relative;
+  height: 120px; /* Fixed height for scale */
+  margin: 0 10px 40px 20px; /* M7.5: Added margin-bottom for invalidation extension */
+}
+
+/* ============================================================================
+   VERTICAL GRADIENT LINE (Background)
+   Renamed from ladder-line to ladder-line-bg
+   ========================================================================= */
+
+.ladder-line-bg {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  border-radius: 2px;
+  background: linear-gradient(
+    to bottom,
+    #ef4444 0%,    /* Red (resistance) */
+    #3b82f6 50%,   /* Blue (neutral) */
+    #10b981 100%   /* Green (support) */
+  );
+}
+
+/* ============================================================================
+   PRICE LEVELS (Resistance, Current, Support)
+   CRITICAL: transform: translateY(-50%) centers labels at Y position
+   This solves label clipping issues (support label can extend below 100%)
+   ========================================================================= */
+
+.price-level {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  transform: translateY(-50%); /* CENTER at Y position - CRITICAL PATTERN */
+  display: flex;
+  align-items: center;
+}
+
+/* ============================================================================
+   TICK MARKS (Resistance/Support Indicators)
+   Small 12px × 2px ticks (replaces large 12px circles)
+   ========================================================================= */
+
+.tick-mark {
+  width: 12px;
+  height: 2px;
+  background: #9ca3af; /* Gray default */
+  margin-left: -4px; /* Center on line: -(12px / 2) + 2px line center = -4px */
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+
+/* Color coding for ticks */
+.resistance .tick-mark {
+  background: #ef4444; /* Red */
+}
+
+.support .tick-mark {
+  background: #10b981; /* Green */
+}
+
+/* ============================================================================
+   CURRENT PRICE DOT (Special Indicator)
+   10px dot with white border and ring effect (box-shadow)
+   ========================================================================= */
+
+.current-dot {
+  width: 10px;
+  height: 10px;
+  background: #3b82f6; /* Blue (default/neutral) */
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px #3b82f6; /* Ring effect */
+  margin-left: -5px; /* Center on line: -(14px total / 2) + 2px line center = -5px */
+  margin-right: 10px;
+  flex-shrink: 0;
+  z-index: 2;
+}
+
+/* Sentiment-based dot colors */
+.price-level.current[data-sentiment="bullish"] .current-dot {
+  background: #10b981; /* Green for bullish */
+  box-shadow: 0 0 0 2px #10b981;
+}
+
+.price-level.current[data-sentiment="bearish"] .current-dot {
+  background: #ef4444; /* Red for bearish */
+  box-shadow: 0 0 0 2px #ef4444;
+}
+
+.price-level.current[data-sentiment="neutral"] .current-dot {
+  background: #3b82f6; /* Blue for neutral */
+  box-shadow: 0 0 0 2px #3b82f6;
+}
+
+/* ============================================================================
+   LABEL GROUP (Renamed from price-label)
+   Contains price-value and price-tag inline
+   ========================================================================= */
+
+.label-group {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+
+/* Price value (main number) */
+.price-value {
+  font-family: 'Courier New', 'Monaco', monospace;
+  font-weight: 700;
+  font-size: 13px;
+  color: #1f2937; /* Dark gray */
+  font-variant-numeric: tabular-nums;
+}
+
+/* Price tag (RES/SUP label with percentage and reason) */
+.price-tag {
+  font-size: 10px;
+  color: #6b7280; /* Medium gray */
+  font-weight: 400;
+}
+
+/* ============================================================================
+   VISUAL HIERARCHY
+   Current price stands out with larger font
+   ========================================================================= */
+
+.current .price-value {
+  font-size: 15px; /* Larger than resistance/support */
+  color: #111; /* Darker black */
+}
+
+/* Color coding for resistance/support values */
+.resistance .price-value {
+  color: #ef4444; /* Red */
+}
+
+.support .price-value {
+  color: #10b981; /* Green */
+}
+
+/* ============================================================================
+   COLLISION AVOIDANCE (Tight Consolidation)
+   When current price is very close to resistance/support
+   ========================================================================= */
+
+/* Collision with resistance (top) - push label DOWN */
+.price-level.current.avoid-overlap-top .label-group {
+  transform: translateY(15px);
+  transition: transform 0.2s ease;
+}
+
+/* Collision with support (bottom) - push label UP */
+.price-level.current.avoid-overlap-bottom .label-group {
+  transform: translateY(-25px);
+  transition: transform 0.2s ease;
+}
+
+/* Ensure current price is always on top */
+.price-level.current {
+  z-index: 10;
+}
+
+/* Improve readability with subtle shadow */
+.price-level.current .price-value {
+  text-shadow: 0 0 5px rgba(255, 255, 255, 0.8);
+}
+
+/* ============================================================================
+   INVALIDATION EXTENSION (M7.5)
+   Integrates invalidation into ladder as fourth point
+   Saves 30-40px vertical space vs. separate box
+   ========================================================================= */
+
+.invalidation-extension {
+  position: absolute;
+  top: 100%; /* Starts exactly at support line (bottom of ladder) */
+  left: 0;
+  width: 100%;
+  padding-top: 15px; /* Spacing from support */
+  display: flex;
+  align-items: center;
+}
+
+/* Dashed red line connecting support to invalidation (danger zone) */
+.dashed-connector {
+  position: absolute;
+  left: 2px; /* Center on 4px ladder-line-bg (4/2 = 2) */
+  top: 0;
+  height: 25px; /* Length of connector */
+  width: 0;
+  border-left: 2px dashed #fca5a5; /* Light red */
+  z-index: 1;
+}
+
+/* X symbol marker for invalidation */
+.invalidation-marker {
+  width: 12px;
+  text-align: center;
+  font-size: 10px;
+  font-weight: bold;
+  color: #ef4444; /* Red-500 */
+  margin-left: -4px; /* Align with ladder line */
+  margin-right: 8px;
+  background: white; /* Covers dashed line behind it */
+  z-index: 2;
+  position: relative;
+}
+
+/* Invalidation label styling (reuse existing .label-group structure) */
+.invalidation-extension .label-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.invalidation-extension .price-value {
+  font-weight: 700;
+  font-size: 13px;
+  color: #dc2626; /* Red-600 */
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+}
+
+.invalidation-extension .price-tag {
+  font-size: 10px;
+  color: #f87171; /* Red-400 */
+  font-weight: 500;
+}
+
+/* ============================================================================
+   ACCESSIBILITY
+   ========================================================================= */
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .price-level {
+    transition: none;
+  }
+}
+
+/* High contrast mode */
+@media (prefers-contrast: high) {
+  .ladder-line-bg {
+    border: 1px solid currentColor;
+  }
+
+  .tick-mark,
+  .current-dot {
+    border-width: 3px;
+  }
+}
+
+/* ============================================================================
+   RESPONSIVE ADJUSTMENTS
+   ========================================================================= */
+
+@media (max-width: 360px) {
+  .price-ladder {
+    height: 100px; /* Smaller on mobile */
+    margin-bottom: 35px; /* M7.5: Slightly less space for invalidation extension on mobile */
+  }
+
+  .price-value {
+    font-size: 12px;
+  }
+
+  .current .price-value {
+    font-size: 14px;
+  }
+
+  .price-tag {
+    font-size: 9px;
+  }
+
+  /* M7.5: Mobile adjustments for invalidation extension */
+  .dashed-connector {
+    height: 20px; /* Shorter on mobile */
+  }
+
+  .invalidation-extension {
+    padding-top: 12px;
+  }
+}
+
+/* ============================================================================
+   SMART MONEY LABELS (M7)
+   Institutional trading terminology labels for professional appearance
+   ========================================================================= */
+
+/* Smart Money Label - Subtle amber highlight for institutional/professional feel */
+.smart-money-label {
+  color: #f59e0b; /* Amber - suggests institutional/professional */
+  font-weight: 600;
+}

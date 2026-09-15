@@ -1,0 +1,1026 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ChartLense™ - Chart Analyzer</title>
+    <link rel="stylesheet" href="sidebar.css" />
+    <link rel="stylesheet" href="modal.css" />
+    <link rel="stylesheet" href="styles/journal.css" />
+    <script src="sidebar.bundle.js"></script>
+  </head>
+
+  <body>
+    <div class="sidebar-wrapper">
+      <div class="sidebar-container">
+        <header class="sidebar-header">
+          <div class="header-brand">
+            <a
+              href="https://chartlense.com/"
+              target="_blank"
+              class="logo-link"
+              title="Go to Homepage"
+            >
+              <div class="logo-container">
+                <img
+                  src="icons/logo_white_48.png"
+                  alt="ChartLense Logo"
+                  class="logo"
+                />
+              </div>
+            </a>
+          </div>
+          <div class="header-controls">
+            <span id="header-quota-display" class="header-quota-display" title="Click for details" style="display: none;">
+              <span id="header-quota-text" class="header-quota-text"></span>
+              <span id="header-quota-boost" class="header-quota-boost"></span>
+            </span>
+            <a
+              id="doc-link"
+              class="doc-link"
+              href="#"
+              data-guide-url="https://chartlense.com/docs/"
+              target="_blank"
+              title="User Guide"
+              data-icon="Book"
+            >
+              <span class="icon"></span>
+              <span class="text">Guide</span>
+            </a>
+            <button
+              id="feedback-btn"
+              class="secondary-btn"
+              title="Send Feedback"
+              data-icon="Mail"
+            >
+              <span class="icon"></span>
+              <span class="text">Feedback</span>
+            </button>
+            <button
+              id="settings-btn"
+              class="secondary-btn"
+              title="Privacy Settings"
+              data-icon="Settings"
+            >
+              <span class="icon"></span>
+              <span class="text">Privacy</span>
+            </button>
+            <div class="account-dropdown" id="account-dropdown">
+              <button
+                id="account-btn"
+                class="auth-btn account-btn"
+                title="Account Menu"
+                data-icon="User"
+              >
+                <img
+                  id="account-avatar"
+                  class="account-avatar"
+                  style="display: none"
+                  onerror="this.style.display='none'; document.getElementById('account-icon').style.display='inline-block';"
+                />
+                <span class="icon" id="account-icon"></span>
+                <span id="account-preview" class="text account-preview"
+                  >Login</span
+                >
+              </button>
+              <div id="account-menu" class="account-menu hidden">
+                <div id="account-email" class="account-email"></div>
+                <div id="account-plan" class="account-plan-detailed">
+                  <div class="account-plan-row">
+                    <span>Subscription:</span>
+                    <span id="account-plan-badge" class="plan-badge"></span>
+                  </div>
+                  <div class="account-plan-row">
+                    <span>Refresh:</span>
+                    <span id="account-sub-refresh">--</span>
+                  </div>
+                  <div class="account-plan-row">
+                    <span>Analysis:</span>
+                    <span id="account-sub-quota">0/0</span>
+                  </div>
+                  <div id="account-boost-row" class="account-plan-row" style="display: none">
+                    <span>Boost:</span>
+                    <span id="account-boost-quota">+0</span>
+                  </div>
+                </div>
+                <button
+                  id="upgrade-account-btn"
+                  class="upgrade-account-option hidden"
+                  data-icon="Rocket"
+                >
+                  <span class="upgrade-account-icon"></span>
+                  <span class="upgrade-account-text">Upgrade Account</span>
+                </button>
+                <button
+                  id="manage-subscription-btn"
+                  class="manage-subscription-option hidden"
+                >
+                  <span class="manage-subscription-icon">⚙️</span>
+                  <span class="manage-subscription-text"
+                    >Manage Subscription</span
+                  >
+                </button>
+                <button id="logout-btn" class="logout-option" data-icon="LogOut">
+                  <span class="logout-icon"></span>
+                  <span class="logout-text">Logout</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <main class="main-content">
+          <div class="card unified-card">
+            <!-- Compact Marker Toolbar - Single Row Above Analyze Button -->
+            <div id="marker-toolbar" class="marker-toolbar--compact">
+              <button
+                id="marker-long-btn"
+                class="marker-btn marker-btn--compact marker-btn--long"
+                data-tooltip="Click on chart to place LONG marker"
+              >
+                <span class="marker-btn__triangle marker-btn__triangle--up"></span>
+              </button>
+              <button
+                id="marker-short-btn"
+                class="marker-btn marker-btn--compact marker-btn--short"
+                data-tooltip="Click on chart to place SHORT marker"
+              >
+                <span class="marker-btn__triangle marker-btn__triangle--down"></span>
+              </button>
+              <button
+                id="marker-textbox-btn"
+                class="marker-btn marker-btn--compact marker-btn--textbox"
+                data-tooltip="Click on chart to add note"
+              >
+                <span class="marker-btn__icon">💬</span>
+              </button>
+              <button
+                id="marker-clear-btn"
+                class="marker-btn marker-btn--compact marker-btn--util"
+                data-tooltip="Clear all markers"
+                disabled
+              >clear</button>
+              <button
+                id="marker-journal-btn"
+                class="marker-btn marker-btn--compact marker-btn--journal marker-btn--right"
+                data-tooltip="First Analyze this chart"
+                data-icon="Book"
+                disabled
+              ><span class="icon"></span> Journal</button>
+            </div>
+
+            <!-- Control Section -->
+            <div class="control-section">
+              <!-- Analysis Button (Left - 70%) -->
+              <button id="new-analysis-btn" class="primary-btn analyze-btn-horizontal">
+                Analyze this chart
+              </button>
+
+              <!-- Dropdown Selector (Right - 30%) -->
+              <div
+                id="prompt-selection-container"
+                class="prompt-selection-container"
+              >
+                <!-- This area will be populated by JavaScript (prompt-manager.js) -->
+              </div>
+            </div>
+          </div>
+
+          <div id="result" class="card hidden">
+            <!-- Analysis content inserted directly here -->
+          </div>
+        </main>
+
+        <footer class="sidebar-footer">
+          <!-- Independent Footer Systems Row -->
+          <div class="footer-systems-row">
+            <!-- Left side: Feedback thumbs (reserved space, independent) -->
+            <div
+              class="feedback-thumbs-container"
+              id="feedback-thumbs-container"
+              role="group"
+              aria-label="Rate this analysis"
+            >
+              <div class="feedback-buttons">
+                <button
+                  class="feedback-btn"
+                  data-feedback="positive"
+                  title="This analysis was helpful"
+                  aria-label="Mark this analysis as helpful"
+                  aria-pressed="false"
+                >
+                  👍
+                </button>
+                <button
+                  class="feedback-btn"
+                  data-feedback="negative"
+                  title="This analysis was not helpful"
+                  aria-label="Mark this analysis as not helpful"
+                  aria-pressed="false"
+                >
+                  👎
+                </button>
+              </div>
+            </div>
+
+            <!-- Right side: Message2Client content (independent) -->
+            <div
+              class="message2client-container hidden"
+              id="message2client-container"
+              role="region"
+              aria-label="System messages and upgrade prompts"
+            >
+              <div class="message-content" id="quota-message-content">
+                <span class="message-text" id="message-text"></span>
+                <button
+                  class="message-action-btn"
+                  id="message-action-btn"
+                  type="button"
+                  style="display: none"
+                >
+                  Action
+                </button>
+              </div>
+              <!-- Settings and dismiss controls -->
+              <div class="message-controls">
+                <a
+                  href="#"
+                  class="message-dismiss-link"
+                  id="message-dismiss-link"
+                  aria-label="Dismiss message"
+                  >×</a
+                >
+                <button
+                  class="message-settings-icon"
+                  id="message-settings-icon"
+                  type="button"
+                  aria-label="Message preferences"
+                  title="Message preferences"
+                >
+                  ⚙️
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Static footer content -->
+          <div class="footer-content">
+            <div class="version-info" id="version-info">v1.0.0</div>
+            <div class="footer-links">
+              <a href="#" id="footer-disclaimer-link" class="footer-link"
+                >⚠️ Educational use • Not investment advice</a
+              >
+              <span class="footer-separator">•</span>
+              <a
+                href="https://chartlense.com/privacy.html"
+                target="_blank"
+                class="footer-link"
+                title="Privacy Policy"
+              >
+                Privacy
+              </a>
+              <span class="footer-separator">•</span>
+              <a
+                href="https://chartlense.com/terms.html"
+                target="_blank"
+                class="footer-link"
+                title="Terms of Service"
+              >
+                Terms
+              </a>
+            </div>
+          </div>
+        </footer>
+      </div>
+    </div>
+
+    <div id="auth-modal" class="auth-modal hidden">
+      <div class="auth-modal-content">
+        <!-- Header -->
+        <div class="auth-modal-header">
+          <div class="auth-modal-logo-container">
+            <img
+              src="icons/logo_white_48.png"
+              alt="ChartLense Logo"
+              class="auth-modal-logo"
+            />
+            <h2 id="auth-modal-title" class="auth-modal-title">ChartLense</h2>
+          </div>
+          <p id="auth-modal-subtitle" class="auth-modal-subtitle">
+            Sign in to access your AI analysis
+          </p>
+        </div>
+
+        <!-- Google Button -->
+        <button id="google-login-btn" class="google-auth-btn">
+          <svg width="20" height="20" viewBox="0 0 24 24">
+            <path
+              fill="#4285F4"
+              d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+            />
+            <path
+              fill="#34A853"
+              d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+            />
+            <path
+              fill="#FBBC05"
+              d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+            />
+            <path
+              fill="#EA4335"
+              d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+            />
+          </svg>
+          <span id="google-button-text">Sign in with Google</span>
+        </button>
+
+        <!-- Divider -->
+        <div class="auth-divider">
+          <span>OR</span>
+        </div>
+
+        <!-- Email/Password Form -->
+        <div class="email-auth-section">
+          <form id="auth-form" class="auth-form">
+            <input
+              type="email"
+              id="auth-email"
+              placeholder="Email"
+              autocomplete="email"
+              aria-label="Email address"
+              title="Enter your email address"
+            />
+            <input
+              type="password"
+              id="auth-password"
+              placeholder="Password"
+              autocomplete="current-password"
+              aria-label="Password"
+              title="Enter your password and press Enter to sign in"
+            />
+
+            <!-- Forgot password link -->
+            <div class="forgot-password-container">
+              <a
+                href="#"
+                id="forgot-password-link"
+                class="forgot-password-link"
+              >
+                Forgot password?
+              </a>
+            </div>
+
+            <!-- Divider before GDPR consent -->
+            <div class="auth-divider"></div>
+
+            <!-- GDPR Consent - shown dynamically when T&C consent is missing -->
+            <div id="gdpr-consent-section" class="gdpr-consent-section hidden">
+              <input
+                type="checkbox"
+                id="gdpr-consent-checkbox"
+                name="gdpr-consent"
+                class="gdpr-consent-checkbox"
+              />
+              <span class="gdpr-consent-text">
+                I agree to the
+                <a
+                  href="https://chartlense.com/terms.html"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  >Terms of Service</a
+                >
+                and
+                <a
+                  href="https://chartlense.com/privacy.html"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  >Privacy Policy</a
+                >.
+              </span>
+            </div>
+
+            <button id="auth-submit-btn" class="email-auth-btn" type="submit">
+              Sign In
+            </button>
+          </form>
+        </div>
+
+        <div id="auth-error" class="auth-error"></div>
+      </div>
+    </div>
+
+    <!-- Registration Completion Modal -->
+    <div id="registration-modal" class="registration-modal hidden">
+      <div class="registration-modal-content">
+        <button
+          id="registration-modal-close"
+          class="modal-close"
+          type="button"
+          aria-label="Close dialog"
+        >
+          &times;
+        </button>
+
+        <!-- Header -->
+        <div class="auth-modal-header">
+          <div class="auth-modal-logo-container">
+            <img
+              src="icons/logo_white_48.png"
+              alt="ChartLense Logo"
+              class="auth-modal-logo"
+            />
+            <h3 class="auth-modal-title">Complete Your Registration</h3>
+          </div>
+          <p class="auth-modal-subtitle" id="reg-subtitle">
+            Just 2 steps to start using ChartLense
+          </p>
+
+          <!-- Progress Indicator (Dynamic based on auth method) -->
+          <div class="progress-indicator" id="progress-indicator">
+            <div class="progress-step active" id="step-1-indicator">
+              <div class="step-number">1</div>
+              <div class="step-label">Consent</div>
+            </div>
+            <div class="progress-connector" id="progress-connector"></div>
+            <div class="progress-step" id="step-2-indicator">
+              <div class="step-number">2</div>
+              <div class="step-label">Verify</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 1: Consent for AI Analysis -->
+        <div class="reg-consent-section">
+          <h4>📸 Step 1: Consent for AI Analysis</h4>
+
+          <div class="consent-detail-item" style="margin-top: 15px">
+            <div>
+              <p
+                style="margin: 0 0 10px 0; font-size: 1.05em; font-weight: 500"
+              >
+                To provide analysis, ChartLense will:
+              </p>
+              <ul
+                style="
+                  list-style-type: '✓ ';
+                  padding-left: 20px;
+                  margin: 0;
+                  font-size: 1.05em;
+                "
+              >
+                <li style="padding-left: 8px; margin-bottom: 5px">
+                  Capture a temporary screenshot of your chart.
+                </li>
+                <li style="padding-left: 8px; margin-bottom: 5px">
+                  Encrypt data and delete it after analysis.
+                </li>
+                <li style="padding-left: 8px; margin-bottom: 0">
+                  Let you hide sensitive areas you mark <br />
+                  (-> ⚙️ Privacy Settings).
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <div
+            style="
+              background: #fff3cd;
+              color: #856404;
+              padding: 12px;
+              border-radius: 6px;
+              border: 1px solid #ffeaa7;
+              margin: 15px 0;
+            "
+          >
+            <p style="margin: 0; font-weight: bold">
+              ⚠️ For Educational Use Only: Analysis is not investment advice.
+            </p>
+          </div>
+
+          <!-- Consent action button - Fallback text ensures button is never empty -->
+          <div class="consent-action-wrapper">
+            <button id="reg-consent-btn" class="consent-btn">
+              Acknowledge & Continue
+            </button>
+          </div>
+          <!--
+            JavaScript Enhancement: auth-modal.js initializeConsentSection()
+            will dynamically update this text based on consent state:
+            - "Acknowledge & Continue" (default/needs consent)
+            - "✅ Confirmed" (consent already granted)
+            - "Saving..." (processing state)
+          -->
+        </div>
+
+        <!-- Step 2: Email Verification (Dynamically generated by JavaScript) -->
+        <div
+          id="reg-email-section"
+          class="registration-step"
+          style="margin-top: 30px"
+        >
+          <!-- Content generated by initializeEmailSection() in auth-modal.js -->
+        </div>
+
+        <!-- Message display area -->
+        <div id="reg-message" class="reg-message hidden"></div>
+
+        <!-- Action buttons -->
+        <div class="registration-actions">
+          <button id="reg-complete-btn" class="email-auth-btn" disabled>
+            Complete Registration
+          </button>
+          <button id="reg-learn-more-btn" class="secondary-btn">
+            Learn More
+          </button>
+        </div>
+
+        <!-- Footer links -->
+        <div class="registration-footer">
+          <a href="https://chartlense.com/privacy.html" target="_blank"
+            >Privacy Policy</a
+          >
+          <span>•</span>
+          <a href="https://chartlense.com/terms.html" target="_blank"
+            >Terms of Service</a
+          >
+        </div>
+      </div>
+    </div>
+
+    <div id="feedback-modal" class="feedback-modal hidden">
+      <div class="feedback-modal-content">
+        <button
+          id="feedback-close"
+          class="modal-close"
+          type="button"
+          aria-label="Close dialog"
+        >
+          &times;
+        </button>
+
+        <!-- Header -->
+        <div class="feedback-modal-header">
+          <div class="feedback-modal-logo-container">
+            <img
+              src="icons/logo_white_48.png"
+              alt="ChartLense Logo"
+              class="feedback-modal-logo"
+            />
+            <h2 class="feedback-title" id="feedback-title"></h2>
+          </div>
+          <p class="feedback-modal-subtitle">
+            Help us improve ChartLense with your feedback
+          </p>
+        </div>
+
+        <!-- Feedback Form -->
+        <div class="feedback-form-section">
+          <textarea
+            id="feedback-text"
+            class="feedback-text"
+            maxlength="500"
+            rows="4"
+            placeholder="Share your thoughts, suggestions, or report any issues..."
+          ></textarea>
+        </div>
+
+        <div class="feedback-note" id="feedback-consent-note"></div>
+
+        <button id="feedback-submit-btn" class="feedback-submit-btn"></button>
+        <div id="feedback-message" class="feedback-error"></div>
+      </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="settings-modal hidden">
+      <div class="settings-modal-content">
+        <button
+          id="settings-modal-close"
+          class="modal-close"
+          type="button"
+          aria-label="Close dialog"
+        >
+          &times;
+        </button>
+
+        <!-- Header -->
+        <div class="settings-modal-header">
+          <div class="settings-modal-logo-container">
+            <img
+              src="icons/logo_white_48.png"
+              alt="ChartLense Logo"
+              class="settings-modal-logo"
+            />
+            <h2 class="settings-modal-title" id="settings-modal-title">
+              Settings
+            </h2>
+          </div>
+          <p class="settings-modal-subtitle">
+            Manage your privacy settings and preferences
+          </p>
+        </div>
+
+        <!-- Privacy Protection Section -->
+        <div class="settings-section">
+          <h3 class="settings-section-title" id="privacy-protection-title">
+            <span>🔒</span>
+            <span>Privacy Protection</span>
+          </h3>
+          <p
+            class="settings-section-description"
+            id="privacy-protection-description"
+          >
+            Configure areas to hide from AI analysis
+          </p>
+          <div id="privacy-status" class="privacy-status">
+            No sensitive areas marked for blackout
+          </div>
+          <div class="settings-section-controls">
+            <button id="privacy-edit-btn" class="primary-btn">
+              📝 Edit Privacy Areas
+            </button>
+            <button
+              id="privacy-test-btn"
+              class="secondary-btn"
+              style="display: none"
+            >
+              🧪 Test
+            </button>
+            <button
+              id="privacy-clear-btn"
+              class="secondary-btn"
+              style="display: none"
+            >
+              🗑️ Clear All
+            </button>
+          </div>
+        </div>
+
+        <!-- Message Preferences Section -->
+        <div class="settings-section">
+          <h3 class="settings-section-title">
+            <span>💬</span>
+            <span>Message Preferences</span>
+          </h3>
+          <p class="settings-section-description">
+            Control which AI Insights and tips are shown
+          </p>
+          <div class="settings-section-controls">
+            <button id="open-message-prefs-btn" class="primary-btn">
+              ⚙️ Configure Messages
+            </button>
+          </div>
+        </div>
+
+        <!-- Data Processing Information -->
+        <div class="settings-section">
+          <h3 class="settings-section-title">
+            <span>🔄</span>
+            <span>Data Processing</span>
+          </h3>
+          <div class="data-processing-info">
+            <div class="processing-step">
+              <span class="step-icon">📸</span>
+              <div class="step-content">
+                <strong>Screenshot Capture</strong>
+                <p>Temporary processing only, never stored</p>
+              </div>
+            </div>
+            <div class="processing-step">
+              <span class="step-icon">🤖</span>
+              <div class="step-content">
+                <strong>AI Analysis</strong>
+                <p>Sent to OpenAI for chart pattern recognition</p>
+              </div>
+            </div>
+            <div class="processing-step">
+              <span class="step-icon">🗑️</span>
+              <div class="step-content">
+                <strong>Automatic Deletion</strong>
+                <p>All image data deleted after analysis</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Investment Disclaimer Section -->
+        <div class="settings-section" id="investment-disclaimer-section">
+          <h3 class="settings-section-title">
+            <span>⚠️</span>
+            <span>Investment Disclaimer</span>
+          </h3>
+          <div
+            class="disclaimer-content"
+            style="
+              background: #fff3cd;
+              padding: 12px;
+              border-radius: 6px;
+              border: 1px solid #ffeaa7;
+              margin-bottom: 12px;
+            "
+          >
+            <div style="font-weight: 600; color: #856404; margin-bottom: 8px">
+              Important Legal Notice
+            </div>
+            <div style="font-size: 0.9em; line-height: 1.4; color: #856404">
+              <p style="margin: 0 0 8px 0">
+                <strong
+                  >ChartLense™ is NOT a registered investment adviser</strong
+                >
+                and does not provide personalized investment advice, financial
+                advice, or trading recommendations.
+              </p>
+              <p style="margin: 0 0 8px 0">
+                <strong>Educational Purpose Only:</strong> All analysis is for
+                informational and educational purposes only. This is technical
+                chart analysis, not investment advice.
+              </p>
+              <p style="margin: 0 0 8px 0">
+                <strong>Risk Warning:</strong> Trading financial instruments
+                involves substantial risk of loss. Past performance does not
+                predict future results.
+              </p>
+              <p style="margin: 0">
+                <strong>Your Responsibility:</strong> Always conduct independent
+                research and consult qualified financial professionals before
+                making investment decisions.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Privacy Policy Section -->
+        <div class="settings-section">
+          <h3 class="settings-section-title">
+            <span>📋</span>
+            <span>Privacy & Legal</span>
+          </h3>
+          <p class="settings-section-description">
+            Review our comprehensive privacy practices and legal terms for
+            complete transparency.
+          </p>
+          <div class="settings-section-controls">
+            <a
+              href="https://chartlense.com/privacy.html"
+              target="_blank"
+              class="secondary-btn"
+            >
+              📋 Privacy Policy
+            </a>
+            <a
+              href="https://chartlense.com/terms.html"
+              target="_blank"
+              class="secondary-btn"
+            >
+              📄 Terms of Service
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Blackout Privacy Modal -->
+    <div id="blackout-modal" class="blackout-modal hidden">
+      <div class="blackout-modal-content">
+        <button
+          id="blackout-modal-close"
+          class="modal-close"
+          type="button"
+          aria-label="Close dialog"
+        >
+          &times;
+        </button>
+
+        <!-- Header -->
+        <div class="blackout-modal-header">
+          <div class="blackout-modal-logo-container">
+            <img
+              src="icons/logo_white_48.png"
+              alt="ChartLense Logo"
+              class="blackout-modal-logo"
+            />
+            <h2 class="blackout-modal-title">Privacy Protection</h2>
+          </div>
+          <p id="blackout-modal-description" class="blackout-modal-description">
+            Draw rectangles over sensitive information that should be hidden
+            from AI analysis.
+          </p>
+        </div>
+        <div class="blackout-mode-toggle">
+          <button id="blackout-mode-blackout" class="mode-btn active">Hide Areas</button>
+          <button id="blackout-mode-allowlist" class="mode-btn">Show Only</button>
+        </div>
+        <div class="blackout-canvas-container">
+          <canvas id="blackout-canvas" class="blackout-canvas"></canvas>
+        </div>
+        <div class="blackout-modal-controls">
+          <button id="blackout-clear" class="secondary-btn">
+            🗑️ Clear All
+          </button>
+          <button id="blackout-test" class="secondary-btn">🧪 Test</button>
+          <button id="blackout-save" class="primary-btn">
+            ✅ Save & Close
+          </button>
+        </div>
+        <div id="blackout-modal-status" class="blackout-status"></div>
+      </div>
+    </div>
+
+    <!-- Message Preferences Modal -->
+    <div
+      id="message-preferences-modal"
+      class="message-preferences-modal hidden"
+    >
+      <div class="message-prefs-content">
+        <div class="message-prefs-header">
+          <h2>Message Preferences</h2>
+          <button
+            class="modal-close"
+            id="message-prefs-close"
+            aria-label="Close"
+          >
+            &times;
+          </button>
+        </div>
+
+        <div class="modal-body">
+          <p class="prefs-description">
+            Choose which AI insights you want to see in the footer area. All
+            other message types will always be shown.
+          </p>
+
+          <div class="pref-category">
+            <div class="pref-header">
+              <label class="pref-label">
+                <input type="checkbox" id="pref-toggle-quality" checked />
+                Quality Improvement Tips
+              </label>
+            </div>
+            <p class="pref-description">
+              Tips to improve your screenshot quality for better AI analysis
+            </p>
+          </div>
+
+          <div class="pref-category">
+            <div class="pref-header">
+              <label class="pref-label">
+                <input type="checkbox" id="pref-toggle-confidence" checked />
+                AI Confidence Transparency
+              </label>
+            </div>
+            <p class="pref-description">
+              Explanations about the AI's confidence level in its analysis
+            </p>
+          </div>
+
+          <div class="pref-category">
+            <div class="pref-header">
+              <label class="pref-label">
+                <input type="checkbox" id="pref-toggle-learning" checked />
+                Learning Opportunities
+              </label>
+            </div>
+            <p class="pref-description">
+              Educational content about trading patterns detected in your charts
+            </p>
+          </div>
+
+          <div
+            class="prefs-feedback"
+            id="message-prefs-feedback"
+            style="display: none"
+          ></div>
+        </div>
+
+        <div class="modal-footer">
+          <button id="reset-message-prefs-btn" class="secondary-btn">
+            Reset to Defaults
+          </button>
+          <button id="save-message-prefs-btn" class="primary-btn">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Trading Journal Modal (Tabbed: New Entry + History) -->
+    <div id="journal-entry-modal" class="journal-modal hidden">
+      <div class="journal-modal-content">
+        <button class="journal-modal-close" id="journal-modal-close">&times;</button>
+
+        <!-- Header with Tabs -->
+        <div class="journal-modal-header">
+          <h2>Trading Journal</h2>
+          <div class="journal-tabs">
+            <button class="journal-tab active" data-tab="new">+ New Entry</button>
+            <button class="journal-tab" data-tab="history">History <span class="journal-tab-count" id="journal-tab-count">0</span></button>
+          </div>
+        </div>
+
+        <!-- Tab: New Entry -->
+        <div class="journal-tab-content" id="journal-tab-new">
+          <!-- Screenshot Preview -->
+          <div class="journal-new-entry-header">
+            <div class="screenshot-preview">
+              <img id="journal-screenshot-preview" src="" alt="Chart screenshot" />
+            </div>
+            <div id="journal-auto-info" class="journal-auto-info hidden"></div>
+          </div>
+
+          <!-- Empty state (no screenshot) -->
+          <div class="journal-new-entry-empty hidden" id="journal-new-entry-empty">
+            <p>Analyze a chart first to create a new journal entry</p>
+          </div>
+
+          <!-- Trade Details Form -->
+          <form id="journal-entry-form" class="journal-form">
+            <div id="journal-form-error" class="journal-form-error hidden"></div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="journal-symbol">Symbol</label>
+                <input type="text" id="journal-symbol" placeholder="e.g., BTCUSD" />
+              </div>
+              <div class="form-group">
+                <label for="journal-timeframe">Timeframe</label>
+                <input type="text" id="journal-timeframe" placeholder="e.g., 4H" />
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>Direction</label>
+              <div class="direction-toggle">
+                <button type="button" class="direction-btn" data-direction="LONG">LONG</button>
+                <button type="button" class="direction-btn" data-direction="SHORT">SHORT</button>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="journal-entry-price">Entry Price</label>
+                <input type="number" id="journal-entry-price" step="any" placeholder="Entry" />
+              </div>
+              <div class="form-group">
+                <label for="journal-exit-price">Exit Price</label>
+                <input type="number" id="journal-exit-price" step="any" placeholder="Exit (optional)" />
+              </div>
+            </div>
+
+            <div id="journal-pnl-preview" class="journal-pnl-preview hidden"></div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="journal-stop-loss">Stop Loss</label>
+                <input type="number" id="journal-stop-loss" step="any" placeholder="SL" />
+              </div>
+              <div class="form-group">
+                <label for="journal-take-profit">Take Profit</label>
+                <input type="number" id="journal-take-profit" step="any" placeholder="TP" />
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="journal-notes">Notes</label>
+              <textarea id="journal-notes" rows="2" placeholder="Trade rationale..."></textarea>
+            </div>
+
+            <div class="form-group">
+              <label for="journal-tags">Tags</label>
+              <input type="text" id="journal-tags" placeholder="swing, breakout (comma-separated)" />
+            </div>
+
+            <div class="journal-form-actions">
+              <button type="button" id="journal-skip-btn" class="secondary-btn">Skip</button>
+              <button type="submit" id="journal-save-btn" class="primary-btn">Save to Journal</button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Tab: History -->
+        <div class="journal-tab-content hidden" id="journal-tab-history">
+          <div class="journal-stats hidden" id="journal-stats"></div>
+
+          <div class="journal-filters">
+            <select id="journal-outcome-filter">
+              <option value="all">All Trades</option>
+              <option value="WIN">Wins</option>
+              <option value="LOSS">Losses</option>
+              <option value="OPEN">Open</option>
+            </select>
+          </div>
+
+          <div class="journal-entries-list" id="journal-entries-list">
+            <div class="journal-entries-empty">
+              No journal entries yet. Save your first trade to get started.
+            </div>
+          </div>
+
+          <div class="journal-actions">
+            <button id="journal-export-btn" class="secondary-btn">Export Archive</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Journal Detail Modal (Read-Only) -->
+    <div id="journal-detail-modal" class="journal-modal hidden"></div>
+  </body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "extensionName": {
+    "message": "ChartLense: AI Chart Analysis & Journaling",
+    "description": "Nombre de la extensión"
+  },
+  "extensionDescription": {
+    "message": "Análisis de gráficos IA y diario de trading para TradingView. Reconocimiento de patrones y tendencias — sin salir del gráfico.",
+    "description": "Descripción corta en Chrome Web Store y página de gestión"
+  },
+  "extensionFullDescription": {
+    "message": "Con un solo clic, ChartLense™ ofrece un análisis técnico completo de cualquier gráfico, convirtiendo datos complejos en información clara y accionable. Está diseñado para eliminar el ruido y brindarte una segunda opinión rápida e imparcial.\n\nAsí es como ChartLense potencia tus decisiones:\n\n⏱️ ANALIZA MÁS RÁPIDO, ACTÚA ANTES\nObtén un análisis completo en menos de 10 segundos. Examina decenas de gráficos con la velocidad que necesitas para aprovechar más oportunidades, ahorrando un promedio de 4,5 minutos en cada revisión manual.\n\n💡 Gana Claridad y Convicción Imparciales\nElimina el ruido del mercado y la indecisión. Nuestro análisis objetivo basado en datos te ayuda a confirmar tu estrategia y ejecutar tus operaciones o inversiones con confianza.\n\n🧠 Mejora tu Perspectiva del Mercado\nAprende del análisis ChartLense™ de la estructura del mercado en tiempo real. Entrena tu ojo para detectar configuraciones de alto potencial y comprender tendencias a largo plazo, mejorando tus propias habilidades con cada clic.\n\nFUNCIONA PERFECTAMENTE EN:\n• TradingView\n• Stock3\n• Yahoo Finance\n• ...y muchos más.\n\nPERFECTO PARA:\n→ Traders Activos que necesitan examinar gráficos eficientemente y encontrar configuraciones de alta probabilidad.\n→ Inversores a Largo Plazo que buscan confirmación técnica y puntos óptimos de entrada o salida.\n→ Cualquiera que quiera aprender del análisis objetivo y construir confianza en sus decisiones.\n\nInstala ChartLense hoy y transforma la forma en que ves el mercado.\n\nSOPORTE\n¿Necesitas ayuda? No dudes en contactar a nuestro equipo en support@chartlense.com y te responderemos lo antes posible.",
+    "description": "Descripción completa detallada para el listado de Chrome Web Store"
+  }
+}

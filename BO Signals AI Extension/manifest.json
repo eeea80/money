@@ -1,0 +1,82 @@
+{
+"update_url": "https://clients2.google.com/service/update2/crx",
+
+  "manifest_version": 3,
+  "name": "BO Signals AI",
+  "description": "AI-powered binary options signals with integrated trading platform access.",
+  "version": "0.1.1",
+  "minimum_chrome_version": "114",
+  "action": {
+    "default_title": "BO Signals AI",
+    "default_popup": "popup/index.html"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "background": {
+    "service_worker": "background/service-worker.js",
+    "type": "module"
+  },
+  "side_panel": {
+    "default_path": "popup/index.html"
+  },
+  "options_ui": { "page": "options/index.html", "open_in_tab": true },
+  "permissions": [
+    "storage",
+    "alarms",
+    "sidePanel",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://api.openrouter.ai/*",
+    "https://ai-tradebot.com/*",
+    "https://*.supabase.co/*",
+    "https://quotex.com/*",
+    "https://qxbroker.com/*",
+    "https://qtx-broker.com/*",
+    "https://quotex-market.io/*",
+    "https://quotex-market.pro/*",
+    "https://qxbroker.pro/*",
+    "https://qtxbrk.com/*",
+    "https://quotex-market.trade/*",
+    "https://quotex-trade.io/*",
+    "https://qx-market.com/*",
+    "https://market-qx.pro/*",
+    "https://qx-market.io/*",
+    "https://market-qx.trade/*",
+    "https://p.finance/*",
+    "https://pocketoption.com/*",
+    "https://iqoption.net/*",
+    "https://iqoption.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://quotex.com/*",
+        "https://qxbroker.com/*",
+        "https://qtx-broker.com/*",
+        "https://quotex-market.io/*",
+        "https://quotex-market.pro/*",
+        "https://qxbroker.pro/*",
+        "https://qtxbrk.com/*",
+        "https://quotex-market.trade/*",
+        "https://quotex-trade.io/*",
+        "https://qx-market.com/*",
+        "https://market-qx.pro/*",
+        "https://qx-market.io/*",
+        "https://market-qx.trade/*",
+        "https://p.finance/*",
+        "https://pocketoption.com/*",
+        "https://iqoption.net/*",
+        "https://iqoption.com/*"
+      ],
+      "js": ["content/siteloader.js"],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ]
+}
+

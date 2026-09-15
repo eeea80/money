@@ -1,0 +1,43 @@
+<!doctype html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>AI Scan — BO Signals AI</title>
+	<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+	<div id="app" class="card">
+		<header class="row between center scan-hero">
+			<h1>AI Scan</h1>
+			<div class="row gap">
+				<a href="index.html" class="icon-btn" title="Back" aria-label="Back">↩</a>
+			</div>
+		</header>
+
+		<div class="row gap" style="margin-top:10px">
+			<button id="capture" class="btn">📷 Capture chart</button>
+			<button id="analyze" class="btn secondary">🤖 Analyze</button>
+		</div>
+
+		<div id="meta" class="muted" style="margin-top:8px; font-size:12px"></div>
+
+		<div id="progress" class="progress hidden" aria-hidden="true"><span></span></div>
+
+		<div id="result" class="callout glow" style="margin-top:10px">
+			<p class="muted">Take a screenshot of the visible tab (chart area) and analyze with AI. The model will suggest direction and recommended timeframe.</p>
+		</div>
+
+		<div id="previewContainer" style="margin-top:10px; position:relative; display:none; border-radius:8px; overflow:hidden">
+			<img id="preview" alt="preview" style="max-width:100%; display:block" />
+			<div id="scanOverlay" class="scan-overlay hidden">
+				<div class="scan-line"></div>
+				<div class="scan-grid"></div>
+			</div>
+		</div>
+	</div>
+	<script src="scan.js" type="module"></script>
+</body>
+</html>
+
+

@@ -1,0 +1,5 @@
+Supabase
+Project URL
+https://fdovdqrrpnwfexccmlrj.supabase.co
+
+API Key eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZkb3ZkcXJycG53ZmV4Y2NtbHJqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA0NDg4NDUsImV4cCI6MjA3NjAyNDg0NX0.\_VYIZjFe8pVYzBHzxkyEVM1MMIyy-yQM0Tx19pome0M

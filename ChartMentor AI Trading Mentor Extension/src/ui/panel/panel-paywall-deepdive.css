@@ -1,0 +1,170 @@
+/* --- Paywall Overlay --- */
+.paywall-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(7, 10, 16, 0.74);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1001;
+  transition: opacity 0.2s ease;
+  padding: 20px;
+  box-sizing: border-box;
+}
+
+.paywall-overlay.hidden {
+  opacity: 0;
+  pointer-events: none;
+  display: none !important;
+}
+
+.paywall-card {
+  background: var(--cm-surface);
+  border: 1px solid var(--cm-border-strong);
+  border-radius: 10px;
+  padding: 20px;
+  max-width: 336px;
+  width: 100%;
+  text-align: left;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.34);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  box-sizing: border-box;
+}
+
+.paywall-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--cm-radius-md);
+  background: color-mix(in srgb, var(--cm-success) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--cm-success) 30%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cm-success);
+  margin-bottom: 14px;
+}
+
+.paywall-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--cm-text-head);
+  margin: 0 0 8px 0;
+  letter-spacing: -0.01em;
+  text-transform: none;
+}
+
+.paywall-description {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--cm-text-body);
+  margin: 0 0 18px 0;
+}
+
+.paywall-btn {
+  width: 100%;
+  min-height: 38px;
+  padding: 10px 14px;
+  border: none;
+  border-radius: var(--cm-radius-md);
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease;
+  display: block;
+  box-sizing: border-box;
+}
+
+.paywall-btn:focus-visible {
+  outline: 2px solid var(--cm-primary);
+  outline-offset: 2px;
+}
+
+.paywall-btn.primary {
+  background: var(--cm-primary);
+  color: #ffffff;
+  margin-bottom: 8px;
+}
+
+.paywall-btn.primary:hover {
+  background: color-mix(in srgb, var(--cm-primary) 86%, #ffffff);
+}
+
+.paywall-btn.secondary {
+  background: transparent;
+  color: var(--cm-text-muted);
+  border: 1px solid var(--cm-border-strong);
+}
+
+.paywall-btn.secondary:hover {
+  border-color: var(--cm-text-muted);
+  color: var(--cm-text-head);
+}
+
+[data-theme="light"] .paywall-overlay {
+  background: rgba(15, 23, 42, 0.38);
+}
+
+[data-theme="light"] .paywall-card {
+  background: #ffffff;
+  border-color: var(--cm-border-strong);
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.16);
+}
+
+/* --- Post-Value Verdict Upgrade Nudge --- */
+/* A single hairline rule, matching the prompt turns in the chat feed. */
+.verdict-upgrade-nudge {
+  margin-top: 12px;
+  padding: 2px 0 2px 11px;
+  border: 0;
+  border-left: 2px solid var(--cm-success);
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  box-sizing: border-box;
+}
+
+.verdict-upgrade-nudge .nudge-text {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--cm-text-body);
+  font-weight: 400;
+}
+
+.verdict-upgrade-nudge .nudge-upgrade-btn {
+  min-height: 30px;
+  padding: 7px 12px;
+  border: none;
+  border-radius: var(--cm-radius-sm);
+  background: var(--cm-primary);
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+  width: auto;
+  text-align: center;
+}
+
+.verdict-upgrade-nudge .nudge-upgrade-btn:hover {
+  background: color-mix(in srgb, var(--cm-primary) 86%, #ffffff);
+}
+
+.verdict-upgrade-nudge .nudge-upgrade-btn:focus-visible {
+  outline: 2px solid var(--cm-primary);
+  outline-offset: 2px;
+}

@@ -1,0 +1,220 @@
+#watchlist-tab.active {
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+
+.watchlist-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px 0 18px;
+}
+
+.watchlist-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--cm-border-glass);
+}
+
+.watchlist-header h2 {
+  margin: 0;
+  color: var(--cm-text-head);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.watchlist-header p,
+.watchlist-empty p,
+.watchlist-note,
+.watchlist-state-message,
+.watchlist-count {
+  margin: 3px 0 0;
+  color: var(--cm-text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+#watchlist-status {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  text-align: right;
+}
+
+.watchlist-count {
+  margin: 0;
+  white-space: nowrap;
+}
+
+.watchlist-add {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--cm-border-glass);
+  background: var(--cm-surface-raised);
+}
+
+.watchlist-current {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.watchlist-current span,
+.watchlist-add label {
+  color: var(--cm-text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.watchlist-current strong {
+  overflow: hidden;
+  color: var(--cm-text-head);
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.watchlist-add label {
+  grid-column: 1 / -1;
+}
+
+#watchlist-note-input {
+  min-width: 0;
+  height: 34px;
+  padding: 0 9px;
+  border: 1px solid var(--cm-border-glass);
+  border-radius: 3px;
+  background: var(--cm-bg-premium);
+  color: var(--cm-text-body);
+  font: inherit;
+  font-size: 12px;
+}
+
+#watchlist-note-input:focus-visible,
+.watchlist-action:focus-visible,
+.watchlist-add-button:focus-visible {
+  outline: 2px solid var(--cm-primary);
+  outline-offset: 1px;
+}
+
+.watchlist-add-button,
+.watchlist-action {
+  min-height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--cm-border-glass);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--cm-text-body);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.watchlist-add-button {
+  height: 34px;
+  border-color: var(--cm-primary);
+  background: var(--cm-primary);
+  color: var(--cm-bg);
+}
+
+.watchlist-add-button:disabled,
+.watchlist-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.watchlist-list {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--cm-border-glass);
+}
+
+.watchlist-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--cm-border-glass);
+}
+
+.watchlist-item-details {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.watchlist-item-heading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--cm-text-head);
+  font-size: 13px;
+}
+
+.watchlist-timeframe {
+  padding-left: 7px;
+  border-left: 1px solid var(--cm-border-glass);
+  color: var(--cm-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.watchlist-note {
+  overflow-wrap: anywhere;
+}
+
+.watchlist-item-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 5px;
+}
+
+.watchlist-action.primary {
+  border-color: color-mix(in srgb, var(--cm-primary) 55%, transparent);
+  color: var(--cm-primary);
+}
+
+.watchlist-action.danger {
+  color: var(--cm-text-muted);
+}
+
+.watchlist-action:hover:not(:disabled),
+.watchlist-add-button:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.watchlist-empty {
+  padding: 22px 0;
+  color: var(--cm-text-head);
+  text-align: center;
+}
+
+.watchlist-error {
+  max-width: 190px;
+  margin: 0;
+  color: var(--cm-error);
+}
+
+@media (max-width: 360px) {
+  .watchlist-header,
+  .watchlist-item {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .watchlist-item-actions {
+    justify-content: flex-end;
+  }
+}

@@ -1,0 +1,165 @@
+/* Outcome follow-up chat turn and manual-plan fallback modal. */
+
+.outcome-chat-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.outcome-chat-prompt-text {
+  margin: 0;
+  color: var(--cm-text-body);
+  font-size: 13.5px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+.plan-first-banner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Flat action rows inside chat turns: alert + feedback controls share a line. */
+.mentor-live-turn .live-mentor-actions {
+  flex-wrap: wrap;
+  align-items: center;
+  row-gap: 6px;
+}
+
+.plan-first-btn {
+  min-height: 30px;
+  padding: 6px 12px;
+  border: 1px solid var(--cm-border-strong);
+  border-radius: var(--cm-radius-sm);
+  background: transparent;
+  color: var(--cm-text-muted);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.plan-first-btn:focus-visible {
+  outline: 2px solid var(--cm-primary);
+  outline-offset: 2px;
+}
+
+.plan-first-btn.primary {
+  background: var(--cm-primary);
+  color: #ffffff;
+  border-color: transparent;
+}
+
+.plan-first-btn.primary:hover {
+  background: color-mix(in srgb, var(--cm-primary) 86%, #ffffff);
+}
+
+.plan-first-btn.secondary:hover {
+  border-color: var(--cm-text-muted);
+  color: var(--cm-text-head);
+}
+
+.plan-first-btn.outcome-choice {
+  background: transparent;
+  border-color: color-mix(in srgb, var(--cm-success) 40%, transparent);
+  color: var(--cm-text-head);
+}
+
+.plan-first-btn.outcome-choice:hover {
+  background: color-mix(in srgb, var(--cm-success) 12%, transparent);
+}
+
+.outcome-reflection-input {
+  width: 100%;
+  min-height: 60px;
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--cm-border-strong);
+  border-radius: var(--cm-radius-sm);
+  background: transparent;
+  color: var(--cm-text-body);
+  font: inherit;
+  font-size: 13px;
+  resize: vertical;
+}
+
+.outcome-reflection-input:focus-visible {
+  outline: 2px solid var(--cm-primary);
+  outline-offset: 2px;
+}
+
+.manual-plan-card {
+  max-width: 320px;
+}
+
+.manual-plan-field-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.manual-plan-direction {
+  flex: 1;
+  text-align: center;
+}
+
+.manual-plan-direction.selected[data-direction="LONG"] {
+  background: color-mix(in srgb, var(--cm-success) 18%, transparent);
+  border-color: color-mix(in srgb, var(--cm-success) 52%, transparent);
+  color: var(--cm-text-head);
+}
+
+.manual-plan-direction.selected[data-direction="SHORT"] {
+  background: color-mix(in srgb, var(--cm-error) 16%, transparent);
+  border-color: color-mix(in srgb, var(--cm-error) 48%, transparent);
+  color: var(--cm-text-head);
+}
+
+.manual-plan-label {
+  display: block;
+  margin: 10px 0 4px 0;
+  color: var(--cm-text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.manual-plan-input {
+  width: 100%;
+  min-height: 34px;
+  padding: 8px 10px;
+  border: 1px solid var(--cm-border-strong);
+  border-radius: var(--cm-radius-sm);
+  background: var(--cm-bg-premium);
+  color: var(--cm-text-head);
+  font-family: inherit;
+  font-size: 13px;
+  box-sizing: border-box;
+}
+
+.manual-plan-input:focus-visible {
+  border-color: var(--cm-primary);
+  outline: none;
+  box-shadow: 0 0 0 2px var(--cm-primary-glow);
+}
+
+.manual-plan-error {
+  margin: 10px 0 0 0;
+  color: var(--cm-error);
+  font-size: 12px;
+}
+
+.manual-plan-error.hidden {
+  display: none !important;
+}
+
+.manual-plan-card .paywall-btn.primary {
+  margin-top: 16px;
+}

@@ -1,0 +1,466 @@
+/* --- Chat turns -------------------------------------------------------- */
+/* Assistant output shares the panel canvas. Hierarchy comes from the response
+   content itself, not from an outer bubble or container. */
+
+.message {
+  align-self: stretch;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--cm-text-body);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.55;
+  position: relative;
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+}
+
+.message.user {
+  align-self: flex-end;
+  width: fit-content;
+  max-width: min(86%, 420px);
+  padding: 8px 12px;
+  border-radius: var(--cm-radius-md) var(--cm-radius-md) 3px
+    var(--cm-radius-md);
+  background: var(--cm-user-bubble);
+  color: var(--cm-user-bubble-text);
+  font-size: 13.5px;
+  line-height: 1.45;
+  box-shadow: none;
+}
+
+.message.assistant {
+  --mentor-accent: var(--cm-primary);
+  align-self: stretch;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--cm-text-body);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.55;
+}
+
+.message.assistant::before {
+  content: none;
+}
+
+.review-note {
+  margin-top: 10px;
+  padding: 8px 0 8px 10px;
+  border-left: 2px solid var(--cm-warning);
+  background: transparent;
+  color: var(--cm-text-body);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+/* --- Semantic response markup ------------------------------------------ */
+
+.message-content {
+  min-width: 0;
+  max-width: 100%;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.55;
+  color: var(--cm-text-body);
+}
+
+.message-content > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.message-content > :first-child {
+  margin-top: 0;
+}
+
+.message-content > :last-child {
+  margin-bottom: 0;
+}
+
+.message-content h1,
+.message-content h2,
+.message-content h3 {
+  margin: 16px 0 6px;
+  color: var(--cm-text-head);
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.005em;
+}
+
+.message-content h1 {
+  font-size: 15px;
+}
+
+.message-content h2 {
+  font-size: 14px;
+}
+
+.message-content h3 {
+  font-size: 13px;
+}
+
+.message-content p {
+  margin: 0 0 10px;
+}
+
+.message-content br {
+  line-height: 1.2;
+}
+
+.message-content ul,
+.message-content ol {
+  margin: 8px 0 10px;
+  padding-left: 18px;
+}
+
+.message-content li {
+  margin: 0 0 5px;
+}
+
+.message-content li:last-child {
+  margin-bottom: 0;
+}
+
+.message-content li::marker {
+  color: var(--cm-text-muted);
+}
+
+.message-content li > ul,
+.message-content li > ol {
+  margin: 5px 0 0;
+}
+
+.message-content strong {
+  color: var(--cm-text-head);
+  font-weight: 600;
+}
+
+.message-content em {
+  font-style: italic;
+}
+
+.message-content a {
+  color: var(--cm-primary);
+  text-decoration: none;
+}
+
+.message-content a:hover,
+.message-content a:focus-visible {
+  text-decoration: underline;
+}
+
+.message-content code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--cm-hover-surface);
+  color: var(--cm-text-head);
+  font-family: var(--cm-font-mono);
+  font-size: 12.5px;
+}
+
+.message-content blockquote {
+  margin: 10px 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--cm-border-strong);
+  color: var(--cm-text-muted);
+}
+
+/* Compact data tables: hairline rows, no fills, numerals aligned. Fixed
+   layout with even columns keeps a 4-column table inside a ~380px panel
+   without ever forcing the row wider than its container. */
+.message-content table {
+  width: 100%;
+  max-width: 100%;
+  margin: 10px 0 12px;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.message-content th,
+.message-content td {
+  padding: 6px 10px 6px 0;
+  border-bottom: 1px solid var(--cm-border-glass);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.message-content th:last-child,
+.message-content td:last-child {
+  padding-right: 0;
+}
+
+.message-content th {
+  color: var(--cm-text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.message-content td {
+  color: var(--cm-text-body);
+  font-variant-numeric: tabular-nums;
+}
+
+.message-content tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+/* Inside the dark user bubble every token inherits the bubble's own colour,
+   otherwise --cm-text-head goes near-black against it in the light theme. */
+.message.user .message-content,
+.message.user .message-content h1,
+.message.user .message-content h2,
+.message.user .message-content h3,
+.message.user .message-content strong,
+.message.user .message-content td {
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+/* --- Response reveal --------------------------------------------------- */
+
+.message.response-preparing,
+.review-card.response-preparing,
+.setup-scan-card.response-preparing {
+  opacity: 0;
+  will-change: opacity;
+}
+
+.message.response-ready,
+.review-card.response-ready,
+.setup-scan-card.response-ready {
+  position: relative;
+  animation: responseReadyIn 0.28s cubic-bezier(0.22, 0.8, 0.3, 1) both;
+}
+
+.review-card.response-ready .response-reveal-item,
+.setup-scan-card.response-ready .response-reveal-item,
+.message.response-ready .response-reveal-item {
+  animation: responseRevealItemIn 0.26s cubic-bezier(0.22, 0.8, 0.3, 1) both;
+  animation-delay: calc(40ms + (var(--response-reveal-index, 0) * 26ms));
+}
+
+.review-card.response-ready .review-verdict {
+  animation: verdictSettleIn 0.24s cubic-bezier(0.22, 0.8, 0.3, 1) 80ms both;
+}
+
+@keyframes responseReadyIn {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes responseRevealItemIn {
+  0% {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes verdictSettleIn {
+  0% {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.message.assistant.loading {
+  align-self: flex-start;
+  width: fit-content;
+  max-width: 100%;
+  animation: responseReadyIn 0.16s ease-out both;
+}
+
+.analysis-typing-bubble .message-content {
+  min-width: 42px;
+}
+
+/* --- Quiet turn metadata ------------------------------------------------ */
+
+.inflight-scan-context-note,
+.previous-scan-label {
+  margin-bottom: 5px;
+  color: var(--cm-text-muted);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.conversation-load-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 0;
+  border-top: 1px solid var(--cm-border-glass);
+  color: var(--cm-text-muted);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.conversation-load-status.is-loading {
+  justify-content: flex-start;
+}
+
+.conversation-load-status.is-loading::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  border: 2px solid color-mix(in srgb, var(--cm-text-muted) 28%, transparent);
+  border-top-color: var(--cm-primary);
+  border-radius: 50%;
+  animation: conversationLoadSpin 0.8s linear infinite;
+}
+
+@keyframes conversationLoadSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.conversation-load-retry {
+  flex: 0 0 auto;
+  padding: 3px 0;
+  border: 0;
+  background: transparent;
+  color: var(--cm-primary);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.conversation-load-retry:focus-visible {
+  outline: 2px solid var(--cm-primary);
+  outline-offset: 2px;
+}
+
+/* --- Chat action card (review, upgrades, etc.) -------------------------- */
+
+.chat-action-card {
+  margin-top: 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chat-action-btn {
+  min-height: 30px;
+  padding: 7px 12px;
+  border: 1px solid var(--cm-border-strong);
+  border-radius: var(--cm-radius-sm);
+  background: transparent;
+  color: var(--cm-text-body);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1;
+  text-align: center;
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.chat-action-btn.primary {
+  border-color: transparent;
+  background: var(--cm-primary);
+  color: #ffffff;
+}
+
+.chat-action-btn.primary:hover {
+  background: color-mix(in srgb, var(--cm-primary) 86%, #ffffff);
+}
+
+.chat-action-btn.secondary {
+  background: transparent;
+  color: var(--cm-text-muted);
+}
+
+.chat-action-btn.secondary:hover {
+  border-color: var(--cm-text-muted);
+  color: var(--cm-text-head);
+}
+
+.chat-action-btn:focus-visible {
+  outline: 2px solid var(--cm-primary);
+  outline-offset: 2px;
+}
+
+.message.assistant[data-review-request="true"] {
+  --mentor-accent: var(--cm-warning);
+}
+
+.message.assistant[data-conversion-prompt="true"] {
+  --mentor-accent: var(--cm-success);
+}
+
+.message.assistant[data-review-request="true"] .chat-action-btn.primary {
+  background: var(--cm-warning);
+  color: #14171c;
+}
+
+.message.assistant[data-review-request="true"] .chat-action-btn.primary:hover {
+  background: color-mix(in srgb, var(--cm-warning) 88%, #ffffff);
+}
+
+.message.assistant[data-conversion-prompt="true"] .chat-action-btn.primary {
+  flex: 1 1 150px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .message.response-preparing,
+  .review-card.response-preparing,
+  .setup-scan-card.response-preparing,
+  .message.response-ready,
+  .review-card.response-ready,
+  .setup-scan-card.response-ready,
+  .review-card.response-ready .response-reveal-item,
+  .setup-scan-card.response-ready .response-reveal-item,
+  .message.response-ready .response-reveal-item,
+  .review-card.response-ready .review-verdict,
+  .message.assistant.loading {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .conversation-load-status.is-loading::before {
+    animation: none;
+    border-top-color: var(--cm-text-muted);
+  }
+}

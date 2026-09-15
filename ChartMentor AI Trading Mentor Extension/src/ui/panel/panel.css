@@ -1,0 +1,25 @@
+@import url("panel-base-layout.css");
+@import url("panel-chat-results.css");
+@import url("panel-response-motion.css");
+@import url("panel-review-cards.css");
+@import url("panel-mode-controls.css");
+@import url("panel-onboarding.css");
+@import url("panel-navigation-input.css");
+@import url("panel-paywall-deepdive.css");
+@import url("panel-feedback-controls.css");
+@import url("panel-details-feedback.css");
+@import url("panel-scan-result.css");
+@import url("panel-plan-first.css");
+@import url("panel-mentor-session.css");
+@import url("panel-watchlist.css");
+
+#chartmentor-panel {
+  cursor: default;
+}
+
+#chartmentor-panel input[type="text"],
+#chartmentor-panel input:not([type]),
+#chartmentor-panel textarea,
+#chartmentor-panel [contenteditable="true"] {
+  cursor: text;
+}

@@ -1,0 +1,280 @@
+/* --- History ------------------------------------------------------------ */
+.history-controls {
+  padding: 12px 0 12px 0;
+  flex-shrink: 0;
+}
+
+.history-list {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.search-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.search-container svg {
+  position: absolute;
+  left: 11px;
+  color: var(--cm-text-muted);
+  pointer-events: none;
+}
+
+#history-search {
+  width: 100%;
+  min-height: 34px;
+  padding: 8px 12px 8px 32px;
+  background: var(--cm-surface);
+  border: 1px solid var(--cm-border-strong);
+  border-radius: var(--cm-radius-sm);
+  color: var(--cm-text-head);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 400;
+  outline: none;
+  transition:
+    border-color 0.12s ease,
+    box-shadow 0.12s ease;
+}
+
+#history-search::placeholder {
+  color: var(--cm-text-muted);
+}
+
+#history-search:focus {
+  border-color: var(--cm-primary);
+  box-shadow: 0 0 0 2px var(--cm-primary-glow);
+}
+
+.history-item {
+  background: transparent;
+  border: 1px solid var(--cm-border-glass);
+  border-radius: var(--cm-radius-sm);
+  padding: 12px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition:
+    border-color 0.12s ease,
+    background-color 0.12s ease;
+}
+
+.history-item:hover {
+  border-color: var(--cm-border-strong);
+  background: var(--cm-surface);
+}
+
+.history-item:focus-visible {
+  outline: 2px solid var(--cm-primary);
+  outline-offset: 2px;
+}
+
+.history-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.history-symbol {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--cm-text-head);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.history-tf {
+  padding: 2px 6px;
+  border: 1px solid var(--cm-border-glass);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--cm-text-muted);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.history-time {
+  flex: 0 0 auto;
+  color: var(--cm-text-muted);
+  font-size: 11px;
+}
+
+.history-preview {
+  margin-top: 4px;
+  color: var(--cm-text-body);
+  font-size: 12.5px;
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* --- Composer ----------------------------------------------------------- */
+/* One docked, bordered control. Review is a quiet icon affordance inside the
+   field; send is the only filled element in the row. */
+
+.chat-input-area {
+  flex: 0 0 auto;
+  display: block;
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  padding: 8px 0 12px;
+  background: var(--cm-bg-premium);
+}
+
+.input-wrapper {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 4px 4px 6px;
+  background: var(--cm-surface);
+  border: 1px solid var(--cm-border-strong);
+  border-radius: var(--cm-radius-md);
+  transition:
+    border-color 0.12s ease,
+    box-shadow 0.12s ease;
+}
+
+.input-wrapper:focus-within {
+  border-color: var(--cm-primary);
+  box-shadow: 0 0 0 2px var(--cm-primary-glow);
+}
+
+#chat-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 6px 4px;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--cm-text-head);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.4;
+}
+
+#chat-input::placeholder {
+  color: var(--cm-text-muted);
+}
+
+#chat-input:disabled {
+  cursor: not-allowed;
+  color: var(--cm-text-muted);
+}
+
+.analyze-btn,
+.send-btn {
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  min-height: 30px;
+  flex: 0 0 30px;
+  padding: 0;
+  border: none;
+  border-radius: var(--cm-radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.analyze-btn:focus-visible,
+.send-btn:focus-visible {
+  outline: 2px solid var(--cm-primary);
+  outline-offset: 1px;
+}
+
+/* Secondary: review a plan. */
+.analyze-btn {
+  width: auto;
+  min-width: 30px;
+  flex: 0 0 auto;
+  gap: 6px;
+  padding: 0 9px;
+  background: transparent;
+  color: var(--cm-text-muted);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.analyze-btn svg {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+}
+
+.analyze-btn-label {
+  max-width: none;
+}
+
+.analyze-btn:hover:not(:disabled):not(.is-extension-loading) {
+  background: var(--cm-hover-surface);
+  color: var(--cm-text-head);
+}
+
+.analyze-btn:disabled,
+.analyze-btn.is-extension-loading {
+  cursor: wait;
+  opacity: 0.45;
+}
+
+.analyze-btn.analyzing {
+  cursor: progress;
+  color: var(--cm-primary);
+}
+
+/* Primary: send. */
+.send-btn {
+  background: var(--cm-primary);
+  color: #ffffff;
+}
+
+.send-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
+.send-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--cm-primary) 86%, #ffffff);
+}
+
+.send-btn:disabled {
+  cursor: not-allowed;
+  background: var(--cm-hover-surface);
+  color: var(--cm-text-muted);
+}
+
+/* --- Footer ------------------------------------------------------------- */
+.panel-footer {
+  flex: 0 0 auto;
+  padding: 8px 12px 9px;
+  border-top: 1px solid var(--cm-border-glass);
+  background: var(--cm-bg-premium);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 7px;
+}
+
+#chartmentor-panel.has-review-content .panel-footer {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}

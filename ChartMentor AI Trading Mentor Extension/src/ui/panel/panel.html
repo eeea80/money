@@ -1,0 +1,444 @@
+<!doctype html>
+<!--
+  @license
+  Copyright (c) 2024-2025 CRX International LLC. All Rights Reserved.
+
+  This code is licensed under a commercial license.
+  See the LICENSE.md file for details.
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ChartMentor</title>
+    <link rel="stylesheet" href="panel.css" />
+  </head>
+
+  <body>
+    <div id="chartmentor-panel">
+      <!-- Header -->
+      <header class="panel-header">
+        <div class="logo">
+          <div class="logo-icon">
+            <svg
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+            >
+              <path d="M3 17l6-6 4 4 8-8"></path>
+              <path d="M14 7h7v7"></path>
+            </svg>
+          </div>
+          <span>ChartMentor</span>
+        </div>
+        <div class="usage-info" id="usage-info">
+          <span class="tier-badge" id="tier-badge">Free</span>
+        </div>
+        <div class="header-actions">
+          <button
+            id="new-session-btn"
+            class="icon-btn"
+            title="New Session / Clear Chat"
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M23 4v6h-6"></path>
+              <path d="M1 20v-6h6"></path>
+              <path
+                d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"
+              ></path>
+            </svg>
+          </button>
+          <button id="settings-btn" class="icon-btn" title="Settings">
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path
+                d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"
+              ></path>
+              <circle cx="12" cy="12" r="3"></circle>
+            </svg>
+          </button>
+          <button id="close-panel-btn" class="icon-btn" title="Close Panel">
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <div id="update-banner" class="update-banner" hidden>
+        <span>A newer version of ChartMentor is available.</span>
+        <a
+          id="update-banner-link"
+          href="https://chromewebstore.google.com/detail/chartmentor-ai-trading-me/neeoehhmfaeoegkhddlbhjnojiabgman"
+          target="_blank"
+          rel="noopener noreferrer"
+          >Update</a
+        >
+        <button id="update-banner-dismiss" class="icon-btn" title="Dismiss">
+          &times;
+        </button>
+      </div>
+
+      <!-- Section navigation + readiness -->
+      <div class="panel-subbar">
+        <div class="tab-nav" role="tablist" aria-label="Panel sections">
+          <button
+            id="tab-review"
+            class="tab-btn active"
+            type="button"
+            role="tab"
+            data-tab="review"
+            aria-selected="true"
+            aria-controls="review-tab"
+            tabindex="0"
+          >
+            Mentor
+          </button>
+          <button
+            id="tab-history"
+            class="tab-btn"
+            type="button"
+            role="tab"
+            data-tab="history"
+            aria-selected="false"
+            aria-controls="history-tab"
+            tabindex="-1"
+          >
+            History
+          </button>
+          <button
+            id="tab-watchlist"
+            class="tab-btn"
+            type="button"
+            role="tab"
+            data-tab="watchlist"
+            aria-selected="false"
+            aria-controls="watchlist-tab"
+            tabindex="-1"
+          >
+            Watchlist
+          </button>
+        </div>
+        <div class="readiness-pill" id="readiness-pill">
+          <span
+            class="readiness-dot"
+            id="readiness-dot"
+            aria-hidden="true"
+          ></span>
+          <span id="readiness-label">Preparing...</span>
+        </div>
+      </div>
+
+      <!-- Tab Content -->
+      <main class="tab-content">
+        <!-- Scan Tab -->
+        <div
+          id="review-tab"
+          class="tab-pane active"
+          role="tabpanel"
+          aria-labelledby="tab-review"
+        >
+          <div
+            class="chat-messages"
+            id="chat-messages"
+            role="log"
+            aria-live="polite"
+            aria-relevant="additions"
+            aria-label="Conversation"
+          ></div>
+          <div class="chat-input-area">
+            <div class="input-wrapper">
+              <input
+                type="text"
+                id="chat-input"
+                placeholder="Ask about the chart..."
+                disabled
+              />
+              <button
+                id="analyze-btn"
+                class="analyze-btn"
+                type="button"
+                aria-label="Review this chart"
+                title="Review this chart"
+              >
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  aria-hidden="true"
+                >
+                  <circle cx="12" cy="12" r="7"></circle>
+                  <path d="M12 2v4M12 18v4M2 12h4M18 12h4"></path>
+                </svg>
+                <span id="analyze-btn-label" class="analyze-btn-label">Review chart</span>
+              </button>
+              <button
+                id="send-btn"
+                class="send-btn"
+                type="button"
+                aria-label="Send message"
+                title="Send message"
+                disabled
+              >
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.5"
+                >
+                  <line x1="22" y1="2" x2="11" y2="13"></line>
+                  <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- History Tab -->
+        <div
+          id="history-tab"
+          class="tab-pane"
+          role="tabpanel"
+          aria-labelledby="tab-history"
+        >
+          <div class="history-controls">
+            <div class="search-container">
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+              </svg>
+              <input
+                type="text"
+                id="history-search"
+                placeholder="Search symbol or keyword..."
+              />
+            </div>
+          </div>
+          <div class="history-list" id="history-list">
+            <div class="empty-state">
+              <svg
+                class="hud-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+              >
+                <path
+                  d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"
+                />
+              </svg>
+              <h3 class="hud-title">REVIEW HISTORY</h3>
+              <p class="hud-subtitle">
+                Your past plan reviews are stored here for reference.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Watchlist Tab -->
+        <div
+          id="watchlist-tab"
+          class="tab-pane"
+          role="tabpanel"
+          aria-labelledby="tab-watchlist"
+        >
+          <section class="watchlist-shell" aria-labelledby="watchlist-heading">
+            <header class="watchlist-header">
+              <div>
+                <h2 id="watchlist-heading">Watchlist</h2>
+                <p>Synced charts to revisit without starting a review.</p>
+              </div>
+              <div id="watchlist-status" aria-live="polite"></div>
+            </header>
+            <div class="watchlist-add">
+              <div class="watchlist-current">
+                <span>Current chart</span>
+                <strong id="watchlist-current-chart"
+                  >Waiting for a reliable chart…</strong
+                >
+              </div>
+              <label for="watchlist-note-input">Note (optional)</label>
+              <input
+                id="watchlist-note-input"
+                type="text"
+                maxlength="160"
+                autocomplete="off"
+                placeholder="Level, setup, or reminder"
+              />
+              <button
+                id="watchlist-add-current"
+                class="watchlist-add-button"
+                type="button"
+                data-watchlist-action="add-current"
+                disabled
+              >
+                Add current chart
+              </button>
+            </div>
+            <div id="watchlist-list" class="watchlist-list"></div>
+          </section>
+        </div>
+      </main>
+
+      <!-- Footer -->
+      <footer class="panel-footer">
+        <p class="panel-legal-note">
+          Educational analysis only — not financial advice.
+        </p>
+      </footer>
+    </div>
+
+    <!-- Paywall Overlay -->
+    <div id="paywall-overlay" class="paywall-overlay hidden" aria-hidden="true">
+      <div class="paywall-card">
+        <div class="paywall-icon">
+          <svg
+            width="28"
+            height="28"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.5"
+          >
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+          </svg>
+        </div>
+        <h3 class="paywall-title">$1 today. Seven days of Pro.</h3>
+        <p id="paywall-description" class="paywall-description">
+          Seven days of Pro. Then $39.99/month unless canceled.
+        </p>
+        <button id="paywall-upgrade-btn" class="paywall-btn primary">
+          Start 7-Day Pro for $1
+        </button>
+        <button id="paywall-close-btn" class="paywall-btn secondary">
+          Not now
+        </button>
+      </div>
+    </div>
+
+    <!-- Manual Plan Fallback -->
+    <div
+      id="manual-plan-modal"
+      class="paywall-overlay hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="manual-plan-title"
+      aria-hidden="true"
+    >
+      <div class="paywall-card manual-plan-card">
+        <h3 id="manual-plan-title" class="paywall-title">Log your plan</h3>
+        <p class="paywall-description">
+          Direction, entry, stop, and target - I'll review it against the chart.
+        </p>
+        <div class="manual-plan-field-row">
+          <button id="manual-plan-long-btn" class="plan-first-btn manual-plan-direction" type="button" data-direction="LONG">Long</button>
+          <button id="manual-plan-short-btn" class="plan-first-btn manual-plan-direction" type="button" data-direction="SHORT">Short</button>
+        </div>
+        <label class="manual-plan-label" for="manual-plan-entry">Entry / activation</label>
+        <input id="manual-plan-entry" class="manual-plan-input" type="text" inputmode="decimal" maxlength="32" placeholder="e.g. 1.0850" />
+        <label class="manual-plan-label" for="manual-plan-stop">Stop / invalidation</label>
+        <input id="manual-plan-stop" class="manual-plan-input" type="text" inputmode="decimal" maxlength="32" placeholder="e.g. 1.0800" />
+        <label class="manual-plan-label" for="manual-plan-target">Target</label>
+        <input id="manual-plan-target" class="manual-plan-input" type="text" inputmode="decimal" maxlength="32" placeholder="e.g. 1.0950" />
+        <p
+          id="manual-plan-error"
+          class="manual-plan-error hidden"
+          role="alert"
+        ></p>
+        <button id="manual-plan-submit-btn" class="paywall-btn primary">
+          Review this plan
+        </button>
+        <button id="manual-plan-cancel-btn" class="paywall-btn secondary">
+          Cancel
+        </button>
+      </div>
+    </div>
+
+    <script src="../../shared/constants.js"></script>
+    <script src="../../shared/storage-utils.js"></script>
+    <script src="panel-config.js"></script>
+    <script src="panel-watchlist-state.js"></script>
+    <script src="panel-watchlist-api.js"></script>
+    <script src="panel-watchlist-render.js"></script>
+    <script src="panel-handshake-state.js"></script>
+    <script src="panel-usage-modes.js"></script>
+    <script src="panel-checkout.js"></script>
+    <script src="panel-rich-cards.js"></script>
+    <script src="panel-chat-state.js"></script>
+    <script src="panel-empty-states.js"></script>
+    <script src="panel-scan-normalization.js"></script>
+    <script src="panel-tradingview-alert-guidance.js"></script>
+    <script src="panel-scan-controls.js"></script>
+    <script src="panel-scan-result-copy.js"></script>
+    <script src="panel-onboarding-bootstrap.js"></script>
+    <script src="panel-messaging-feed.js"></script>
+    <script src="panel-history-sync.js"></script>
+    <script src="panel-conversation-state.js"></script>
+    <script src="panel-analysis-response.js"></script>
+    <script src="panel-scan-recovery.js"></script>
+    <script src="panel-analysis-request.js"></script>
+    <script src="panel-prompts-trials.js"></script>
+    <script src="panel-paywall-capture.js"></script>
+    <script src="panel-structured-follow-up.js"></script>
+    <script src="panel-response-motion.js"></script>
+    <script src="panel-message-rendering.js"></script>
+    <script src="panel-mentor-session.js"></script>
+    <script src="panel-mentor-initiative.js"></script>
+    <script src="panel-formatting-loading.js"></script>
+    <script src="panel-scan-rendering.js"></script>
+    <script src="panel-history-settings.js"></script>
+    <script src="panel-history-conversation.js"></script>
+    <script src="panel-view-recovery.js"></script>
+    <script src="panel-feedback-api.js"></script>
+    <script src="panel-feedback-export.js"></script>
+    <script src="panel-mentor-review.js"></script>
+    <script src="panel-mentor-response.js"></script>
+    <script src="panel-plan-first.js"></script>
+    <script src="panel-outcome-prompts.js"></script>
+    <script src="panel-watchlist-controller.js"></script>
+    <script src="panel.js"></script>
+  </body>
+</html>

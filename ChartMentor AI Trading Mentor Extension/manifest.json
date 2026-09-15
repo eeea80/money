@@ -1,0 +1,83 @@
+{
+"update_url": "https://clients2.google.com/service/update2/crx",
+
+  "manifest_version": 3,
+  "name": "ChartMentor AI Trading Mentor",
+  "short_name": "ChartMentor",
+  "version": "3.4.11",
+  "description": "An AI mentor inside TradingView that learns your style, reviews the plans you mark, and remembers what matters.",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "tabs",
+    "unlimitedStorage"
+  ],
+  "host_permissions": [
+    "https://fjepmkoonpzmlddpeufe.supabase.co/*",
+    "*://*.tradingview.com/*",
+    "https://chartmentor.io/*",
+    "https://chartmentor.lovable.app/*",
+    "https://preview--chartmentor.lovable.app/*"
+  ],
+  "background": {
+    "service_worker": "src/background/background.js"
+  },
+  "action": {
+    "default_title": "ChartMentor AI Trading Mentor",
+    "default_icon": {
+      "16": "images/icon16.png",
+      "48": "images/icon48.png",
+      "128": "images/icon128.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.tradingview.com/chart/*"],
+      "js": [
+        "src/shared/constants.js",
+        "src/shared/storage-utils.js",
+        "src/content/panel-controller-utils.js",
+        "src/content/panel-controller-theme.js",
+        "src/content/panel-controller-capture.js",
+        "src/content/panel-controller-frame.js",
+        "src/content/tradingview-alert-opener.js",
+        "src/content/tradingview-alert-autofill.js",
+        "src/content/tradingview-chart-navigation.js",
+        "src/content/panel-controller.js",
+        "src/content/content-styles.js",
+        "src/content/content-dom.js",
+        "src/content/content-parser.js",
+        "src/content/content.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    },
+    {
+      "matches": [
+        "https://chartmentor.io/*",
+        "https://chartmentor.lovable.app/*",
+        "https://preview--chartmentor.lovable.app/*"
+      ],
+      "js": ["src/content/auth-sync.js"],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "src/ui/panel/panel.html",
+        "src/ui/panel/panel.css",
+        "src/ui/panel/panel.js",
+        "src/shared/constants.js",
+        "images/*.png"
+      ],
+      "matches": ["*://*.tradingview.com/*"]
+    }
+  ],
+  "icons": {
+    "16": "images/icon16.png",
+    "48": "images/icon48.png",
+    "128": "images/icon128.png"
+  }
+}

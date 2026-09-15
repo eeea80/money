@@ -1,0 +1,212 @@
+/* The turn itself is flat; .scan-result-surface is the only card, so it sits
+   flush in the panel gutter instead of nesting inside a second padded box. */
+.scan-experience.setup-scan-card {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.scan-result-surface {
+  --scan-result-accent: var(--cm-text-muted);
+  padding: 14px;
+  background: var(--cm-surface);
+  border: 1px solid var(--cm-border-glass);
+  border-radius: var(--cm-radius-md);
+}
+
+.scan-result-surface.signal {
+  --scan-result-accent: var(--cm-success);
+}
+
+.scan-result-surface.watch {
+  --scan-result-accent: var(--cm-warning);
+}
+
+.scan-result-surface.wait {
+  --scan-result-accent: var(--cm-warning);
+}
+
+.scan-result-surface.review {
+  --scan-result-accent: var(--cm-primary);
+}
+
+.scan-result-surface.blocked {
+  --scan-result-accent: var(--cm-error);
+}
+
+.scan-result-kicker {
+  color: var(--cm-text-muted);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.setup-detected-context {
+  margin-bottom: 10px;
+  color: var(--cm-text-muted);
+  font-size: 11px;
+  font-style: italic;
+  line-height: 1.4;
+}
+
+.tradingview-alert-guidance {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 11px 12px;
+  border: 1px solid color-mix(in srgb, var(--cm-primary) 32%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--cm-primary) 8%, transparent);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.tradingview-alert-guidance.autofilled {
+  border-color: color-mix(in srgb, var(--cm-success) 38%, transparent);
+  background: color-mix(in srgb, var(--cm-success) 8%, transparent);
+}
+
+.tradingview-alert-guidance-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: var(--cm-text-body);
+}
+
+.tradingview-alert-guidance-copy strong {
+  color: var(--cm-text-head);
+  font-size: 12px;
+}
+
+.tradingview-alert-guidance-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.tradingview-alert-guidance-action {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--cm-primary);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.tradingview-alert-guidance-action:focus-visible {
+  outline: 2px solid var(--cm-primary);
+  outline-offset: 2px;
+}
+
+.scan-supporting-details {
+  margin-top: 12px;
+  border-bottom: 1px solid var(--cm-border-glass);
+}
+
+.scan-supporting-details summary {
+  padding: 10px 0;
+  color: var(--cm-text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+.scan-supporting-details[open] summary {
+  color: var(--cm-text-head);
+}
+
+.scan-supporting-body {
+  padding-bottom: 8px;
+}
+
+.scan-experience .setup-detected-context,
+.scan-experience .situational-awareness-note {
+  margin: 12px 0 0;
+}
+
+.mentor-message {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+  margin-top: 22px;
+}
+
+.mentor-message .mentor-bubble {
+  margin: 0;
+  padding: 13px 15px;
+  background: var(--cm-surface-raised);
+  border: 1px solid var(--cm-border-glass);
+  border-radius: var(--cm-radius-md);
+}
+
+.mentor-message .mentor-bubble::before {
+  display: none;
+}
+
+.mentor-message .mentor-bubble-text {
+  color: var(--cm-text-head);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.mentor-message .mentor-bubble-action {
+  margin-top: 8px;
+  color: var(--cm-text-body);
+  font-size: 12px;
+}
+
+.scan-experience > .feedback-row {
+  margin-top: 14px;
+  gap: 8px;
+}
+
+.scan-experience > .feedback-row .feedback-label {
+  width: 100%;
+  color: var(--cm-text-body);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.scan-experience > .feedback-row .feedback-btn {
+  min-height: 24px;
+  padding: 3px 7px;
+  color: var(--cm-text-head);
+  font-size: 11px;
+  font-weight: 500;
+  border-color: var(--cm-border-strong);
+  border-radius: 6px;
+}
+
+.scan-experience > .feedback-row .feedback-btn:hover {
+  background: var(--cm-hover-surface);
+  border-color: var(--cm-text-body);
+}
+
+.scan-experience > .feedback-row .feedback-btn:focus-visible {
+  outline: 2px solid var(--cm-primary);
+  outline-offset: 2px;
+}
+
+@media (max-width: 420px) {
+  .scan-experience.setup-scan-card {
+    padding: 0;
+  }
+
+  .scan-result-surface {
+    padding: 14px;
+  }
+
+  .mentor-message {
+    grid-template-columns: 34px minmax(0, 1fr);
+    gap: 9px;
+  }
+}

@@ -1,0 +1,19 @@
+/* --- Feedback Disabled & Selected States --- */
+.feedback-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.feedback-btn.selected:disabled {
+  opacity: 1;
+  color: var(--cm-success);
+  border-color: color-mix(in srgb, var(--cm-success) 34%, transparent);
+  background: color-mix(in srgb, var(--cm-success) 8%, transparent);
+}
+
+.feedback-btn[data-feedback-tone="not_helpful"].selected:disabled {
+  color: var(--cm-warning);
+  border-color: color-mix(in srgb, var(--cm-warning) 40%, transparent);
+  background: color-mix(in srgb, var(--cm-warning) 9%, transparent);
+}

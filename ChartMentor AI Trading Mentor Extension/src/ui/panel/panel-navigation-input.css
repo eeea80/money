@@ -1,0 +1,325 @@
+/* --- Mentor-live turns -------------------------------------------------- */
+/* Live turns sit flat on the panel background like every other assistant
+   turn; only the status line and the action row distinguish them. */
+
+.mentor-live-empty {
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 14px 0 8px;
+  text-align: left;
+}
+
+.mentor-live-empty .live-mentor-message {
+  max-width: 100%;
+}
+
+.live-mentor-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  color: var(--cm-text-muted);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.live-mentor-status-icon,
+.mentor-section-emoji {
+  flex: 0 0 auto;
+  font-family: "Segoe UI Emoji", "Apple Color Emoji", sans-serif;
+  font-weight: 400;
+  line-height: 1;
+}
+
+.live-mentor-status-label {
+  color: var(--cm-text-head);
+  font-weight: 600;
+}
+
+.live-mentor-status-context {
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live-mentor-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 6px;
+  border-radius: 50%;
+  background: var(--cm-success);
+}
+
+.mentor-live-turn.wait .live-mentor-dot {
+  background: var(--cm-warning);
+}
+
+.mentor-live-turn.blocked .live-mentor-dot {
+  background: var(--cm-error);
+}
+
+.mentor-live-copy .mentor-lead {
+  margin: 0;
+  color: var(--cm-text-head);
+  font-size: 14.5px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.mentor-live-copy .mentor-section {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--cm-border-glass);
+}
+
+.mentor-live-copy .mentor-section-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 7px;
+  color: var(--cm-text-head);
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.003em;
+}
+
+.mentor-live-copy .mentor-section-emoji {
+  width: 18px;
+  font-size: 14px;
+  text-align: center;
+}
+
+.mentor-live-copy .mentor-section-copy,
+.mentor-live-copy .mentor-question-copy {
+  margin: 0;
+  color: var(--cm-text-body);
+  line-height: 1.55;
+}
+
+.mentor-live-copy .mentor-bullet-group ul,
+.mentor-live-copy .mentor-question-section ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.mentor-live-copy .mentor-bullet-group li,
+.mentor-live-copy .mentor-question-section li {
+  margin-bottom: 6px;
+  line-height: 1.5;
+}
+
+.mentor-live-copy .mentor-bullet-group li:last-child,
+.mentor-live-copy .mentor-question-section li:last-child {
+  margin-bottom: 0;
+}
+
+.mentor-live-copy .mentor-conflict-section {
+  border-top-color: color-mix(in srgb, var(--cm-warning) 36%, transparent);
+}
+
+.mentor-live-copy .mentor-plan-table {
+  margin: 8px 0 0;
+  overflow: hidden;
+  border: 1px solid var(--cm-border-glass);
+  border-radius: var(--cm-radius-sm);
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.mentor-live-copy .mentor-plan-table th,
+.mentor-live-copy .mentor-plan-table td {
+  padding: 7px 8px;
+}
+
+.mentor-live-copy .mentor-plan-table th {
+  background: var(--cm-hover-surface);
+  color: var(--cm-text-head);
+  font-weight: 600;
+}
+
+.mentor-live-copy .mentor-plan-table td {
+  color: var(--cm-text-head);
+  font-weight: 500;
+}
+
+.mentor-live-copy .mentor-question-section {
+  border-top-color: color-mix(in srgb, var(--cm-primary) 36%, transparent);
+}
+
+@media (max-width: 340px) {
+  .mentor-live-copy .mentor-plan-table th,
+  .mentor-live-copy .mentor-plan-table td {
+    padding: 6px 5px;
+    font-size: 10.5px;
+  }
+}
+
+.live-mentor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.mentor-demo-prompts {
+  margin-top: 14px;
+}
+
+.live-mentor-action {
+  min-height: 30px;
+  padding: 6px 11px;
+  border: 1px solid var(--cm-border-strong);
+  border-radius: var(--cm-radius-sm);
+  background: transparent;
+  color: var(--cm-text-body);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.live-mentor-action.primary {
+  border-color: transparent;
+  background: var(--cm-primary);
+  color: #ffffff;
+}
+
+.live-mentor-action:hover {
+  border-color: var(--cm-text-muted);
+  color: var(--cm-text-head);
+}
+
+.live-mentor-action.primary:hover {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--cm-primary) 86%, #ffffff);
+  color: #ffffff;
+}
+
+.live-mentor-action:focus-visible {
+  outline: 2px solid var(--cm-primary);
+  outline-offset: 2px;
+}
+
+.live-mentor-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* --- Empty / activation states ------------------------------------------ */
+
+.activation-state {
+  text-align: left;
+}
+
+.empty-state.mentor-chat-start {
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 12px 0;
+  width: 100%;
+}
+
+.empty-state.mentor-chat-start .mentor-bubble {
+  width: fit-content;
+  max-width: 100%;
+}
+
+.mentor-opener {
+  margin-top: 0;
+}
+
+.mentor-start-actions {
+  width: 100%;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 12px;
+}
+
+.activation-status-grid {
+  width: 100%;
+  margin: 14px 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border: 1px solid var(--cm-border-glass);
+  border-radius: var(--cm-radius-sm);
+  background: transparent;
+  overflow: hidden;
+}
+
+.activation-status-grid > div {
+  min-width: 0;
+  padding: 9px;
+  text-align: left;
+  border-right: 1px solid var(--cm-border-glass);
+}
+
+.activation-status-grid > div:last-child {
+  border-right: 0;
+}
+
+.activation-status-kicker {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--cm-text-muted);
+  font-size: 10.5px;
+  font-weight: 400;
+}
+
+.activation-status-grid strong {
+  display: block;
+  color: var(--cm-text-head);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activation-status-grid .status-ready {
+  color: var(--cm-success);
+}
+
+.activation-status-grid .status-muted {
+  color: var(--cm-text-muted);
+}
+
+.situational-awareness-note {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--cm-border-glass);
+  border-radius: var(--cm-radius-sm);
+  background: transparent;
+  text-align: left;
+}
+
+.panel-legal-note {
+  margin: 0;
+  padding: 0;
+  text-align: center;
+  color: var(--cm-text-muted);
+  font-size: 10px;
+  line-height: 1.3;
+}
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}

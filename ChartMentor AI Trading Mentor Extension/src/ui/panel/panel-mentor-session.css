@@ -1,0 +1,65 @@
+.mentor-session-placeholder,
+.mentor-session-status {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 4px 0;
+  color: var(--cm-text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.mentor-session-placeholder {
+  min-height: 46px;
+  justify-content: flex-start;
+  background: transparent;
+  border: 0;
+}
+
+.mentor-session-placeholder .chartmentor-thinking-indicator {
+  flex: 0 0 auto;
+}
+
+.mentor-session-placeholder .chartmentor-thinking-indicator span {
+  background: var(--cm-primary);
+}
+
+.mentor-session-status {
+  justify-content: space-between;
+  border-top: 1px solid var(--cm-border);
+  padding-top: 10px;
+}
+
+.mentor-session-status button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--cm-primary);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.message[data-mentor-session="true"].user {
+  animation: mentorUserEnter 220ms cubic-bezier(0.22, 0.8, 0.3, 1) both;
+}
+
+@keyframes mentorUserEnter {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .message[data-mentor-session="true"].user {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}

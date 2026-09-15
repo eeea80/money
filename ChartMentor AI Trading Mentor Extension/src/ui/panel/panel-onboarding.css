@@ -1,0 +1,201 @@
+/* --- Onboarding card ---------------------------------------------------- */
+.onboarding-state {
+  padding: 16px 0;
+  justify-content: flex-start;
+}
+
+.onboarding-card {
+  width: 100%;
+  max-width: 340px;
+  padding: 16px;
+  border: 1px solid var(--cm-border-glass);
+  border-radius: var(--cm-radius-md);
+  background: var(--cm-surface);
+  text-align: left;
+}
+
+.onboarding-kicker {
+  margin-bottom: 8px;
+  color: var(--cm-text-muted);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.onboarding-subtitle {
+  max-width: none;
+  margin-bottom: 16px;
+}
+
+.onboarding-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.onboarding-step {
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  gap: 10px;
+  align-items: start;
+}
+
+.onboarding-step-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid color-mix(in srgb, var(--cm-primary) 50%, transparent);
+  border-radius: 50%;
+  color: var(--cm-primary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.onboarding-step strong {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--cm-text-head);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.onboarding-step p {
+  margin: 0;
+  color: var(--cm-text-body);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.onboarding-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.onboarding-action-btn {
+  min-height: 34px;
+  border: 1px solid transparent;
+  border-radius: var(--cm-radius-sm);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.onboarding-action-btn:focus-visible {
+  outline: 2px solid var(--cm-primary);
+  outline-offset: 2px;
+}
+
+.onboarding-action-btn.cm-button-primary {
+  background: var(--cm-primary);
+  color: #ffffff;
+}
+
+.onboarding-action-btn.cm-button-primary:hover {
+  background: color-mix(in srgb, var(--cm-primary) 86%, #ffffff);
+}
+
+.onboarding-action-btn.cm-button-secondary {
+  background: transparent;
+  border-color: var(--cm-border-strong);
+  color: var(--cm-text-body);
+}
+
+.onboarding-action-btn.cm-button-secondary:hover {
+  border-color: var(--cm-text-muted);
+  color: var(--cm-text-head);
+}
+
+.onboarding-note {
+  margin: 12px 0 0;
+  color: var(--cm-text-muted);
+  font-size: 11px;
+  text-align: center;
+}
+
+/* --- Short-viewport compaction ------------------------------------------ */
+/* Single home for every height-driven tightening, so the shell chrome cannot
+   be resized from two files at once. */
+
+@media (max-height: 720px) {
+  :root {
+    --header-height: 40px;
+    --subbar-height: 32px;
+  }
+
+  .chat-messages {
+    padding: 10px 0 12px;
+    gap: 12px;
+  }
+
+  .review-card,
+  .setup-scan-card {
+    padding: 12px;
+    margin-bottom: 8px;
+  }
+
+  .chat-input-area {
+    padding: 6px 0 10px;
+  }
+
+  .panel-footer {
+    padding: 7px 12px;
+    gap: 6px;
+  }
+
+  .mode-status {
+    min-height: 30px;
+  }
+
+  .empty-state {
+    padding-top: 16px;
+  }
+
+  .hud-icon {
+    width: 34px;
+    height: 34px;
+    margin-bottom: 10px;
+  }
+
+  .activation-status-grid {
+    margin: 12px 0;
+  }
+
+  .activation-check-item {
+    min-height: 46px;
+  }
+
+  .privacy-note,
+  .idle-suggestion-card {
+    display: none;
+  }
+}
+
+@media (max-height: 560px) {
+  :root {
+    --header-height: 36px;
+    --subbar-height: 30px;
+  }
+
+  .chat-input-area {
+    padding: 6px 0 8px;
+  }
+
+  .panel-footer {
+    padding: 6px 10px;
+    gap: 6px;
+  }
+
+  .mode-status {
+    min-height: 28px;
+  }
+
+  .empty-state {
+    padding-top: 12px;
+  }
+}

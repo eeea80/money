@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Avalisa PO Bot</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: #0f0f23; color: #e2e8f0;
+      width: 300px; padding: 18px 20px 16px;
+    }
+    .logo {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 18px; font-weight: 700; color: #a78bfa; margin-bottom: 4px;
+    }
+    .logo img { width: 58px; height: 28px; object-fit: contain; flex-shrink: 0; }
+    .subtitle { font-size: 12px; color: #64748b; margin-bottom: 14px; }
+    .mascot { text-align: center; margin: 4px 0 14px; }
+    .mascot img {
+      width: 128px; height: auto; display: inline-block;
+      filter: drop-shadow(0 6px 18px rgba(124, 58, 237, 0.35));
+    }
+    .desc {
+      font-size: 12px; line-height: 1.6; color: #94a3b8;
+      background: #1a1a2e; border: 1px solid #2d2d5b; border-radius: 8px;
+      padding: 12px; margin-bottom: 14px;
+    }
+    .desc strong { color: #e2e8f0; }
+    .hint {
+      font-size: 11px; line-height: 1.5; color: #64748b;
+      margin-bottom: 14px; text-align: center;
+    }
+    .hint b { color: #f4c95d; }
+    .btn {
+      display: block; width: 100%; padding: 10px; border: none; border-radius: 8px;
+      font-size: 13px; font-weight: 600; cursor: pointer; text-align: center;
+      text-decoration: none; margin-bottom: 8px; transition: opacity 0.2s;
+    }
+    .btn:hover { opacity: 0.85; }
+    .btn-primary { background: #f4c95d; color: #15120a; }
+    .btn-outline { background: transparent; border: 1px solid #7c3aed; color: #a78bfa; }
+    .divider { border-top: 1px solid #2d2d5b; margin: 14px 0 10px; }
+    .footer {
+      font-size: 11px; color: #475569; text-align: center;
+      display: flex; justify-content: center; align-items: center; gap: 6px;
+    }
+    .footer a { color: #7c3aed; text-decoration: none; }
+    .footer a:hover { text-decoration: underline; }
+    .version {
+      font-size: 10px; color: #475569; text-align: center; margin-top: 8px;
+      letter-spacing: 0.03em;
+    }
+  </style>
+</head>
+<body>
+  <div class="logo">
+    <img src="icons/avalisa-signature-logo-transparent.png" alt="Avalisa PO Bot" /><span>Avalisa PO Bot</span>
+  </div>
+  <div class="subtitle">Trading Strategy Tool for Pocket Option</div>
+
+  <div class="mascot">
+    <img src="icons/avalisa-mascot.png" alt="Avalisa" />
+  </div>
+
+  <div class="desc">
+    Runs your Pocket Option strategy from an on-page panel — <strong>Martingale</strong> for
+    direction-and-recovery rules, or <strong>Avalisa Bot</strong> for indicator-based signals.
+    You stay in control: every setting, and Stop, stay visible while it trades.
+  </div>
+
+  <div class="hint">
+    Sign in and run the bot from the <b>Avalisa panel</b> on the Pocket Option page.
+  </div>
+
+  <a class="btn btn-primary" id="dashboard-link" href="#" target="_blank">Open Dashboard</a>
+  <a class="btn btn-outline" id="affiliate-link" href="#" target="_blank">Register for Pro Access</a>
+
+  <div class="divider"></div>
+  <div class="footer">
+    <a href="#" id="site-link" target="_blank">avalisabot.vercel.app</a> ·
+    <a href="#" id="support-link" target="_blank">Support</a>
+  </div>
+  <div class="version" id="version-line">v—</div>
+
+  <script src="config.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

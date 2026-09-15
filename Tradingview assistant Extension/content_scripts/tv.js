@@ -1,0 +1,1198 @@
+const tv = {
+  reportDeepNode: null,
+  tickerTextPrev: null,
+  timeFrameTextPrev: null,
+  isReportChanged: false,
+  _settingsMethod: null,
+  lastSetStrategyResult: null,
+  // isParsed: false,
+}
+
+
+const SUPPORT_TEXT = 'Please retry. <br />If the problem reproduced then it is possible that TV UI changed. Create task on' +
+  '<a href="https://github.com/akumidv/tradingview-assistant-chrome-extension/issues/" target="_blank"> github</a> please (check before if it isn\'t already created)'
+
+// Inject script to get access to TradingView data on page
+const script = document.createElement('script');
+script.src = chrome.runtime.getURL('page-context.js');
+document.documentElement.appendChild(script);
+
+const scriptPlot = document.createElement('script');
+scriptPlot.src = chrome.runtime.getURL('lib/plotly.min.js')
+document.documentElement.appendChild(scriptPlot);
+
+const tvPageMessageData = {}
+
+window.addEventListener('message', messageHandler)
+
+
+async function messageHandler(event) {
+  const url = window.location && window.location.origin ? window.location.origin : 'https://www.tradingview.com'
+  if (!event.origin.startsWith(url) || !event.data ||
+    !event.data.hasOwnProperty('name') || event.data.name !== 'iondvPage' ||
+    !event.data.hasOwnProperty('action'))
+    return
+  const messageKey = event.data.requestId ? `${event.data.action}#${event.data.requestId}` : event.data.action
+  if (tvPageMessageData.hasOwnProperty(messageKey) && typeof (tvPageMessageData[messageKey]) === 'function') { // Callback
+    const resolve = tvPageMessageData[messageKey]
+    delete tvPageMessageData[messageKey]
+    resolve(event.data)
+  } else {
+    tvPageMessageData[messageKey] = event.data.data
+  }
+}
+
+
+tv.getStrategy = async (strategyName = '', isIndicatorSave = false, isDeepTest = false) => {
+  try {
+    await tv.openStrategyTab(isDeepTest)
+  } catch (err) {
+    console.warn('[ERROR]checkAndOpenStrategy', err)
+  }
+  let isOpened = false
+  if (strategyName)
+    isOpened = await tv.openStrategyParameters(strategyName, true)
+  else
+    isOpened = await tv.openStrategyParameters(null, false)
+  if (isOpened === null)
+    return null  // openStrategyParameters already showed error popup
+  if (!isOpened)
+    throw new Error('It was not possible open strategy. Add it to the chart and try again.')
+
+  const dialogTitle = await page.waitForSelector(SEL.indicatorTitle)
+  if (!dialogTitle || dialogTitle.innerText === null)
+    throw new Error('It was not possible to find a strategy with parameters among the indicators. Add it to the chart and try again.')
+  const indicatorName = await tv.getStrategyNameFromPopup()
+  if (!await tv.changeDialogTabToInput())
+    throw new Error(`Can\'t activate input tab in strategy parameters` + SUPPORT_TEXT)
+
+  const strategyInputs = await tv.getStrategyParams(isIndicatorSave)
+  const strategyData = { name: indicatorName, properties: strategyInputs }
+
+  if (!isIndicatorSave && document.querySelector(SEL.cancelBtn)) {
+    document.querySelector(SEL.cancelBtn).click()
+    await page.waitForSelector(SEL.cancelBtn, 1000, true)
+  }
+
+  return strategyData
+}
+
+tv.getStrategyParams = async (isIndicatorSave = false) => {
+  const strategyInputs = {} // TODO to list of values and set them in the same order
+  const indicProperties = document.querySelectorAll(SEL.indicatorProperty)
+  for (let i = 0; i < indicProperties.length; i++) {
+    const propClassName = indicProperties[i].getAttribute('class')
+    const propText = indicProperties[i].innerText
+    if (!propClassName || !propText) // Undefined type of element
+      continue
+    if (propClassName.includes('topCenter-')) {  // Two rows, also have first in class name
+      i++ // Skip get the next cell because it content values
+      continue // Doesn't realise to manage this kind of properties (two rows)
+    } else if (propClassName.includes('first-') && indicProperties[i].innerText) {
+      i++
+      if (indicProperties[i] && indicProperties[i].querySelector('input')) {
+        let propValue = indicProperties[i].querySelector('input').value
+        if (indicProperties[i].querySelector('input').getAttribute('inputmode') === 'numeric' ||
+          (parseFloat(propValue) == propValue || parseInt(propValue) == propValue)) { // not only inputmode==numbers input have digits
+          const digPropValue = parseFloat(propValue) == parseInt(propValue) ? parseInt(propValue) : parseFloat(propValue)  // Detection if float or int in the string
+          if (!isNaN(propValue))
+            strategyInputs[propText] = digPropValue
+          else
+            strategyInputs[propText] = propValue
+        } else {
+          strategyInputs[propText] = propValue
+        }
+      } else if (indicProperties[i].querySelector('button[role="combobox"]')) { // List, type="button"
+        const buttonEl = indicProperties[i].querySelector('button[role="combobox"]')
+        if (!buttonEl)
+          continue
+        const propValue = buttonEl.innerText
+        if (propValue) {
+          if (isIndicatorSave) {
+            strategyInputs[propText] = propValue
+            continue
+          }
+          buttonEl.scrollIntoView()
+          await page.waitForTimeout(100)
+          page.mouseClick(buttonEl)
+          const isOptions = await page.waitForSelector(SEL.strategyListOptions, 1000)
+          if (isOptions) {
+            const allOptionsEl = document.querySelectorAll(SEL.strategyListOptions)
+            let allOptionsList = propValue + ';'
+            for (let optionEl of allOptionsEl) {
+              if (optionEl && optionEl.innerText && optionEl.innerText !== propValue) {
+                allOptionsList += optionEl.innerText + ';'
+              }
+            }
+            if (allOptionsList)
+              strategyInputs[propText] = allOptionsList
+            page.mouseClick(buttonEl)
+          } else {
+            strategyInputs[propText] = propValue
+          }
+        }
+      } else { // Undefined
+        continue
+      }
+    } else if (propClassName.includes('fill-')) {
+      const element = indicProperties[i].querySelector('input[type="checkbox"]')
+      if (element)
+        strategyInputs[propText] = element.getAttribute('checked') !== null ? element.checked : false
+      else { // Undefined type of element
+        continue
+      }
+    } else if (propClassName.includes('titleWrap-')) { // Titles bwtwen parameters
+      continue
+    } else { // Undefined type of element
+      continue
+    }
+  }
+  return strategyInputs
+}
+
+tv.setStrategyParams = async (name, propVal, isDeepTest = false, keepStrategyParamOpen = false) => {
+  tv.lastSetStrategyResult = null
+  let dialogPrepared = false
+  let dialogOpenedForApi = false
+
+  try {
+    const existingDialog = page.$(SEL.indicatorTitle)
+    if (existingDialog) {
+      dialogPrepared = await tv.changeDialogTabToInput()
+    }
+  } catch {
+    dialogPrepared = false
+  }
+
+  if (!dialogPrepared) {
+    try {
+      const indicatorTitleEl = await tv.checkAndOpenStrategy(name, isDeepTest)
+      if (indicatorTitleEl) {
+        dialogOpenedForApi = true
+        dialogPrepared = await tv.changeDialogTabToInput()
+      }
+    } catch (err) {
+      console.warn('[TV] Unable to prepare strategy dialog for API setter.', err)
+      dialogPrepared = false
+    }
+  }
+
+  let apiSucceeded = false
+  // if (dialogPrepared) { // 2025-12-22 Turned of due changes in api, now schema do not have names, so links keys in_0.. and names should be prepared separatelly
+  //   try {
+  //     const apiEnvelope = await tv.callPageAction('setStrategyParams', { name, values: propVal }, 8000)
+  //     const apiResponse = apiEnvelope && typeof apiEnvelope === 'object' ? apiEnvelope.data : null
+  //     if (apiResponse && typeof apiResponse === 'object') {
+  //       tv.lastSetStrategyResult = { method: 'api', response: apiResponse, raw: apiEnvelope }
+  //       const hasMissing = Array.isArray(apiResponse.missing) && apiResponse.missing.length
+  //       const hasErrors = Array.isArray(apiResponse.errors) && apiResponse.errors.length
+  //       const explicitlyFailed = apiEnvelope && apiEnvelope.success === false
+  //       if (!explicitlyFailed && !hasMissing && !hasErrors)
+  //         apiSucceeded = true
+  //       else
+  //         console.warn('[TV-AS] Strategy parameters API reported issues. Falling back to legacy setter.', apiResponse)
+  //     } else if (apiEnvelope && apiEnvelope.success === false) {
+  //       console.warn('[TV-AS] Strategy parameters API responded with failure.', apiEnvelope.error)
+  //       tv.lastSetStrategyResult = { method: 'api', response: null, raw: apiEnvelope }
+  //     }
+  //   } catch (err) {
+  //     console.warn('[TV-ASS] Strategy parameters API call failed, using legacy setter.', err)
+  //   }
+  // }
+
+  // if (apiSucceeded) {
+  //   console.log('###wait for 5 seconds')
+  //   await page.waitForTimeout(5000)
+  //   if (!keepStrategyParamOpen) {
+  //     const okBtn = page.$(SEL.okBtn)
+  //     if (okBtn)
+  //       okBtn.click()
+  //     else {
+  //       const cancelBtn = page.$(SEL.cancelBtn)
+  //       if (cancelBtn)
+  //         cancelBtn.click()
+  //     }
+  //   }
+  //   return true
+  // }
+
+  // if (dialogOpenedForApi) {
+  //   const cancelBtn = page.$(SEL.cancelBtn)
+  //   if (cancelBtn)
+  //     cancelBtn.click()
+  //   await page.waitForSelector(SEL.cancelBtn, 1000, true)
+  // }
+
+  const legacyEnvelope = await tv._setStrategyParamsLegacy(name, propVal, isDeepTest, keepStrategyParamOpen)
+  const legacySuccess = !!(legacyEnvelope && legacyEnvelope.success !== false)
+  if (!tv.lastSetStrategyResult)
+    tv.lastSetStrategyResult = { method: legacySuccess ? 'legacy' : 'legacy-error', response: null }
+  tv.lastSetStrategyResult.legacy = legacyEnvelope
+  return legacySuccess
+}
+
+// TradingView renders numbers/bools as text and dropdown labels may differ only by surrounding
+// whitespace (incl. zero-width spaces), so compare trimmed/lowercased - same as setSelByText.
+tv._isSameParamValue = (currentRaw, desiredRaw) => {
+  if (currentRaw === null || currentRaw === undefined || desiredRaw === null || desiredRaw === undefined)
+    return false
+  const cur = String(currentRaw).replaceAll('​', '').trim().toLowerCase()
+  const want = String(desiredRaw).replaceAll('​', '').trim().toLowerCase()
+  return cur === want
+}
+
+tv._setStrategyParamsLegacy = async (name, propVal, isDeepTest = false, keepStrategyParamOpen = false) => {
+  const indicatorTitleEl = await tv.checkAndOpenStrategy(name, isDeepTest) // In test.name - ordinary strategy name but in strategyData.name short one as in indicator title
+  if (!indicatorTitleEl)
+    return null
+  let popupVisibleHeight = 917
+  try {
+    popupVisibleHeight = page.$(SEL.indicatorScroll)?.getBoundingClientRect()?.bottom || 917
+  } catch {
+  }
+  let indicProperties = document.querySelectorAll(SEL.indicatorProperty)
+  const propKeys = Object.keys(propVal)
+  let setPropertiesNames = {}
+  for (let i = 0; i < indicProperties.length; i++) {
+    const propText = indicProperties[i].innerText
+    if (propText && propKeys.includes(propText)) {
+      try {
+        const rect = indicProperties[i].getBoundingClientRect()
+        if (rect.top < 0 || rect.bottom > popupVisibleHeight || !indicProperties[i].checkVisibility()) {
+          indicProperties[i].scrollIntoView()
+          await page.waitForTimeout(10)
+          if (indicProperties[i].getBoundingClientRect()?.bottom > popupVisibleHeight)
+            await page.waitForTimeout(50)
+        }
+      } catch {
+      }
+      setPropertiesNames[propText] = true
+      const propClassName = indicProperties[i].getAttribute('class')
+      if (propClassName.includes('first-')) {
+        i++
+        let inputEl = indicProperties[i].querySelector('input')
+        if (inputEl) {
+          if (!tv._isSameParamValue(inputEl.value, propVal[propText]))
+            page.setInputElementValue(inputEl, propVal[propText])
+          inputEl = null
+        } else {
+          let buttonEl = indicProperties[i].querySelector('button[role="combobox"]')
+          if (buttonEl?.innerText) {
+            // The selected dropdown option is shown as the button text; re-selecting the same
+            // option still triggers a strategy recalculation, so skip when it already matches.
+            if (!tv._isSameParamValue(buttonEl.innerText, propVal[propText])) {
+              page.mouseClick(buttonEl) // Pointer events open the menu; native click() no longer does
+              buttonEl = null
+              await page.setSelByText(SEL.strategyListOptions, propVal[propText])
+            }
+            buttonEl = null
+          }
+        }
+      } else if (propClassName.includes('fill-')) {
+        let checkboxEl = indicProperties[i].querySelector('input[type="checkbox"]')
+        if (checkboxEl) {
+          const isChecked = Boolean(checkboxEl.checked)
+          if (Boolean(propVal[propText]) !== isChecked) {
+            page.mouseClick(checkboxEl)
+            checkboxEl.checked = Boolean(propVal[propText])
+          }
+          checkboxEl = null
+        }
+      }
+      if (propKeys.length === Object.keys(setPropertiesNames).length)
+        break
+    }
+  }
+  indicProperties = null
+  const elOkBtn = page.$(SEL.okBtn)
+  if (!keepStrategyParamOpen && elOkBtn)
+    elOkBtn.click()
+
+  const appliedKeys = Object.keys(setPropertiesNames)
+  const missingKeys = propKeys.filter(key => !setPropertiesNames[key])
+
+
+return {
+    success: missingKeys.length === 0,
+    applied: appliedKeys,
+    missing: missingKeys
+  }
+}
+
+tv.changeDialogTabToInput = async () => {
+  let isInputTabActive = document.querySelector(SEL.tabInputActive)
+  if (isInputTabActive) return true
+  const inputTabEl = document.querySelector(SEL.tabInput)
+  if (!inputTabEl) {
+    throw new Error('There are no parameters in this strategy that can be optimized (There is no "Inputs" tab with input values)')
+  }
+  inputTabEl.click()
+  isInputTabActive = await page.waitForSelector(SEL.tabInputActive, 2000)
+  return !!isInputTabActive
+}
+
+// tv._openStrategyByButtonNearTitle = async () => { // No button after 2026 year
+//   if (tv._settingsMethod !== null && tv._settingsMethod !== 'setButton')
+//     return false
+//   const stratParamEl = page.$(SEL.strategyDialogParam) // Version before 2025.02.21 with param button near title
+//   if (!stratParamEl)
+//     return false
+//   tv._settingsMethod = 'setButton'
+//   page.mouseClick(stratParamEl) // stratParamEl.click()
+//   return true
+// }
+
+tv._openStrategyParamsByStrategyDoubleClickBy = async (indicatorTitle) => {
+  if ((tv._settingsMethod !== null && tv._settingsMethod !== 'indName') || !indicatorTitle)
+    return false
+  const indicatorLegendsEl = document.querySelectorAll(SEL.tvLegendIndicatorItem)
+  if (!indicatorLegendsEl)
+    return false
+  for (let indicatorItemEl of indicatorLegendsEl) {
+    const indicatorTitleEl = indicatorItemEl.querySelector(SEL.tvLegendIndicatorItemTitle)
+    if (!indicatorTitleEl)
+      continue
+    if (indicatorTitle !== indicatorTitleEl.innerText)
+      continue
+    page.mouseDoubleClick(indicatorTitleEl)
+    // page.mouseClick(indicatorTitleEl)
+    // page.mouseClick(indicatorTitleEl)
+    const dialogTitle = await page.waitForSelector(SEL.indicatorTitle, 2500)
+    if (dialogTitle && dialogTitle.innerText === indicatorTitle) {
+      tv._settingsMethod = 'indName'
+      return true
+    }
+    if (page.$(SEL.cancelBtn))
+      page.mouseClickSelector(SEL.cancelBtn)//.click()
+
+  }
+  return false
+}
+
+tv._openStrategyParamsByStrategyMenu = async () => {
+  if (tv._settingsMethod !== null && tv._settingsMethod !== 'setMenu')
+    return false
+  // Both real and fakeTabs have the button - filter by visibility and non-fake ancestor
+  const allBtnEls = [...document.querySelectorAll(SEL.strategyCaptionSettings)]
+  const strategyCaptionEl = allBtnEls.find(
+    el => !el.closest('[class*="fake"]') && el.getBoundingClientRect().width > 0
+  )
+  if (!strategyCaptionEl)
+    return false
+  page.mouseClick(strategyCaptionEl) // pointer events needed for menu trigger
+  const menuItemSettingsEl = await page.waitForSelector(SEL.strategyMenuItemSettings, 2000)
+  if (!menuItemSettingsEl)
+    return false
+  menuItemSettingsEl.click() // native click needed for menu items
+  tv._settingsMethod = 'setMenu'
+  return true
+}
+
+tv.getStrategyNameFromPopup = async () => {
+
+  // const strategyTitleEl = page.$(SEL.indicatorTitle)
+  const strategyTitleEl = await page.waitForSelector(SEL.indicatorTitle, 1000)
+  if (strategyTitleEl)
+    return strategyTitleEl.innerText
+  return null
+}
+
+tv.openStrategyParameters = async (indicatorTitle, searchAgainstStrategies = false) => {
+  const curStrategyTitle = await tv.getStrategyNameFromPopup()
+  let isOpened = !!curStrategyTitle
+  if (!isOpened && (indicatorTitle && indicatorTitle !== curStrategyTitle) && searchAgainstStrategies) {
+    isOpened = await tv._openStrategyParamsByStrategyDoubleClickBy(indicatorTitle)
+    tv._settingsMethod = null
+  } else if (!isOpened) {
+    // isOpened = await tv._openStrategyByButtonNearTitle() // 2026-01-14 Disabled due changed in new UI
+    // if (!isOpened)
+    isOpened = await tv._openStrategyParamsByStrategyMenu()
+    if (!isOpened) {
+      if (!indicatorTitle) {
+        const curStrategyCaptionEl = page.$(SEL.strategyCaption)
+        if (curStrategyCaptionEl)
+          indicatorTitle = curStrategyCaptionEl.innerText
+      }
+      isOpened = await tv._openStrategyParamsByStrategyDoubleClickBy(indicatorTitle)
+    }
+  }
+
+  if (!isOpened) {
+    await ui.showErrorPopup('There is not strategy param button on the strategy tab. Test stopped. Open correct page please')
+    return null
+  }
+  const stratIndicatorEl = await page.waitForSelector(SEL.indicatorTitle, 5000)
+  if (!stratIndicatorEl) {
+    await ui.showErrorPopup('There is not strategy parameters popup. If was not opened, probably TV UI changes. ' +
+      'Reload page and try again. Test stopped. Open correct page please')
+    return null
+  }
+  const tabInputEl = document.querySelector(SEL.tabInput)
+  if (!tabInputEl) {
+    await ui.showErrorPopup('There is not strategy parameters input tab. Test stopped. Open correct page please')
+    return null
+  }
+  page.mouseClick(tabInputEl)
+
+  const tabInputActiveEl = await page.waitForSelector(SEL.tabInputActive)
+  if (!tabInputActiveEl) {
+    await ui.showErrorPopup('There is not strategy parameters active input tab. Test stopped. Open correct page please')
+    return null
+  }
+  return true
+}
+
+
+tv.checkAndOpenStrategy = async (name, isDeepTest = false) => {
+  let indicatorTitleEl = page.$(SEL.indicatorTitle)
+  if (!indicatorTitleEl || indicatorTitleEl.innerText !== name) {
+    try {
+      await tv.openStrategyTab(isDeepTest)
+    } catch (err) {
+      console.warn('checkAndOpenStrategy error', err)
+      return null
+    }
+    const isOpened = await tv.openStrategyParameters(name)
+    if (!isOpened) {
+      console.warn('Cannot open current strategy parameters')
+      await ui.showErrorPopup('Cannot open current strategy parameters. Reload the page, leave one strategy on the chart and try again.')
+      return null
+    }
+    if (name) {
+      indicatorTitleEl = page.$(SEL.indicatorTitle)
+      if (!indicatorTitleEl || indicatorTitleEl.innerText !== name) {
+        await ui.showErrorPopup(`The ${name} strategy parameters could not be opened. ${indicatorTitleEl.innerText ? 'Opened "' + indicatorTitleEl.innerText + '".' : ''} Reload the page, leave one strategy on the chart and try again.`)
+        return null
+      }
+    }
+  }
+  await page.waitForSelector(SEL.indicatorProperty)
+  return indicatorTitleEl
+}
+
+tv.checkIsNewVersion = async (timeout = 1000) => {
+  selStatus.isNewVersion = true
+  return
+}
+
+tv.openStrategyTab = async (isDeepTest = false) => {
+  let isStrategyActiveEl = await page.waitForSelector(SEL.strategyTesterTabActive)
+  if (!isStrategyActiveEl) {
+    const strategyTabEl = await page.waitForSelector(SEL.strategyTesterTab)
+    if (strategyTabEl) {
+      strategyTabEl.click()
+      await page.waitForSelector(SEL.strategyTesterTabActive)
+    } else {
+      throw new Error('There is not "Strategy Tester" tab on the page. Open correct page.' + SUPPORT_TEXT)
+    }
+  }
+  let strategyCaptionEl = await page.waitForSelector(SEL.strategyCaption, 2500) // 2023-02-24 Changed to more complicated logic - for single and multiple strategies in page
+  if (!strategyCaptionEl) { // || !strategyCaptionEl.innerText) {
+    throw new Error('There is not strategy name element on "Strategy Tester" tab.' + SUPPORT_TEXT)
+  }
+  // await tv.checkIsNewVersion()
+  let metricsTabActive = await page.waitForSelector(SEL.metricsTab, 1000)
+  if (!metricsTabActive) {
+    if (!metricsTabActive)
+      throw new Error('There is not "Metrics" tab on the page. Open correct page.' + SUPPORT_TEXT)
+
+  }
+  if (!page.$(SEL.metricsTabActive))
+    metricsTabActive.click()
+  const isActive = await page.waitForSelector(SEL.metricsTabActive, 1000)
+  if (!isActive) {
+    console.error('The "Metrics" tab is not active after click')
+  }
+  return true
+}
+
+tv.switchToStrategyTabAndSetObserveForReport = async (isDeepTest = false) => {
+  // 2026-01-14 Not used anymore because of joining all tabs in one Performance tab in new UI
+    // await tv.openStrategyTab(isDeepTest)
+
+  const testResults = {}
+  testResults.ticker = await tvChart.getTicker()
+  testResults.timeFrame = await tvChart.getCurrentTimeFrame()
+  let strategyCaptionEl = document.querySelector(SEL.strategyCaption)
+  testResults.name = strategyCaptionEl?.innerText || strategyCaptionEl?.getAttribute('data-strategy-title')
+
+  // const reportEl = await page.waitForSelector(SEL.strategyReportObserveArea, 10000)
+  // if (!tv.reportNode) {
+  //   // TODO When user switch to deep backtest or minimize window - it should be deleted and created again. Or delete observer after every test
+  //   tv.reportNode = await page.waitForSelector(SEL.strategyReportObserveArea, 10000)
+  //   if (tv.reportNode) {
+  //     const reportObserver = new MutationObserver(() => {
+  //       tv.isReportChanged = true
+  //     });
+  //     reportObserver.observe(tv.reportNode, {
+  //       childList: true,
+  //       subtree: true,
+  //       attributes: false,
+  //       characterData: false
+  //     });
+  //     console.log('[INFO] Observer added to tv.reportNode')
+  //   } else {
+  //     throw new Error('The strategy report did not found.' + SUPPORT_TEXT)
+  //   }
+  // }
+
+
+  return testResults
+}
+
+tv.dialogHandler = async () => {
+  const indicatorTitle = page.getTextForSel(SEL.indicatorTitle)
+  if (!document.querySelector(SEL.okBtn) || !document.querySelector(SEL.tabInput))
+    return
+  if (indicatorTitle === 'iondvSignals' && action.workerStatus === null) {
+    let tickerText = document.querySelector(SEL.ticker).innerText
+    let timeFrameEl = document.querySelector(SEL.timeFrameActive)
+    if (!timeFrameEl)
+      timeFrameEl = document.querySelector(SEL.timeFrame)
+
+    let timeFrameText = timeFrameEl.innerText
+    if (!tickerText || !timeFrameText)
+      // ui.alertMessage('There is not timeframe element on page. Open correct page please')
+      return
+
+    timeFrameText = timeFrameText.toLowerCase() === 'd' ? '1D' : timeFrameText
+    if (ui.isMsgShown && tickerText === tv.tickerTextPrev && timeFrameText === tv.timeFrameTextPrev)
+      return
+    tv.tickerTextPrev = tickerText
+    tv.timeFrameTextPrev = timeFrameText
+
+    if (!await tv.changeDialogTabToInput()) {
+      console.error(`Can't set parameters tab to input`)
+      ui.isMsgShown = true
+      return
+    }
+
+    console.log("TradingView indicator parameters window opened for ticker:", tickerText);
+    const tsData = await storage.getKey(`${storage.SIGNALS_KEY_PREFIX}_${tickerText}::${timeFrameText}`.toLowerCase())
+    if (tsData === null) {
+      await ui.showErrorPopup(`No data was loaded for the ${tickerText} and timeframe ${timeFrameText}.\n\n` +
+        `Please change the ticker and timeframe to correct and reopen script parameter window.`)
+      ui.isMsgShown = true
+      return
+    }
+    ui.isMsgShown = false
+
+    const indicProperties = document.querySelectorAll(SEL.indicatorProperty)
+
+    const propVal = {
+      TSBuy: tsData && tsData.hasOwnProperty('buy') ? tsData.buy : '',
+      TSSell: tsData && tsData.hasOwnProperty('sell') ? tsData.sell : '',
+      Ticker: tickerText,
+      Timeframe: timeFrameText
+    }
+    const setResult = []
+    const propKeys = Object.keys(propVal)
+    for (let i = 0; i < indicProperties.length; i++) {
+      const propText = indicProperties[i].innerText
+      if (propKeys.includes(propText)) {
+        setResult.push(propText)
+        page.setInputElementValue(indicProperties[i + 1].querySelector('input'), propVal[propText])
+        if (propKeys.length === setResult.length)
+          break
+      }
+    }
+    const notFoundParam = propKeys.filter(item => !setResult.includes(item))
+    if (notFoundParam && notFoundParam.length) {
+      await ui.showErrorPopup(`One of the parameters named ${notFoundParam} was not found in the window. Check the script.\n`)
+      ui.isMsgShown = true
+      return
+    }
+    document.querySelector(SEL.okBtn).click()
+    const allSignals = [].concat(tsData.buy.split(','), tsData.sell.split(',')).sort()
+    await ui.showPopup(`${allSignals.length} signals are set.\n  - date of the first signal: ${new Date(parseInt(allSignals[0]))}.\n  - date of the last signal: ${new Date(parseInt(allSignals[allSignals.length - 1]))}`)
+    ui.isMsgShown = true
+  }
+}
+
+
+tv._parseRows = (allReportRowsEl, strategyHeaders, report) => {
+  function parseNumTypeByRowName(rowName, value) {
+    const digitalValues = value.replaceAll(/([\-\d\.\n])|(.)/g, (a, b) => b || '')
+    return rowName.toLowerCase().includes('trades') || rowName.toLowerCase().includes('contracts held')
+      ? parseInt(digitalValues)
+      : parseFloat(digitalValues)
+  }
+
+  const firstColumnValues = ['Initial capital', 'Open P&L', 'Buy & hold return',
+        'Buy & hold % gain', 'Strategy outperformance', 'Sharpe ratio', 'Sortino ratio',
+        'Account size required', 'Max margin used', 'Margin efficiency', 'Margin calls',
+        'Avg equity run-up duration (close-to-close)', 'Avg equity run-up (close-to-close)',
+        'Max equity run-up (close-to-close)',  'Max equity run-up (intrabar)',
+        'Max equity run-up as % of initial capital (intrabar)',
+        'Avg equity drawdown duration (close-to-close)', 'Avg equity drawdown (close-to-close)',
+        'Max equity drawdown (close-to-close)', 'Max equity drawdown (intrabar)',
+        'Max equity drawdown as % of initial capital (intrabar)',
+        'Return of max equity drawdown'
+      ]
+  const negativeValues = ['Gross loss', 'Commission paid',
+      'Avg equity run-up duration (close-to-close)', 'Avg equity run-up (close-to-close)',
+        'Max equity run-up (close-to-close)',  'Max equity run-up (intrabar)',
+        'Max equity run-up as % of initial capital (intrabar)',
+        'Avg equity drawdown duration (close-to-close)', 'Avg equity drawdown (close-to-close)',
+        'Max equity drawdown (close-to-close)', 'Max equity drawdown (intrabar)',
+        'Max equity drawdown as % of initial capital (intrabar)',
+          'Losing trades', 'Avg losing trade', 'Largest losing trade', 'Largest losing trade percent',
+          'Avg # bars in losing trades', 'Margin calls'
+        ]
+
+  for (let rowEl of allReportRowsEl) {
+    if (rowEl) {
+      const allTdEl = rowEl.querySelectorAll('td')
+      if (!allTdEl || allTdEl.length < 2 || !allTdEl[0]) {
+        continue
+      }
+      const paramName = (allTdEl[0].innerText || '').trim()
+      let isSingleValue = firstColumnValues.includes(paramName)
+      for (let i = 1; i < allTdEl.length; i++) {
+        if (isSingleValue && i >= 2)
+          continue
+        let values = allTdEl[i].innerText
+        const isNegative = negativeValues.includes(paramName.toLowerCase())// && allTdEl[i].querySelector('[class^="negativeValue"]')
+        if (values && typeof values === 'string' && strategyHeaders[i]) {
+          values = values.replaceAll(' ', ' ').replaceAll('−', '-').trim()
+          const digitalValues = values.replaceAll(/([\-\d\.\n])|(.)/g, (a, b) => b || '')
+          let digitOfValues = digitalValues.match(/-?\d+\.?\d*/)
+          const nameDigits = isSingleValue ? paramName : `${paramName}: ${strategyHeaders[i]}`
+          const namePercents = isSingleValue ? `${paramName} %` : `${paramName} %: ${strategyHeaders[i]}`
+
+          if ((values.includes('\n') && values.endsWith('%'))) {
+            const valuesPair = values.split('\n', 3)
+            if (valuesPair && valuesPair.length >= 2) {
+              const digitVal0 = valuesPair[0] //.replaceAll(/([\-\d\.])|(.)/g, (a, b) => b || '') //.match(/-?\d+\.?\d*/)
+              const digitVal1 = valuesPair[valuesPair.length - 1]//.replaceAll(/([\-\d\.])|(.)/g, (a, b) => b || '') //match(/-?\d+\.?\d*/)
+
+              if (Boolean(digitVal0)) {
+                report[nameDigits] = parseNumTypeByRowName(nameDigits, digitVal0)
+                if (report[nameDigits] > 0 && isNegative)
+                  report[nameDigits] = report[nameDigits] * -1
+              } else {
+                report[nameDigits] = valuesPair[0]
+              }
+              if (Boolean(digitVal1)) {
+                report[namePercents] = parseNumTypeByRowName(namePercents, digitVal1)
+                if (report[namePercents] > 0 && isNegative)
+                  report[namePercents] = report[namePercents] * -1
+              } else {
+                report[namePercents] = valuesPair[1]
+              }
+            }
+          } else if (Boolean(digitOfValues)) {
+            report[nameDigits] = parseNumTypeByRowName(namePercents, digitalValues)
+            if (report[nameDigits] > 0 && isNegative)
+              report[nameDigits] = report[nameDigits] * -1
+          } else
+            report[nameDigits] = values
+        }
+      }
+    }
+  }
+  return report
+}
+
+
+tv._parseMetrics = (report) => {
+  const matricsValuesEls = document.querySelectorAll(SEL.metricsValueCell)
+  for (let metricEl of matricsValuesEls) {
+    if (!metricEl)
+      continue
+    const metricNameAndValEls = metricEl.querySelectorAll('div[class^="container-"]')
+    if (metricNameAndValEls && metricNameAndValEls.length < 2)
+      continue
+    const metricName = (metricNameAndValEls[0].innerText || '').trim()
+    let metricValue = metricNameAndValEls[1].innerText || ''
+    if (metricValue && typeof metricValue === 'string') {
+      metricValue = metricValue.replaceAll(' ', ' ').replaceAll('−', '-').trim()
+      const digitalValues = metricValue.replaceAll(/([\/\-\d\.\n%])|(.)/g, (a, b) => b || '')
+      let digitOfValuesArr = digitalValues.split('\n')
+      let value0 = null
+      let value1 = null
+      let name1 = null
+      if (digitOfValuesArr.length === 1) {
+        value0 = digitOfValuesArr[0].match(/-?\d+\.?\d*/g)
+      } else {
+          value0 = digitOfValuesArr[0].match(/-?\d+\.?\d*/g)
+        const lastIdx = digitOfValuesArr.length - 1
+        if (digitOfValuesArr[lastIdx].includes('/')) {
+          value1 = digitOfValuesArr[lastIdx]
+          name1 = `${metricName} ratio`
+        } else {
+          value1 = digitOfValuesArr[digitOfValuesArr.length - 1].match(/-?\d+\.?\d*/g)
+          name1 = digitOfValuesArr[digitOfValuesArr.length - 1].endsWith('%') ? `${metricName} %` : `${metricName}_1`
+          if (['Max equity drawdown'].includes(name1))
+            value1 = -1 * value1
+        }
+      }
+      if (Boolean(value0))
+        report[metricName] = parseFloat(value0)
+      else
+        report[metricName] = metricValue
+      if(Boolean(value1) && name1)
+        report[name1] =  (value1.includes('/')) ? value1 : parseFloat(value1)
+    }
+  }
+  return report
+}
+
+tv._getMetricGroupTitle = (group) => {
+  const titleEl = [...(group?.children || [])]
+    .find(child => child.matches?.('p[class^="title"], p[class*=" title"]'))
+  return (titleEl?.innerText || '').trim()
+}
+
+tv.REPORT_PARSER_VERSION = '2026-06-23-lazy-report-sections-v4'
+
+tv._getMetricSectionRoot = (el, requireTable = false) => {
+  const reportRoot = page.$('[class^="backtestingReport"]') || page.$('#bottom-area')
+  for (let node = el; node && node !== reportRoot; node = node.parentElement) {
+    if (tv._getMetricGroupTitle(node) && (!requireTable || node.querySelector('table')))
+      return node
+  }
+  return null
+}
+
+tv._getMetricSectionGroups = () => {
+  const sections = new Set()
+  document.querySelectorAll('[class^="backtestingReport"] table, #bottom-area table')
+    .forEach(table => {
+      const section = tv._getMetricSectionRoot(table, true)
+      if (section)
+        sections.add(section)
+    })
+  document.querySelectorAll('[class^="backtestingReport"] button[id][aria-selected], #bottom-area button[id][aria-selected]')
+    .forEach(button => {
+      const section = tv._getMetricSectionRoot(button)
+      if (section)
+        sections.add(section)
+    })
+  return [...sections]
+}
+
+tv._getReportScrollRoots = () => {
+  const reportRoot = page.$('[class^="backtestingReport"]') || page.$('#bottom-area')
+  const candidates = [
+    ...document.querySelectorAll('#bottom-area *'),
+    reportRoot,
+    page.$('#bottom-area'),
+    document.scrollingElement,
+  ].filter(Boolean)
+
+  return [...new Set(candidates)]
+    .filter(el =>
+      el.scrollHeight > el.clientHeight + 50 &&
+      (el === document.scrollingElement ||
+        el.contains?.(reportRoot) ||
+        el.querySelector?.(SEL.metricSectionGroup) ||
+        el.querySelector?.(SEL.metricsValueCell))
+    )
+    .sort((a, b) => (b.scrollHeight - b.clientHeight) - (a.scrollHeight - a.clientHeight))
+}
+
+tv._getMetricSectionDebug = () => tv._getMetricSectionGroups().map(group => ({
+  title: tv._getMetricGroupTitle(group),
+  tabs: [...group.querySelectorAll('button[id][aria-selected]')]
+    .filter(btn => btn.id !== 'strategy-report-summary')
+    .map(btn => ({
+      id: btn.id,
+      text: (btn.innerText || '').trim(),
+      selected: btn.getAttribute('aria-selected'),
+    })),
+  table: (group.querySelector('table')?.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 160),
+}))
+
+tv._nudgeReportScrollRoot = async (scrollRoot, deltaY) => {
+  const target = scrollRoot === document.scrollingElement ? document : scrollRoot
+  const event = new WheelEvent('wheel', {
+    bubbles: true,
+    cancelable: true,
+    view: window,
+    deltaY,
+    deltaMode: 0,
+  })
+
+  target.dispatchEvent(event)
+  scrollRoot.scrollTop += deltaY
+  await page.waitForTimeout(180)
+}
+
+tv._parseVisibleMetricSectionGroups = async (report, parsedTabs, debugLabel = '') => {
+  const visibleSections = tv._getMetricSectionDebug()
+  for (const group of tv._getMetricSectionGroups())
+    report = await tv._parseMetricSectionGroup(group, report, parsedTabs)
+
+  if (tv.lastReportParseDebug)
+    tv.lastReportParseDebug.passes.push({
+      label: debugLabel,
+      visibleSections,
+      parsedTabsCount: parsedTabs.size,
+      metricCount: Object.keys(report).filter(key => !key.startsWith('_') && key !== 'comment').length,
+    })
+
+  return report
+}
+
+tv._parseMetricSectionGroup = async (group, report, parsedTabs) => {
+  const groupTitle = tv._getMetricGroupTitle(group)
+  const tabButtons = [...group.querySelectorAll('button[id][aria-selected]')]
+    .filter(btn => btn.id !== 'strategy-report-summary')
+
+  for (const tabBtn of tabButtons) {
+    const tabKey = `${groupTitle}::${tabBtn.id}::${(tabBtn.innerText || '').trim()}`
+    if (parsedTabs.has(tabKey))
+      continue
+
+    tabBtn.scrollIntoView({ block: 'center' })
+    await page.waitForTimeout(80)
+
+    if (tabBtn.getAttribute('aria-selected') !== 'true') {
+      page.mouseClick(tabBtn)
+      await page.waitForTimeout(180)
+    }
+
+    let table = group.querySelector('table')
+    if (!table) {
+      await page.waitForTimeout(250)
+      table = group.querySelector('table')
+    }
+    if (!table)
+      continue
+
+    const headerEls = table.querySelectorAll('thead > tr > th')
+    const strategyHeaders = [...headerEls].map(h => (h?.innerText || '').trim())
+    const rowEls = table.querySelectorAll('tbody > tr')
+    if (rowEls.length)
+      report = tv._parseRows(rowEls, strategyHeaders, report)
+
+    parsedTabs.add(tabKey)
+  }
+
+  return report
+}
+
+tv.parseReportTable = async () => {
+  let report = {}
+  report = tv._parseMetrics(report)
+  const parsedTabs = new Set()
+  const scrollRoots = tv._getReportScrollRoots()
+  tv.lastReportParseDebug = {
+    scrollRoots: scrollRoots.map((el, idx) => ({
+      idx,
+      tag: el.tagName,
+      className: String(el.className || '').slice(0, 160),
+      id: el.id || '',
+      scrollTop: el.scrollTop,
+      scrollHeight: el.scrollHeight,
+      clientHeight: el.clientHeight,
+    })),
+    passes: [],
+  }
+
+  report = await tv._parseVisibleMetricSectionGroups(report, parsedTabs, 'initial')
+
+  for (const scrollRoot of scrollRoots) {
+    scrollRoot.scrollTop = 0
+    await page.waitForTimeout(120)
+
+    for (let pass = 0; pass < 25; pass++) {
+      report = await tv._parseVisibleMetricSectionGroups(report, parsedTabs, `root:${scrollRoots.indexOf(scrollRoot)} pass:${pass}`)
+
+      const prevScrollTop = scrollRoot.scrollTop
+      await tv._nudgeReportScrollRoot(scrollRoot, Math.max(500, scrollRoot.clientHeight || 500))
+
+      if (scrollRoot.scrollTop === prevScrollTop)
+        break
+    }
+  }
+
+  return report
+}
+
+tv._getReportEmptyState = () => {
+  const emptyStateEl = page.$(SEL.strategyReportEmptyState)
+  const reportRoot = emptyStateEl || page.$(SEL.reportContent) || page.$('#bottom-area')
+  const reportText = (reportRoot?.innerText || '').replace(/\s+/g, ' ').trim()
+  if (!reportText)
+    return null
+
+  if (emptyStateEl)
+    return {
+      type: 'no_trade_data',
+      message: reportText
+    }
+
+  const knownNoDataMessages = [
+    'This report requires trade data',
+    'Not enough data to show'
+  ]
+  const matchedMessage = knownNoDataMessages.find(message => reportText.includes(message))
+  if (!matchedMessage)
+    return null
+
+  return {
+    type: 'no_trade_data',
+    message: matchedMessage
+  }
+}
+
+
+tv._getLastStoredReport = (testResults) => {
+  const perf = testResults && Array.isArray(testResults.perfomanceSummary) ? testResults.perfomanceSummary : []
+  const filtered = testResults && Array.isArray(testResults.filteredSummary) ? testResults.filteredSummary : []
+  const lastPerf = perf.length ? perf[perf.length - 1] : null
+  const lastFiltered = filtered.length ? filtered[filtered.length - 1] : null
+  if (!lastPerf)
+    return lastFiltered
+  return lastPerf
+}
+
+tv._getReportDataHash = (reportData) => {
+  // `_`-prefixed fields are timings that always change, `comment` is a message, not a result.
+  if (!reportData || typeof reportData !== 'object')
+    return ''
+  const keys = Object.keys(reportData).filter(k => !k.startsWith('_') && k !== 'comment').sort()
+  if (!keys.length)
+    return ''
+  return keys.map(k => `${k}=${reportData[k]}`).join('|')
+}
+
+tv.backtestDelay = async (backtestDelay = 0, isRandom = true) => {
+  let delayTime = backtestDelay * 1000
+  const minimalDelay = 0.2 * 1000//, backtestDelay/2) // 20%
+  if (backtestDelay) {
+    if (isRandom) {
+      const delayCorrection = delayTime/2 > minimalDelay ? delayTime/2 : minimalDelay * 1.1
+      delayTime = randomInteger(Math.max(minimalDelay, delayTime/2), delayTime + delayCorrection) // from 0.1 value to 2x value - in average ~ delay == value
+    }
+    await page.waitForTimeout(delayTime)
+  }
+}
+
+tv.getPerformance = async (testResults, ignoreWaiting = false) => {
+  let reportData = {}
+  let message = ''
+
+  let isProcessStart = false
+  let isProcessEnd = false
+  let isDataChanged = false
+  let sawStageSelector = false
+  let isPrevMessageShowing = !!page.$(SEL.strategyProcessMessage) && !page.$(SEL.strategyReportNeedUpdate)
+  let isProcessError = null
+  const isStartProcessError = page.$(SEL.strategyReportError)
+  const dataWaitingTime = testResults.isDeepTest ? testResults.dataLoadingTime * 2000 : testResults.dataLoadingTime * 1000
+  // TradingView markup is a moving target, so changed report values are used as a
+  // stage-selector-independent signal that the computation finished.
+  const prevReport = tv._getLastStoredReport(testResults)
+  const prevDataHash = tv._getReportDataHash(prevReport)
+  let lastDataCheckTime = new Date()
+  const dataCheckIntervalMs = 500
+  let tikTime = 50
+  let cycles = Math.ceil(5000 / tikTime)
+  for (let i = 0; i < cycles; i++) {
+    if (isPrevMessageShowing)
+      isProcessStart = !!page.$(SEL.strategyReportInProcess) || !!page.$(SEL.strategyReportNeedUpdate)
+    else
+      isProcessStart = !!page.$(SEL.strategyProcessMessage) || !!page.$(SEL.strategyReportNeedUpdate)
+    if (ignoreWaiting || isProcessStart)
+      break
+    await page.waitForTimeout(tikTime)
+  }
+  let isDeepTestUpdateClicked = false
+  let isNewUpdate = false
+  if (ignoreWaiting) {
+    isProcessStart = true
+    isProcessEnd = true
+  } else if (isProcessStart) {
+    tikTime = 100
+    const cycles = Math.ceil(dataWaitingTime / tikTime)
+    for (let i = 0; i < cycles; i++) { // Waiting for an error 5000 ms
+      const isDeepTestUpdateEl = page.$(SEL.strategyReportNeedUpdate)
+      if (!isDeepTestUpdateClicked && isDeepTestUpdateEl !== null) {
+        page.mouseClick(isDeepTestUpdateEl)
+        await page.waitForSelector(SEL.strategyReportUpdate, 10000, true) // It shows succed some times (for current strategy update during deep test calculating)
+        await page.waitForSelector(SEL.strategyReportInProcess, 1000, true)
+        isDeepTestUpdateClicked = true
+        testResults.isDeepTest = true
+      }
+      if (!isStartProcessError || i * tikTime >= 5000)
+        isProcessError = !!page.$(SEL.strategyReportError) && !page.$(SEL.strategyReportInProcess)
+      isProcessEnd = !!page.$(SEL.strategyReportReady)
+      if (!!page.$(SEL.strategyReportInProcess) || isProcessEnd)
+        sawStageSelector = true
+      if (!isProcessEnd && !isProcessError && prevDataHash &&
+          (new Date() - lastDataCheckTime) >= dataCheckIntervalMs) {
+        lastDataCheckTime = new Date()
+        const tickHash = tv._getReportDataHash(await tv.parseReportTable())
+        if (tickHash && tickHash !== prevDataHash) {
+          isDataChanged = true
+          isProcessEnd = true
+        }
+      }
+      if (isProcessEnd && isDeepTestUpdateClicked && !isNewUpdate) {
+        isNewUpdate = !!(await page.waitForSelector(SEL.strategyReportInProcess, 1000))
+        isProcessEnd = !isNewUpdate
+      } else {
+        const isNotProcessMessage = !page.$(SEL.strategyProcessMessage) // it blinked after click on update or change stage
+        if (isNotProcessMessage) {
+          await page.waitForTimeout(1000) // waiting for process end message to disappear after update or stage change
+          isProcessEnd = !page.$(SEL.strategyProcessMessage)
+        }
+      }
+      if (isProcessError || isProcessEnd) {
+        break
+      }
+      await page.waitForTimeout(tikTime)
+    }
+  }
+  const startTime = new Date()
+  if(!ignoreWaiting && isProcessStart)
+    await tv.backtestDelay(Math.max(testResults.backtestDelay, 0.25), testResults.randomDelay)
+  let _waitTime = new Date() - startTime
+  const emptyState = tv._getReportEmptyState()
+  isProcessError = !!document.querySelector(SEL.strategyReportError) && !emptyState
+  reportData = await tv.parseReportTable()
+  if (emptyState && !tv._getReportDataHash(reportData)) {
+    reportData['comment'] = `No report data: ${emptyState.message}`
+    isProcessStart = true
+    isProcessEnd = true
+  }
+  const finalDataHash = tv._getReportDataHash(reportData)
+  if (prevDataHash && finalDataHash && finalDataHash !== prevDataHash)
+    isDataChanged = true
+  if (!isProcessError && !isProcessEnd && isDataChanged) {
+    isProcessEnd = true
+    isProcessStart = true
+  }
+  // Report data did not change vs the previous iteration and no genuine completion was detected
+  // (TradingView did not recompute - typically because the candidate equals what is already set,
+  // or the computation never started / timed out). The table still holds the previous numbers,
+  // so this value is stale and must be marked, not trusted as a fresh result.
+  const isStaleUnchanged = !isProcessError && !isDataChanged && !!prevDataHash && finalDataHash === prevDataHash
+  try {
+    if (testResults.perfomanceSummary.length && !isProcessError)
+      console.log('#', testResults.perfomanceSummary.length, testResults.perfomanceSummary[testResults.perfomanceSummary.length - 1][testResults.optParamName], '->', reportData[testResults.optParamName])
+  } catch {}
+  if (isStaleUnchanged)
+    message += `${message ? '. ' : ''}WARNING: report not updated - value may be stale (TV did not recompute, parameters likely unchanged)`
+  if (reportData['comment'])
+    message += `${message ? '. ' : ''}${reportData['comment']}`
+  const comment = message ? message : null
+  if (comment)
+    reportData['comment'] = comment
+  return {
+    error: isProcessError ? 2 : !isProcessStart ? 1 : !isProcessEnd ? 3 : null,
+    message: message,
+    data: reportData,
+    isDataChanged: isDataChanged,
+    isStaleUnchanged: isStaleUnchanged,
+    sawStageSelector: sawStageSelector,
+    _waitTime: _waitTime
+  }
+  // return await tv.parseReportTable()
+  // TODO change the object to get data
+  // function convertPercent(key, value) {
+  //   if (!value)
+  //     return 0
+  //   return key.endsWith('Percent') || key.startsWith('percent')? value * 100 : value
+  // }
+  //
+  // const perfDict = {
+  //   'netProfit': 'Net Profit',
+  //   'netProfitPercent': 'Net Profit %',
+  //   'grossProfit': 'Gross Profit',
+  //   'grossProfitPercent': 'Gross Profit %',
+  //   'grossLoss': 'Gross Loss',
+  //   'grossLossPercent': 'Gross Loss %',
+  //   'maxStrategyDrawDown': 'Max Drawdown',
+  //   'maxStrategyDrawDownPercent': 'Max Drawdown %',
+  //   'buyHoldReturn': 'Buy & Hold Return',
+  //   'buyHoldReturnPercent': 'Buy & Hold Return %',
+  //   'sharpeRatio': 'Sharpe Ratio',
+  //   'sortinoRatio': 'Sortino Ratio',
+  //   'profitFactor': 'Profit Factor',
+  //   'maxContractsHeld': 'Max Contracts Held',
+  //   'openPL': 'Open PL',
+  //   'openPLPercent': 'Open PL %',
+  //   'commissionPaid': 'Commission Paid',
+  //   'totalTrades': 'Total Closed Trades',
+  //   'totalOpenTrades': 'Total Open Trades',
+  //   'numberOfLosingTrades': 'Number Losing Trades',
+  //   'numberOfWiningTrades': 'Number Winning Trades',
+  //   'percentProfitable': 'Percent Profitable',
+  //   'avgTrade': 'Avg Trade',
+  //   'avgTradePercent': 'Avg Trade %',
+  //   'avgWinTrade': 'Avg Winning Trade',
+  //   'avgWinTradePercent': 'Avg Winning Trade %',
+  //   'avgLosTrade': 'Avg Losing Trade',
+  //   'avgLosTradePercent': 'Avg Losing Trade %',
+  //   'ratioAvgWinAvgLoss': 'Ratio Avg Win / Avg Loss',
+  //   'largestWinTrade': 'Largest Winning Trade',
+  //   'largestWinTradePercent': 'Largest Winning Trade %',
+  //   'largestLosTrade': 'Largest Losing Trade',
+  //   'largestLosTradePercent': 'Largest Losing Trade %',
+  //   'avgBarsInTrade': 'Avg # Bars in Trades',
+  //   'avgBarsInLossTrade': 'Avg # Bars In Losing Trades',
+  //   'avgBarsInWinTrade': 'Avg # Bars In Winning Trades',
+  //   'marginCalls': 'Margin Calls',
+  // }
+  //
+  // const performanceData = await tv.getPageData('getPerformance')
+  // let data = {}
+  // if (performanceData) {
+  //   if(performanceData.hasOwnProperty('all') && performanceData.hasOwnProperty('long') && performanceData.hasOwnProperty('short')) {
+  //     for (let key of Object.keys(performanceData['all'])) {
+  //       const keyName = perfDict.hasOwnProperty(key) ? perfDict[key] : key
+  //       data[`${keyName}: All`] = convertPercent(key, performanceData['all'][key])
+  //       if(performanceData['long'].hasOwnProperty(key))
+  //         data[`${keyName}: Long`] = convertPercent(key, performanceData['long'][key])
+  //       if(performanceData['short'].hasOwnProperty(key))
+  //         data[`${keyName}: Short`] = convertPercent(key, performanceData['short'][key])
+  //     }
+  //   }
+  //   for(let key of Object.keys(performanceData)) {
+  //     if (!['all', 'long', 'short'].includes(key)) {
+  //       const keyName = perfDict.hasOwnProperty(key) ? perfDict[key] : key
+  //       data[keyName] =  convertPercent(key, performanceData[key])
+  //     }
+  //   }
+  // }
+  // return data
+}
+
+tv.getPageData = async (actionName, timeout = 1000) => {
+  delete tvPageMessageData[actionName]
+  const url = window.location && window.location.origin ? window.location.origin : 'https://www.tradingview.com'
+  window.postMessage({ name: 'iondvScript', action: actionName }, url) // TODO wait for data
+  let iter = 0
+  const tikTime = 50
+  do {
+    await page.waitForTimeout(tikTime)
+    iter += 1
+    if (tikTime * iter >= timeout)
+      break
+  } while (!tvPageMessageData.hasOwnProperty(actionName))
+  return tvPageMessageData.hasOwnProperty(actionName) ? tvPageMessageData[actionName] : null
+}
+
+tv.callPageAction = async (actionName, payload = null, timeout = 4000) => {
+  const url = window.location && window.location.origin ? window.location.origin : 'https://www.tradingview.com'
+  const requestId = `${Date.now()}_${Math.random().toString(16).slice(2)}`
+  const messageKey = `${actionName}#${requestId}`
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      if (tvPageMessageData.hasOwnProperty(messageKey))
+        delete tvPageMessageData[messageKey]
+      reject(new Error(`Timeout waiting for "${actionName}" response`))
+    }, timeout)
+    tvPageMessageData[messageKey] = (data) => {
+      clearTimeout(timer)
+      if (tvPageMessageData.hasOwnProperty(messageKey))
+        delete tvPageMessageData[messageKey]
+      resolve(data)
+    }
+    window.postMessage({ name: 'iondvScript', action: actionName, data: payload, requestId }, url)
+  })
+}

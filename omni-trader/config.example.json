@@ -1,0 +1,14 @@
+{
+  "_comment": "Copy to config.json and adjust. NO credentials go here — the engine uses only public market endpoints and needs no API keys.",
+  "symbol": "BTC/USDT",
+  "timeframe": "1m",
+  "strategy": "ema_cross_rsi",
+  "risk_mode": "balanced",
+  "starting_equity": 10000.0,
+  "execution_latency_ms": 140.0,
+  "stop_loss_pct": 0.01,
+  "fee_rate": 0.001,
+  "slippage_pct": 0.0005,
+  "poll_seconds": 5.0,
+  "db_path": "data/journal.sqlite3"
+}

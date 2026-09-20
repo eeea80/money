@@ -1,0 +1,6 @@
+fastapi>=0.110
+uvicorn>=0.29
+ccxt>=4.3
+pandas>=2.2
+pytest>=8.0
+httpx>=0.27

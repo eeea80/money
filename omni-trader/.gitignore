@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Runtime data (journals, logs) — not code, not config
+data/*.sqlite3
+data/*.sqlite3-*
+logs/
+
+# Local config (kept free of any credentials, ever)
+config.json
+
+# OS
+.DS_Store
+Thumbs.db
